@@ -243,6 +243,27 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
     }
   });
 
+  route('POST', '/api/tasks/:id/artifacts', async (req, res, params) => {
+    try {
+      const body = await parseBody(req);
+      const taskId = parseId(params);
+      const artifact = ctx.tasks.addArtifact(
+        taskId,
+        body.name as string,
+        body.content as string,
+        (body.created_by as string) || 'api',
+        body.stage as string | undefined,
+      );
+      json(res, artifact, 201);
+    } catch (err) {
+      if (err instanceof TasksError) {
+        json(res, { error: err.message }, err.statusCode);
+      } else {
+        json(res, { error: 'Internal error' }, 500);
+      }
+    }
+  });
+
   route('GET', '/api/tasks/:id/dependencies', (_req, res, params) => {
     try {
       json(res, ctx.tasks.getDependencies(parseId(params)));
