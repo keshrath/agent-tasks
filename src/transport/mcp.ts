@@ -459,6 +459,15 @@ export const tools: ToolDefinition[] = [
     },
   },
   {
+    name: 'task_cleanup',
+    description:
+      'Run data cleanup manually — purges completed/cancelled tasks and stale data older than the retention period.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
     name: 'task_generate_rules',
     description:
       'Generate IDE-specific rule files that instruct agents to use the pipeline. Supports Cursor (.mdc) and Claude Code (CLAUDE.md) formats.',
@@ -783,6 +792,9 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
         }
         return created;
       }
+
+      case 'task_cleanup':
+        return ctx.cleanup.run();
 
       case 'task_generate_rules': {
         const format = requireString(args, 'format') as 'mdc' | 'claude_md';

@@ -14,6 +14,52 @@ import { TasksError, ValidationError } from '../types.js';
 
 const MAX_BODY_SIZE = 65536;
 
+// ---------------------------------------------------------------------------
+// Rate limiting
+// ---------------------------------------------------------------------------
+
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 100;
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
+  const ip = req.socket.remoteAddress ?? 'unknown';
+  const now = Date.now();
+  let entry = rateLimitMap.get(ip);
+
+  if (!entry || now >= entry.resetAt) {
+    entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    rateLimitMap.set(ip, entry);
+  }
+
+  entry.count++;
+
+  if (entry.count > RATE_LIMIT_MAX) {
+    res.writeHead(429, {
+      'Content-Type': 'application/json',
+      'Retry-After': String(Math.ceil((entry.resetAt - now) / 1000)),
+      'X-Frame-Options': 'SAMEORIGIN',
+      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+    });
+    res.end(JSON.stringify({ error: 'Too many requests. Try again later.' }));
+    return false;
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Security headers
+// ---------------------------------------------------------------------------
+
+const SECURITY_HEADERS = {
+  'X-Frame-Options': 'SAMEORIGIN',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+} as const;
+
+const CSP_HEADER =
+  "default-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; script-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:";
+
 function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -95,6 +141,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
       'X-Content-Type-Options': 'nosniff',
+      ...SECURITY_HEADERS,
     });
     res.end(JSON.stringify(data));
   }
@@ -291,6 +338,18 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
     }
   });
 
+  route('POST', '/api/cleanup', (_req, res) => {
+    try {
+      json(res, ctx.cleanup.run());
+    } catch (err) {
+      if (err instanceof TasksError) {
+        json(res, { error: err.message }, err.statusCode);
+      } else {
+        json(res, { error: 'Internal error' }, 500);
+      }
+    }
+  });
+
   route('GET', '/api/search', (req, res) => {
     const url = new URL(req.url!, `http://${req.headers.host}`);
     const query = url.searchParams.get('q') ?? '';
@@ -362,6 +421,8 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
       res.writeHead(200, {
         'Content-Type': contentType,
         'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': CSP_HEADER,
+        ...SECURITY_HEADERS,
       });
       res.end(content);
     } catch {
@@ -375,6 +436,8 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   // -----------------------------------------------------------------------
 
   return (req: IncomingMessage, res: ServerResponse) => {
+    if (!checkRateLimit(req, res)) return;
+
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
