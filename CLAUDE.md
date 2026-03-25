@@ -54,10 +54,14 @@ npm run dev        # watch mode (tsc + nodemon)
 
 Default: `backlog → spec → plan → implement → test → review → done`
 
-Configurable per project via `hub_configure_pipeline`. Tasks advance through stages sequentially; dependencies block advancement until resolved.
+Configurable per project via `task_pipeline_config`. Tasks advance through stages sequentially; dependencies block advancement until resolved.
 
 ## Key APIs
 
-- **REST**: `GET /health`, `GET /api/tasks`, `POST /api/tasks`, `GET /api/tasks/:id/artifacts`, etc.
-- **WebSocket**: Full state on connect (tasks, dependencies, artifact counts, stages), incremental events streamed
-- **MCP**: `hub_create_task`, `hub_claim_task`, `hub_advance_task`, `hub_add_artifact`, `hub_list_tasks`, etc.
+- **REST**: `GET /health`, `GET/POST /api/tasks`, `PUT /api/tasks/:id/stage`, `GET /api/tasks/:id/artifacts`, `GET/POST /api/tasks/:id/comments`, `GET /api/search?q=`, `GET /api/agents`
+- **WebSocket**: Full state on connect, incremental events streamed, DB polling for cross-process updates (2s interval)
+- **MCP** (33 tools): `task_create`, `task_list`, `task_claim`, `task_advance`, `task_complete`, `task_add_artifact`, `task_comment`, `task_search`, `task_add_collaborator`, `task_request_approval`, `task_approve`, `task_reject`, `task_review_cycle`, `task_generate_rules`, etc.
+
+## Live Updates
+
+The dashboard server polls the SQLite DB every 2 seconds to detect changes made by other processes (MCP stdio servers). This ensures the kanban board stays in sync even when tasks are created/modified via MCP tools in separate Claude Code sessions.
