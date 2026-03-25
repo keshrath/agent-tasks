@@ -49,7 +49,10 @@ function connect() {
       return;
     }
 
-    if (data.type === 'state') {
+    if (data.type === 'reload') {
+      location.reload();
+      return;
+    } else if (data.type === 'state') {
       handleFullState(data);
     } else if (data.type && data.data) {
       handleEvent(data);

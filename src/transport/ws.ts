@@ -16,6 +16,7 @@ const PING_INTERVAL_MS = 30_000;
 
 export interface WebSocketHandle {
   wss: WebSocketServer;
+  broadcast(message: string): void;
   close(): void;
 }
 
@@ -161,6 +162,13 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
 
   return {
     wss,
+    broadcast(message: string): void {
+      for (const [ws] of clients) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(message);
+        }
+      }
+    },
     close() {
       clearInterval(pingInterval);
       for (const [ws, state] of clients) {

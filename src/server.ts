@@ -9,10 +9,15 @@
 // =============================================================================
 
 import { createServer, type Server } from 'http';
+import { watch } from 'fs';
+import { resolve, join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { createContext, type AppContext } from './context.js';
 import { createRouter } from './transport/rest.js';
 import { setupWebSocket, type WebSocketHandle } from './transport/ws.js';
 import type { DbOptions } from './storage/database.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export interface DashboardServer {
   httpServer: Server;
@@ -26,6 +31,7 @@ export function startDashboard(ctx: AppContext, port = 3422): Promise<DashboardS
     const httpServer = createServer(router);
 
     let wsHandle: WebSocketHandle | null = null;
+    let fileWatcher: ReturnType<typeof startFileWatcher> | null = null;
 
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
@@ -37,17 +43,43 @@ export function startDashboard(ctx: AppContext, port = 3422): Promise<DashboardS
 
     httpServer.listen(port, () => {
       wsHandle = setupWebSocket(httpServer, ctx);
+      fileWatcher = startFileWatcher(wsHandle);
       process.stderr.write(`agent-tasks dashboard: http://localhost:${port}\n`);
       resolve({
         httpServer,
         port,
         close() {
+          if (fileWatcher) fileWatcher.close();
           if (wsHandle) wsHandle.close();
           httpServer.close();
         },
       });
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// UI file watcher — triggers livereload on connected clients
+// ---------------------------------------------------------------------------
+
+function startFileWatcher(wsHandle: WebSocketHandle) {
+  const uiDir = resolve(join(__dirname, 'ui'));
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+
+  const watcher = watch(uiDir, { recursive: true }, (_event, filename) => {
+    if (!filename) return;
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      wsHandle.broadcast(JSON.stringify({ type: 'reload' }));
+    }, 200);
+  });
+
+  return {
+    close() {
+      if (debounce) clearTimeout(debounce);
+      watcher.close();
+    },
+  };
 }
 
 if (process.argv[1]?.endsWith('server.js') || process.argv[1]?.endsWith('server.ts')) {
