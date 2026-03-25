@@ -179,10 +179,3 @@ npm run check         # Full CI: typecheck + lint + format + test
 ## License
 
 MIT — see [LICENSE](LICENSE)
-
----
-
-<p align="center">
-  <a href="https://github.com/keshrath/agent-tasks">Repository</a> &middot;
-  <a href="https://github.com/keshrath/agent-tasks/issues">Issues</a>
-</p>

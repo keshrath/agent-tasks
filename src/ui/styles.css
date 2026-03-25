@@ -61,7 +61,7 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --column-min: 240px;
   --column-max: 320px;
-  --panel-width: 480px;
+  --panel-width: 560px;
 
   --shadow-0: none;
   --shadow-1: 0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 1px 3px 1px rgba(0, 0, 0, 0.15);
@@ -1311,7 +1311,83 @@ header {
 }
 
 .board-wrapper.panel-open .side-panel.panel-wide {
-  --panel-width: min(600px, 50vw);
+  --panel-width: min(720px, 55vw);
+}
+
+/* ---- Panel resize handle ---- */
+
+.panel-resize-handle {
+  position: absolute;
+  top: 0;
+  left: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+}
+.panel-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 40px;
+  border-radius: 2px;
+  background: var(--border);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.panel-resize-handle:hover::after,
+.panel-resize-handle:active::after {
+  opacity: 1;
+  background: var(--accent);
+}
+
+/* ---- Fullscreen artifact ---- */
+
+.artifact-fullscreen-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 2px 4px;
+  display: inline-flex;
+  align-items: center;
+}
+.artifact-fullscreen-btn:hover {
+  color: var(--accent);
+}
+.artifact-fullscreen-btn .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.artifact-fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.artifact-fullscreen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+.artifact-fullscreen-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.artifact-fullscreen-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
 }
 
 .panel-header {
