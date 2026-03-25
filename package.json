@@ -71,8 +71,13 @@
     "LICENSE"
   ],
   "license": "MIT",
+  "author": "MuK IT GmbH",
   "repository": {
     "type": "git",
     "url": "https://gitlab.mukit.at/development/agent-tasks.git"
+  },
+  "homepage": "https://gitlab.mukit.at/development/agent-tasks",
+  "bugs": {
+    "url": "https://gitlab.mukit.at/development/agent-tasks/-/issues"
   }
 }
