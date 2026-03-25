@@ -5,16 +5,19 @@ All notable changes to this project will be documented in this file.
 ## [1.6.0] - 2026-03-25
 
 ### Added
+
 - GitHub Actions CI with npm auto-publish on tag
 - Clean CHANGELOG
 
 ### Changed
+
 - Prepared for open-source release on GitHub
 - Removed all internal references
 
 ## [1.5.0] - 2026-03-25
 
 ### Added
+
 - Comprehensive documentation (README, setup guide, API reference, dashboard guide, hooks guide)
 - 7 dashboard screenshots
 - Cleanup dialog with 3 options: purge completed, purge all done, purge everything
@@ -22,6 +25,7 @@ All notable changes to this project will be documented in this file.
 ## [1.4.0] - 2026-03-25
 
 ### Added
+
 - Syntax highlighting for code artifacts (highlight.js)
 - Markdown rendering (marked + DOMPurify)
 - Expandable/collapsible artifacts
@@ -31,6 +35,7 @@ All notable changes to this project will be documented in this file.
 - Loading skeleton placeholders
 
 ### Fixed
+
 - Card flicker on state updates (morphdom keying)
 - CSP headers for CDN libraries
 - isDiff detection accuracy
@@ -38,6 +43,7 @@ All notable changes to this project will be documented in this file.
 ## [1.3.0] - 2026-03-25
 
 ### Added
+
 - Side panel detail view
 - Rich task cards with avatars, description preview, relative time
 - Inline task creation and editing
@@ -48,12 +54,14 @@ All notable changes to this project will be documented in this file.
 ## [1.2.9] - 2026-03-25
 
 ### Added
-- Health endpoint optimization (COUNT(*))
+
+- Health endpoint optimization (COUNT(\*))
 - REST input validation, PUT /api/tasks/:id
 - Rate limit cleanup, event bus logging
 - 338 tests across 12 test files
 
 ### Fixed
+
 - Rate limiter memory leak
 - getDependencies validation
 - fail() transaction wrapper
@@ -62,6 +70,7 @@ All notable changes to this project will be documented in this file.
 ## [1.2.0] - 2026-03-25
 
 ### Added
+
 - Real-time kanban dashboard with WebSocket
 - TodoWrite bridge hook
 - Approval workflows
@@ -70,6 +79,7 @@ All notable changes to this project will be documented in this file.
 ## [1.1.0] - 2026-03-25
 
 ### Added
+
 - Multi-agent collaboration, subtasks, search
 - Drag-and-drop, filters, keyboard shortcuts
 - Full-text search (FTS5)
