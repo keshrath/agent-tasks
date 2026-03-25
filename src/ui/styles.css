@@ -61,13 +61,15 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --column-min: 240px;
   --column-max: 320px;
-  --panel-width: 420px;
+  --panel-width: 480px;
 
+  --shadow-0: none;
   --shadow-1: 0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 1px 3px 1px rgba(0, 0, 0, 0.15);
   --shadow-2: 0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 2px 6px 2px rgba(0, 0, 0, 0.15);
   --shadow-3: 0px 1px 3px 0px rgba(0, 0, 0, 0.3), 0px 4px 8px 3px rgba(0, 0, 0, 0.15);
+  --shadow-hover: 0px 2px 4px 0px rgba(0, 0, 0, 0.25), 0px 4px 12px 4px rgba(0, 0, 0, 0.15);
   --focus-ring: rgba(93, 141, 168, 0.35);
-  --shadow-drag: 0px 2px 6px 0px rgba(0, 0, 0, 0.3), 0px 8px 24px 4px rgba(0, 0, 0, 0.2);
+  --shadow-drag: 0px 4px 8px 0px rgba(0, 0, 0, 0.3), 0px 12px 32px 6px rgba(0, 0, 0, 0.25);
   --shadow-panel: -2px 0px 8px 0px rgba(0, 0, 0, 0.3), -4px 0px 16px 2px rgba(0, 0, 0, 0.15);
 
   --transition-fast: 0.15s ease;
@@ -121,11 +123,13 @@
   --stage-done: #3fb950;
   --stage-cancelled: #f85149;
 
+  --shadow-0: none;
   --shadow-1: 0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 1px 3px 1px rgba(0, 0, 0, 0.15);
   --shadow-2: 0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 2px 6px 2px rgba(0, 0, 0, 0.15);
   --shadow-3: 0px 1px 3px 0px rgba(0, 0, 0, 0.3), 0px 4px 8px 3px rgba(0, 0, 0, 0.15);
+  --shadow-hover: 0px 2px 4px 0px rgba(0, 0, 0, 0.35), 0px 6px 16px 4px rgba(0, 0, 0, 0.25);
   --focus-ring: rgba(93, 141, 168, 0.4);
-  --shadow-drag: 0px 2px 6px 0px rgba(0, 0, 0, 0.5), 0px 8px 24px 4px rgba(0, 0, 0, 0.4);
+  --shadow-drag: 0px 4px 8px 0px rgba(0, 0, 0, 0.5), 0px 12px 32px 6px rgba(0, 0, 0, 0.4);
   --shadow-panel: -2px 0px 8px 0px rgba(0, 0, 0, 0.5), -4px 0px 16px 2px rgba(0, 0, 0, 0.3);
 }
 
@@ -448,6 +452,50 @@ header {
 }
 
 /* --------------------------------------------------------------------------
+   Panel Loading / Skeleton
+   -------------------------------------------------------------------------- */
+
+.panel-loading {
+  padding: 12px 0;
+}
+
+.skeleton-line {
+  height: 12px;
+  background: var(--bg-hover);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  animation: skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.skeleton-line:nth-child(2) {
+  width: 85%;
+}
+
+.skeleton-line:nth-child(3) {
+  width: 70%;
+}
+
+.skeleton-line.skeleton-wide {
+  height: 16px;
+  width: 60%;
+  margin-bottom: 12px;
+}
+
+.skeleton-line.skeleton-short {
+  width: 40%;
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+/* --------------------------------------------------------------------------
    Board Layout (with side panel support)
    -------------------------------------------------------------------------- */
 
@@ -678,15 +726,28 @@ header {
 }
 
 .column-empty .empty-cta {
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
   color: var(--accent);
   cursor: pointer;
-  margin-top: 4px;
-  opacity: 0.7;
+  margin-top: 6px;
+  padding: 6px 12px;
+  background: var(--accent-dim);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  opacity: 1;
+  transition: all var(--transition-fast);
+}
+.column-empty .empty-cta .material-symbols-outlined {
+  font-size: 16px;
+  opacity: 1;
 }
 .column-empty .empty-cta:hover {
-  opacity: 1;
-  text-decoration: underline;
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
 }
 
 .board-empty {
@@ -744,11 +805,12 @@ header {
 
 .task-card {
   background: var(--bg-elevated);
-  border: 1px solid var(--border-light);
+  border: 1px solid transparent;
   border-radius: var(--radius);
   padding: 10px 12px;
   cursor: pointer;
   position: relative;
+  box-shadow: var(--shadow-1);
   transition:
     border-color var(--transition-fast),
     box-shadow var(--transition-fast),
@@ -757,9 +819,10 @@ header {
 }
 
 .task-card:hover {
-  border-color: var(--accent);
-  box-shadow: var(--shadow-2);
-  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px var(--accent-dim),
+    var(--shadow-hover);
+  transform: translateY(-2px);
 }
 
 .task-card:active {
@@ -924,10 +987,63 @@ header {
 
 .task-card.priority-high {
   border-left: 3px solid var(--red);
-  box-shadow: inset 0 0 0 1px rgba(220, 53, 69, 0.1);
 }
 .task-card.priority-medium {
   border-left: 3px solid var(--orange);
+}
+.task-card.status-cancelled .task-card-title {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+/* ---- Status indicator on cards ---- */
+
+.task-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+.task-status-indicator .material-symbols-outlined {
+  font-size: 14px;
+  font-variation-settings:
+    'FILL' 1,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 14;
+}
+.task-status-indicator.status-in_progress {
+  color: var(--blue);
+}
+.task-status-indicator.status-completed {
+  color: var(--green);
+}
+.task-status-indicator.status-failed {
+  color: var(--red);
+}
+.task-status-indicator.status-pending {
+  color: var(--gray);
+}
+.task-status-indicator.status-cancelled {
+  color: var(--text-dim);
+}
+
+/* ---- Collaborator overflow indicator ---- */
+
+.collab-overflow {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--bg-surface);
+  margin-left: -4px;
 }
 
 /* ---- Staggered entrance animation ---- */
@@ -1194,6 +1310,10 @@ header {
   min-width: var(--panel-width);
 }
 
+.board-wrapper.panel-open .side-panel.panel-wide {
+  --panel-width: min(600px, 50vw);
+}
+
 .panel-header {
   display: flex;
   align-items: center;
@@ -1316,13 +1436,15 @@ header {
 .panel-description {
   font-size: 13px;
   line-height: 1.6;
-  white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-secondary);
   padding: 10px 12px;
   background: var(--bg-elevated);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-light);
+}
+.panel-description .rendered-md {
+  white-space: normal;
 }
 
 /* ---- Panel artifacts ---- */
@@ -1337,7 +1459,7 @@ header {
 .panel-artifact h4 {
   font-size: 12px;
   color: var(--accent);
-  margin-bottom: 4px;
+  margin-bottom: 0;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1348,9 +1470,9 @@ header {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-muted);
-  max-height: 200px;
-  overflow-y: auto;
   line-height: 1.5;
+  margin: 0;
+  padding: 0;
 }
 
 /* ---- Panel subtasks ---- */
@@ -1981,4 +2103,327 @@ header {
   color: var(--text-muted);
   max-height: 200px;
   overflow-y: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Syntax Highlighting
+   -------------------------------------------------------------------------- */
+
+.hljs-keyword {
+  color: var(--purple);
+  font-weight: 500;
+}
+.hljs-string {
+  color: var(--green);
+}
+.hljs-comment {
+  color: var(--text-dim);
+  font-style: italic;
+}
+.hljs-number {
+  color: var(--orange);
+}
+.hljs-function {
+  color: var(--blue);
+}
+.hljs-type {
+  color: var(--indigo);
+}
+.hljs-operator {
+  color: var(--text-muted);
+}
+.hljs-property {
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   Markdown Rendering
+   -------------------------------------------------------------------------- */
+
+.rendered-md h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 12px 0 6px;
+  color: var(--text);
+}
+.rendered-md h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 4px;
+  color: var(--text);
+}
+.rendered-md strong {
+  font-weight: 600;
+  color: var(--text);
+}
+.rendered-md em {
+  font-style: italic;
+}
+.rendered-md code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-inset);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--accent);
+}
+.rendered-md pre {
+  background: var(--bg-inset);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+.rendered-md pre code {
+  background: none;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.rendered-md ul {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+.rendered-md ul li {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+.rendered-md a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.rendered-md a:hover {
+  text-decoration: underline;
+}
+.rendered-md br {
+  content: '';
+  display: block;
+  margin-top: 4px;
+}
+
+/* --------------------------------------------------------------------------
+   Expandable Artifacts
+   -------------------------------------------------------------------------- */
+
+.artifact-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.artifact-wrapper.artifact-collapsed .artifact-code {
+  max-height: calc(1.5em * 8 + 20px);
+  overflow: hidden;
+}
+
+.artifact-wrapper.artifact-collapsed .artifact-fade {
+  display: block;
+}
+
+.artifact-wrapper.artifact-expanded .artifact-code {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.artifact-code {
+  margin: 0;
+  padding: 0 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--text-muted);
+}
+
+.artifact-fade {
+  display: none;
+  position: absolute;
+  bottom: 28px;
+  left: 0;
+  right: 0;
+  height: 48px;
+  background: linear-gradient(transparent, var(--bg-elevated));
+  pointer-events: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.artifact-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 0;
+  margin-top: 4px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border-light);
+  color: var(--accent);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+.artifact-toggle:hover {
+  color: var(--accent-hover);
+}
+.artifact-toggle .material-symbols-outlined {
+  font-size: 14px;
+}
+
+/* --------------------------------------------------------------------------
+   Diff Viewer
+   -------------------------------------------------------------------------- */
+
+.diff-viewer {
+  display: flex;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.diff-side {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.diff-side .diff-header {
+  padding: 4px 8px;
+  background: var(--bg-hover);
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.diff-ln {
+  width: 36px;
+  text-align: right;
+  padding: 0 8px;
+  color: var(--text-dim);
+  user-select: none;
+  border-right: 1px solid var(--border);
+}
+
+.diff-code {
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.diff-del {
+  background: var(--red-dim);
+}
+
+.diff-del .diff-code {
+  color: var(--red);
+}
+
+.diff-add {
+  background: var(--green-dim);
+}
+
+.diff-add .diff-code {
+  color: var(--green);
+}
+
+.diff-context {
+  background: transparent;
+}
+
+.diff-context .diff-code {
+  color: var(--text-muted);
+}
+
+.diff-section-header td {
+  padding: 2px 8px;
+  background: var(--blue-dim);
+  color: var(--blue);
+  font-weight: 500;
+  font-size: 11px;
+}
+
+/* --------------------------------------------------------------------------
+   Artifact Header (copy button + line numbers)
+   -------------------------------------------------------------------------- */
+
+.artifact-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.artifact-header h4 {
+  font-size: 12px;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact-copy-btn {
+  background: none;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: var(--font-sans);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+.artifact-copy-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.artifact-copy-btn .material-symbols-outlined {
+  font-size: 13px;
+}
+
+.artifact-lines {
+  display: flex;
+  overflow-x: auto;
+}
+
+.artifact-line-numbers {
+  white-space: pre;
+  text-align: right;
+  padding-right: 12px;
+  border-right: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+  user-select: none;
+  min-width: 32px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.artifact-line-content {
+  flex: 1;
+  overflow-x: auto;
+  min-width: 0;
 }

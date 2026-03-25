@@ -64,6 +64,18 @@ export class CollaboratorService {
     );
   }
 
+  listAllByTask(): Record<number, TaskCollaborator[]> {
+    const rows = this.db.queryAll<TaskCollaborator>(
+      'SELECT * FROM task_collaborators ORDER BY added_at ASC',
+    );
+    const result: Record<number, TaskCollaborator[]> = {};
+    for (const r of rows) {
+      if (!result[r.task_id]) result[r.task_id] = [];
+      result[r.task_id].push(r);
+    }
+    return result;
+  }
+
   getTasksForAgent(agentId: string): number[] {
     const rows = this.db.queryAll<{ task_id: number }>(
       'SELECT task_id FROM task_collaborators WHERE agent_id = ?',

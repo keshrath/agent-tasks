@@ -221,6 +221,7 @@ function sendFullState(ws: WebSocket, ctx: AppContext): void {
         commentCounts: ctx.comments.countByTask(),
         subtaskProgress: ctx.tasks.getAllSubtaskProgress(),
         stages: ctx.tasks.getPipelineStages(),
+        collaborators: ctx.collaborators.listAllByTask(),
       }),
     );
   } catch {

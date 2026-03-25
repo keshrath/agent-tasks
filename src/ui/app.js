@@ -10,7 +10,24 @@
 function morph(el, newInnerHTML) {
   const wrap = document.createElement(el.tagName);
   wrap.innerHTML = newInnerHTML;
-  morphdom(el, wrap, { childrenOnly: true });
+  morphdom(el, wrap, {
+    childrenOnly: true,
+    getNodeKey(node) {
+      if (node.id) return node.id;
+      if (node.dataset) {
+        if (node.dataset.taskId) return 'task-' + node.dataset.taskId;
+        if (node.dataset.stage && node.classList && node.classList.contains('kanban-column'))
+          return 'col-' + node.dataset.stage;
+      }
+      return null;
+    },
+    onBeforeElUpdated(fromEl, toEl) {
+      if (fromEl.classList && fromEl.classList.contains('task-card')) {
+        toEl.classList.add('no-anim');
+      }
+      return true;
+    },
+  });
 }
 
 // ---- Constants ----
@@ -27,14 +44,39 @@ const STAGE_ICONS = {
 };
 
 const STAGE_EMPTY_MESSAGES = {
-  backlog: { icon: 'inbox', text: 'Nothing in backlog', cta: 'Add a task' },
-  spec: { icon: 'description', text: 'No specs yet', cta: 'Drag tasks here' },
-  plan: { icon: 'map', text: 'No plans in progress', cta: 'Drag tasks here' },
-  implement: { icon: 'code', text: 'Nothing being built', cta: 'Drag tasks here' },
-  test: { icon: 'science', text: 'Nothing to test', cta: 'Drag tasks here' },
-  review: { icon: 'rate_review', text: 'Nothing in review', cta: 'Drag tasks here' },
-  done: { icon: 'check_circle', text: 'No completed tasks', cta: '' },
-  cancelled: { icon: 'cancel', text: 'No cancelled tasks', cta: '' },
+  backlog: { icon: 'inbox', text: 'Nothing in backlog', cta: 'Add a task', ctaIcon: 'add' },
+  spec: {
+    icon: 'description',
+    text: 'No specs yet',
+    cta: 'Drag tasks here',
+    ctaIcon: 'drag_indicator',
+  },
+  plan: {
+    icon: 'map',
+    text: 'No plans in progress',
+    cta: 'Drag tasks here',
+    ctaIcon: 'drag_indicator',
+  },
+  implement: {
+    icon: 'code',
+    text: 'Nothing being built',
+    cta: 'Drag tasks here',
+    ctaIcon: 'drag_indicator',
+  },
+  test: {
+    icon: 'science',
+    text: 'Nothing to test',
+    cta: 'Drag tasks here',
+    ctaIcon: 'drag_indicator',
+  },
+  review: {
+    icon: 'rate_review',
+    text: 'Nothing in review',
+    cta: 'Drag tasks here',
+    ctaIcon: 'drag_indicator',
+  },
+  done: { icon: 'check_circle', text: 'No completed tasks', cta: '', ctaIcon: '' },
+  cancelled: { icon: 'cancel', text: 'No cancelled tasks', cta: '', ctaIcon: '' },
 };
 
 const AVATAR_COLORS = [
@@ -61,6 +103,7 @@ const state = {
   artifactCounts: {},
   commentCounts: {},
   subtaskProgress: {},
+  collaborators: {},
   stages: ['backlog', 'spec', 'plan', 'implement', 'test', 'review', 'done', 'cancelled'],
   collapsedColumns: new Set(),
   panelTaskId: null,
@@ -189,6 +232,7 @@ function handleFullState(data) {
   state.artifactCounts = data.artifactCounts || {};
   state.commentCounts = data.commentCounts || {};
   state.subtaskProgress = data.subtaskProgress || {};
+  state.collaborators = data.collaborators || {};
   if (data.stages) state.stages = data.stages;
   if (data.version) {
     document.getElementById('version').textContent = 'v' + data.version;
@@ -302,6 +346,28 @@ function handleEvent(event) {
     }
     case 'pipeline:configured': {
       if (d.stages) state.stages = d.stages;
+      break;
+    }
+    case 'collaborator:added': {
+      if (d.task_id && d.agent_id) {
+        if (!state.collaborators[d.task_id]) state.collaborators[d.task_id] = [];
+        const existing = state.collaborators[d.task_id].find((c) => c.agent_id === d.agent_id);
+        if (!existing) {
+          state.collaborators[d.task_id].push({
+            task_id: d.task_id,
+            agent_id: d.agent_id,
+            role: d.role || 'collaborator',
+          });
+        }
+      }
+      break;
+    }
+    case 'collaborator:removed': {
+      if (d.task_id && d.agent_id && state.collaborators[d.task_id]) {
+        state.collaborators[d.task_id] = state.collaborators[d.task_id].filter(
+          (c) => c.agent_id !== d.agent_id,
+        );
+      }
       break;
     }
   }
@@ -448,6 +514,217 @@ function renderAvatar(name, sizeClass) {
   return `<div class="${cls}" style="background:${color}" title="${esc(name)}">${esc(initials)}</div>`;
 }
 
+// ---- Markdown Rendering ----
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+    try {
+      const html = DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
+      return '<div class="rendered-md prose">' + html + '</div>';
+    } catch (e) {
+      return '<div class="rendered-md">' + esc(text) + '</div>';
+    }
+  }
+  return '<div class="rendered-md">' + esc(text).replace(/\n/g, '<br>') + '</div>';
+}
+
+// ---- Syntax Highlighting (via highlight.js CDN) ----
+
+function highlightCode(code, langHint) {
+  if (!code) return esc(code);
+  if (typeof hljs !== 'undefined') {
+    try {
+      if (langHint) {
+        const result = hljs.highlight(code, { language: langHint, ignoreIllegals: true });
+        return result.value;
+      }
+      const result = hljs.highlightAuto(code);
+      return result.value;
+    } catch (e) {
+      return esc(code);
+    }
+  }
+  return esc(code);
+}
+
+// Keep backward compat for callers using old name
+function highlightSyntax(code, langHint) {
+  return highlightCode(code, langHint);
+}
+
+function detectLanguage(name) {
+  if (!name) return '';
+  const n = name.toLowerCase();
+  if (/\.(js|ts|jsx|tsx)/.test(n) || /javascript|typescript/.test(n)) return 'javascript';
+  if (/\.(py)/.test(n) || /python/.test(n)) return 'python';
+  if (/\.(sh|bash)/.test(n) || /shell|bash/.test(n)) return 'bash';
+  if (/\.json/.test(n)) return 'json';
+  if (/\.(css|scss)/.test(n)) return 'css';
+  if (/\.(html|xml)/.test(n)) return 'xml';
+  if (/\.sql/.test(n)) return 'sql';
+  if (/\.ya?ml/.test(n)) return 'yaml';
+  if (/\.rs/.test(n) || /rust/.test(n)) return 'rust';
+  if (/\.go/.test(n)) return 'go';
+  return '';
+}
+
+// ---- Diff Detection & Rendering ----
+
+function isDiff(content) {
+  if (!content) return false;
+  const dLines = content.split('\n').slice(0, 30);
+  let hasHunkHeader = false;
+  let hasMinusFile = false;
+  let hasPlusFile = false;
+  let hasDiffCmd = false;
+  for (const line of dLines) {
+    if (/^@@\s/.test(line)) hasHunkHeader = true;
+    if (/^--- [ab\/]/.test(line)) hasMinusFile = true;
+    if (/^\+\+\+ [ab\/]/.test(line)) hasPlusFile = true;
+    if (/^diff --git/.test(line)) hasDiffCmd = true;
+  }
+  return hasHunkHeader || (hasMinusFile && hasPlusFile) || hasDiffCmd;
+}
+
+function renderDiff(content) {
+  const dLines = content.split('\n');
+  const leftRows = [];
+  const rightRows = [];
+  let leftLn = 0;
+  let rightLn = 0;
+
+  for (const line of dLines) {
+    if (/^(---|\+\+\+|diff |index )/.test(line)) {
+      continue;
+    } else if (/^@@/.test(line)) {
+      const m = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)/);
+      if (m) {
+        leftLn = parseInt(m[1], 10) - 1;
+        rightLn = parseInt(m[2], 10) - 1;
+      }
+      const escaped = esc(line);
+      leftRows.push('<tr class="diff-section-header"><td colspan="2">' + escaped + '</td></tr>');
+      rightRows.push('<tr class="diff-section-header"><td colspan="2">' + escaped + '</td></tr>');
+    } else if (/^\+/.test(line)) {
+      rightLn++;
+      const escaped = esc(line.slice(1));
+      leftRows.push(
+        '<tr class="diff-add"><td class="diff-ln"></td><td class="diff-code"></td></tr>',
+      );
+      rightRows.push(
+        '<tr class="diff-add"><td class="diff-ln">' +
+          rightLn +
+          '</td><td class="diff-code">' +
+          escaped +
+          '</td></tr>',
+      );
+    } else if (/^-/.test(line)) {
+      leftLn++;
+      const escaped = esc(line.slice(1));
+      leftRows.push(
+        '<tr class="diff-del"><td class="diff-ln">' +
+          leftLn +
+          '</td><td class="diff-code">' +
+          escaped +
+          '</td></tr>',
+      );
+      rightRows.push(
+        '<tr class="diff-del"><td class="diff-ln"></td><td class="diff-code"></td></tr>',
+      );
+    } else {
+      leftLn++;
+      rightLn++;
+      const text = line.startsWith(' ') ? line.slice(1) : line;
+      const escaped = esc(text);
+      leftRows.push(
+        '<tr class="diff-context"><td class="diff-ln">' +
+          leftLn +
+          '</td><td class="diff-code">' +
+          escaped +
+          '</td></tr>',
+      );
+      rightRows.push(
+        '<tr class="diff-context"><td class="diff-ln">' +
+          rightLn +
+          '</td><td class="diff-code">' +
+          escaped +
+          '</td></tr>',
+      );
+    }
+  }
+
+  return (
+    '<div class="diff-viewer">' +
+    '<div class="diff-side diff-left"><div class="diff-header">Original</div>' +
+    '<table class="diff-table">' +
+    leftRows.join('') +
+    '</table></div>' +
+    '<div class="diff-side diff-right"><div class="diff-header">Modified</div>' +
+    '<table class="diff-table">' +
+    rightRows.join('') +
+    '</table></div>' +
+    '</div>'
+  );
+}
+
+// ---- Expandable Artifact Rendering ----
+
+function renderArtifactContent(content, name) {
+  if (isDiff(content)) return renderDiff(content);
+  const lang = detectLanguage(name, content);
+  const highlighted = highlightSyntax(content, lang);
+  const aLines = content.split('\n');
+  const lineNums = aLines.map((_, i) => i + 1).join('\n');
+  return (
+    '<div class="artifact-lines"><div class="artifact-line-numbers">' +
+    lineNums +
+    '</div><div class="artifact-line-content"><pre class="artifact-code">' +
+    highlighted +
+    '</pre></div></div>'
+  );
+}
+
+function renderArtifactBlock(artifact) {
+  const vLabel = artifact.version > 1 ? ' v' + artifact.version : '';
+  const aLines = (artifact.content || '').split('\n');
+  const needsCollapse = aLines.length > 8;
+  const wrapperClass = needsCollapse
+    ? 'artifact-wrapper artifact-collapsed'
+    : 'artifact-wrapper artifact-expanded';
+  const artId = 'artifact-' + artifact.id;
+  let html = '<div class="panel-artifact"><div class="artifact-header">';
+  html +=
+    '<h4><span class="material-symbols-outlined" style="font-size:14px">description</span> ' +
+    esc(artifact.name) +
+    vLabel +
+    ' <span style="color:var(--text-dim);font-weight:400">(' +
+    esc(artifact.stage) +
+    ', ' +
+    esc(artifact.created_by) +
+    ')</span></h4>';
+  html +=
+    '<button class="artifact-fullscreen-btn" data-artifact-id="' +
+    artId +
+    '" title="Open fullscreen"><span class="material-symbols-outlined">open_in_full</span></button>' +
+    '<button class="artifact-copy-btn" data-artifact-id="' +
+    artId +
+    '" title="Copy to clipboard"><span class="material-symbols-outlined">content_copy</span> Copy</button>';
+  html += '</div><div class="' + wrapperClass + '" id="' + artId + '">';
+  html += renderArtifactContent(artifact.content || '', artifact.name || '');
+  html += '<div class="artifact-fade"></div></div>';
+  if (needsCollapse) {
+    html +=
+      '<button class="artifact-toggle" data-artifact-id="' +
+      artId +
+      '"><span class="material-symbols-outlined">expand_more</span> Show more (' +
+      aLines.length +
+      ' lines)</button>';
+  }
+  html += '</div>';
+  return html;
+}
+
 // ---- Rendering ----
 
 function render() {
@@ -557,13 +834,13 @@ function renderBoard() {
           bodyContent = `<div class="column-empty">
         <span class="material-symbols-outlined">${emptyMsg.icon}</span>
         <div class="empty-text">${esc(emptyMsg.text)}</div>
-        ${emptyMsg.cta ? `<div class="empty-cta" data-action="add-task" data-stage="${esc(stage)}">${esc(emptyMsg.cta)}</div>` : ''}
+        ${emptyMsg.cta ? `<div class="empty-cta" data-action="add-task" data-stage="${esc(stage)}">${emptyMsg.ctaIcon ? `<span class="material-symbols-outlined">${emptyMsg.ctaIcon}</span>` : ''}${esc(emptyMsg.cta)}</div>` : ''}
       </div>`;
         } else {
           bodyContent = tasks.map((t, i) => renderCard(t, blocked.has(t.id), stage, i)).join('');
         }
 
-        return `<div class="${colClass}" data-stage="${esc(stage)}">
+        return `<div class="${colClass}" id="col-${esc(stage)}" data-stage="${esc(stage)}">
       <div class="column-header" data-action="toggle-collapse" data-stage="${esc(stage)}">
         <div class="column-header-left">
           <span class="material-symbols-outlined">${icon}</span>
@@ -630,6 +907,11 @@ function renderCard(task, isBlocked, stage, index) {
   const priorityClass =
     task.priority >= 5 ? ' priority-high' : task.priority >= 3 ? ' priority-medium' : '';
 
+  const statusClass =
+    task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+      ? ` status-${task.status}`
+      : '';
+
   const descPreview = task.description ? task.description.split('\n')[0].substring(0, 120) : '';
 
   const timeAgo = relativeTime(task.updated_at);
@@ -639,13 +921,18 @@ function renderCard(task, isBlocked, stage, index) {
   const isActive = state.panelTaskId === task.id;
   const activeClass = isActive ? ' active-card' : '';
 
-  return `<div class="task-card${priorityClass}${activeClass}" tabindex="0" draggable="true"
+  const statusIndicator = renderStatusIndicator(task.status);
+
+  const collabs = state.collaborators[task.id] || [];
+  const collabHtml = renderCollaborators(collabs);
+
+  return `<div class="task-card${priorityClass}${statusClass}${activeClass}" tabindex="0" draggable="true"
        data-task-id="${task.id}" data-stage="${esc(stage)}"
        role="option"
        style="animation-delay: ${index * 30}ms"
        aria-label="Task #${task.id}: ${esc(task.title)}">
     <div class="task-card-header">
-      <span class="task-card-id">#${task.id}</span>
+      <span class="task-card-id">#${task.id}${statusIndicator}</span>
       ${timeAgo ? `<span class="task-card-time">${esc(timeAgo)}</span>` : ''}
     </div>
     <div class="task-card-title" data-action="edit-title" data-task-id="${task.id}">${esc(task.title)}</div>
@@ -654,8 +941,40 @@ function renderCard(task, isBlocked, stage, index) {
       <div class="task-card-meta">${tags.join('')}</div>
       ${assigneeAvatar ? `<div class="task-card-assignee" data-action="change-assignee" data-task-id="${task.id}">${assigneeAvatar}</div>` : ''}
     </div>
+    ${collabHtml}
     ${progressBar}
   </div>`;
+}
+
+function renderStatusIndicator(status) {
+  const icons = {
+    in_progress: 'pending',
+    completed: 'check_circle',
+    failed: 'cancel',
+    pending: 'radio_button_unchecked',
+    cancelled: 'block',
+  };
+  const icon = icons[status];
+  if (!icon) return '';
+  return `<span class="task-status-indicator status-${status}"><span class="material-symbols-outlined">${icon}</span></span>`;
+}
+
+function renderCollaborators(collabs) {
+  if (!collabs || collabs.length === 0) return '';
+  const maxVisible = 3;
+  const visible = collabs.slice(0, maxVisible);
+  const overflow = collabs.length - maxVisible;
+  let html = '<div class="task-card-collabs">';
+  for (const c of visible) {
+    const initials = avatarInitials(c.agent_id);
+    const color = avatarColor(c.agent_id);
+    html += `<div class="collab-avatar" style="background:${color}" title="${esc(c.agent_id)} (${esc(c.role)})">${esc(initials)}</div>`;
+  }
+  if (overflow > 0) {
+    html += `<div class="collab-overflow" title="${collabs.length} collaborators">+${overflow}</div>`;
+  }
+  html += '</div>';
+  return html;
 }
 
 // ---- Event Delegation (board) ----
@@ -869,6 +1188,14 @@ function openPanel(id) {
   const wrapper = document.getElementById('board-wrapper');
   wrapper.classList.add('panel-open');
 
+  const panel = document.getElementById('side-panel');
+  const hasArtifacts = (state.artifactCounts[id] || 0) > 0;
+  if (hasArtifacts) {
+    panel.classList.add('panel-wide');
+  } else {
+    panel.classList.remove('panel-wide');
+  }
+
   renderPanelContent(task);
   highlightActiveCard(id);
 
@@ -972,7 +1299,7 @@ function renderPanelContent(task) {
     html += '<div class="panel-section">';
     html +=
       '<div class="panel-section-title"><span class="material-symbols-outlined">notes</span> Description</div>';
-    html += `<div class="panel-description">${esc(task.description)}</div>`;
+    html += `<div class="panel-description">${renderMarkdown(task.description)}</div>`;
     html += '</div>';
   }
 
@@ -980,7 +1307,7 @@ function renderPanelContent(task) {
     html += '<div class="panel-section">';
     html +=
       '<div class="panel-section-title"><span class="material-symbols-outlined">output</span> Result</div>';
-    html += `<div class="panel-description">${esc(task.result)}</div>`;
+    html += `<div class="panel-description">${renderMarkdown(task.result)}</div>`;
     html += '</div>';
   }
 
@@ -1016,7 +1343,15 @@ function renderPanelContent(task) {
     html += '</div>';
   }
 
-  panelBody.innerHTML = html;
+  const skeletonHTML =
+    '<div class="panel-loading">' +
+    '<div class="skeleton-line skeleton-wide"></div>' +
+    '<div class="skeleton-line"></div>' +
+    '<div class="skeleton-line"></div>' +
+    '<div class="skeleton-line skeleton-short"></div>' +
+    '</div>';
+
+  panelBody.innerHTML = html + skeletonHTML;
 
   Promise.all([
     fetch(`/api/tasks/${task.id}/artifacts`)
@@ -1048,11 +1383,7 @@ function renderPanelContent(task) {
       extra += '<div class="panel-section">';
       extra += `<div class="panel-section-title"><span class="material-symbols-outlined">inventory_2</span> Artifacts (${artifacts.length})</div>`;
       for (const a of artifacts) {
-        const vLabel = a.version > 1 ? ` v${a.version}` : '';
-        extra += `<div class="panel-artifact">
-          <h4><span class="material-symbols-outlined" style="font-size:14px">description</span> ${esc(a.name)}${vLabel} <span style="color:var(--text-dim);font-weight:400">(${esc(a.stage)}, ${esc(a.created_by)})</span></h4>
-          <pre>${esc(a.content)}</pre>
-        </div>`;
+        extra += renderArtifactBlock(a);
       }
       extra += '</div>';
     }
@@ -1067,7 +1398,7 @@ function renderPanelContent(task) {
           <span class="comment-agent">${esc(c.agent_id)}</span>
           <span class="comment-time">${relativeTime(c.created_at) || formatDate(c.created_at)}</span>
         </div>
-        <div class="comment-body">${esc(c.content)}</div>
+        <div class="comment-body">${renderMarkdown(c.content)}</div>
       </div>`;
     }
     extra += `<div class="comment-form">
@@ -1097,8 +1428,109 @@ document.getElementById('side-panel').addEventListener('click', (e) => {
   const sendBtn = e.target.closest('#comment-send-btn');
   if (sendBtn) {
     submitComment(parseInt(sendBtn.dataset.taskId, 10));
+    return;
+  }
+
+  const toggleBtn = e.target.closest('.artifact-toggle');
+  if (toggleBtn) {
+    const artId = toggleBtn.dataset.artifactId;
+    if (artId) toggleArtifact(artId);
+    return;
+  }
+
+  const copyBtn = e.target.closest('.artifact-copy-btn');
+  if (copyBtn) {
+    copyArtifact(copyBtn);
+    return;
+  }
+
+  const fsBtn = e.target.closest('.artifact-fullscreen-btn');
+  if (fsBtn) {
+    const artId = fsBtn.dataset.artifactId;
+    if (artId) openArtifactFullscreen(artId);
+    return;
   }
 });
+
+// ---- Artifact fullscreen ----
+
+function openArtifactFullscreen(artId) {
+  const wrapper = document.getElementById(artId);
+  if (!wrapper) return;
+  const content = wrapper.querySelector('.artifact-code, .diff-viewer');
+  if (!content) return;
+
+  const header = wrapper.closest('.panel-artifact')?.querySelector('h4');
+  const title = header ? header.textContent : 'Artifact';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'artifact-fullscreen-overlay';
+  overlay.innerHTML =
+    '<div class="artifact-fullscreen-header">' +
+    '<h3>' +
+    esc(title) +
+    '</h3>' +
+    '<button class="icon-btn" aria-label="Close fullscreen"><span class="material-symbols-outlined">close</span></button>' +
+    '</div>' +
+    '<div class="artifact-fullscreen-body"></div>';
+
+  const body = overlay.querySelector('.artifact-fullscreen-body');
+  body.innerHTML = wrapper.innerHTML;
+  const fade = body.querySelector('.artifact-fade');
+  if (fade) fade.remove();
+  // Expand everything in fullscreen
+  const artWrapper = body.querySelector('.artifact-wrapper');
+  if (artWrapper) {
+    artWrapper.classList.remove('artifact-collapsed');
+    artWrapper.classList.add('artifact-expanded');
+  }
+
+  overlay.querySelector('button').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') overlay.remove();
+  });
+
+  document.body.appendChild(overlay);
+  overlay.querySelector('button').focus();
+}
+
+// ---- Panel resize ----
+
+(function initPanelResize() {
+  const panel = document.getElementById('side-panel');
+  if (!panel) return;
+  const handle = document.createElement('div');
+  handle.className = 'panel-resize-handle';
+  panel.appendChild(handle);
+
+  let isResizing = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  handle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    startX = e.clientX;
+    startWidth = panel.offsetWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    const dx = startX - e.clientX;
+    const newWidth = Math.max(400, Math.min(startWidth + dx, window.innerWidth * 0.8));
+    panel.style.width = newWidth + 'px';
+    panel.style.minWidth = newWidth + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!isResizing) return;
+    isResizing = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+})();
 
 // ---- Inline Task Creation ----
 
@@ -1468,6 +1900,49 @@ document.getElementById('cleanup-all')?.addEventListener('click', () => {
     })
     .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
 });
+
+// ---- Artifact interactions ----
+
+function toggleArtifact(id) {
+  const wrapper = document.getElementById(id);
+  if (!wrapper) return;
+  const isCollapsed = wrapper.classList.contains('artifact-collapsed');
+  wrapper.classList.toggle('artifact-collapsed', !isCollapsed);
+  wrapper.classList.toggle('artifact-expanded', isCollapsed);
+  const btn = wrapper.parentElement.querySelector('.artifact-toggle');
+  if (btn) {
+    const icon = btn.querySelector('.material-symbols-outlined');
+    if (isCollapsed) {
+      icon.textContent = 'expand_less';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' Show less';
+    } else {
+      icon.textContent = 'expand_more';
+      const codeEl = wrapper.querySelector('.artifact-code, .diff-viewer');
+      const count = codeEl ? codeEl.textContent.split('\n').length : 0;
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' Show more (' + count + ' lines)';
+    }
+  }
+}
+
+function copyArtifact(btn) {
+  const artifactEl = btn.closest('.panel-artifact');
+  if (!artifactEl) return;
+  const codeEl = artifactEl.querySelector('.artifact-code, .diff-viewer');
+  if (!codeEl) return;
+  const text = codeEl.textContent || '';
+  navigator.clipboard
+    .writeText(text)
+    .then(function () {
+      const origHtml = btn.innerHTML;
+      btn.innerHTML = '<span class="material-symbols-outlined">check</span> Copied';
+      setTimeout(function () {
+        btn.innerHTML = origHtml;
+      }, 1500);
+    })
+    .catch(function () {
+      /* fallback */
+    });
+}
 
 // ---- Boot ----
 
