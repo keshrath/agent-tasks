@@ -23,8 +23,10 @@ export class EventBus {
       for (const h of specific) {
         try {
           h(event);
-        } catch {
-          /* fail-safe */
+        } catch (err) {
+          process.stderr.write(
+            `[agent-tasks] Event handler error (${type}): ${err instanceof Error ? err.message : String(err)}\n`,
+          );
         }
       }
     }
@@ -34,8 +36,10 @@ export class EventBus {
       for (const h of wildcards) {
         try {
           h(event);
-        } catch {
-          /* fail-safe */
+        } catch (err) {
+          process.stderr.write(
+            `[agent-tasks] Event handler error (*): ${err instanceof Error ? err.message : String(err)}\n`,
+          );
         }
       }
     }
@@ -51,6 +55,15 @@ export class EventBus {
     return () => {
       set!.delete(handler);
     };
+  }
+
+  listenerCount(type?: EventType | '*'): number {
+    if (type) {
+      return this.listeners.get(type)?.size ?? 0;
+    }
+    let total = 0;
+    for (const set of this.listeners.values()) total += set.size;
+    return total;
   }
 
   removeAll(): void {

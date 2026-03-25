@@ -174,6 +174,31 @@ describe('POST /api/tasks', () => {
     const body = await res.json();
     expect(body.error).toMatch(/too long/i);
   });
+
+  it('rejects non-string title', async () => {
+    const res = await api(
+      '/api/tasks',
+      jsonBody({
+        title: 12345,
+      }),
+    );
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/string/i);
+  });
+
+  it('rejects non-number priority', async () => {
+    const res = await api(
+      '/api/tasks',
+      jsonBody({
+        title: 'Valid title',
+        priority: 'high',
+      }),
+    );
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/number/i);
+  });
 });
 
 describe('GET /api/tasks (with data)', () => {
@@ -223,6 +248,52 @@ describe('GET /api/tasks/:id', () => {
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error).toMatch(/not found/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task update
+// ---------------------------------------------------------------------------
+
+describe('PUT /api/tasks/:id', () => {
+  it('updates task title', async () => {
+    const res = await api('/api/tasks/1', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Updated title' }),
+    });
+    expect(res.status).toBe(200);
+    const task = await res.json();
+    expect(task.title).toBe('Updated title');
+  });
+
+  it('updates task priority', async () => {
+    const res = await api('/api/tasks/1', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ priority: 99 }),
+    });
+    expect(res.status).toBe(200);
+    const task = await res.json();
+    expect(task.priority).toBe(99);
+  });
+
+  it('returns 404 for non-existent task', async () => {
+    const res = await api('/api/tasks/99999', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Nope' }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('returns error when no fields provided', async () => {
+    const res = await api('/api/tasks/1', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
   });
 });
 
@@ -486,12 +557,11 @@ describe('GET /api/tasks/:id/dependencies', () => {
     expect(body.blockers.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('returns empty for non-existent task', async () => {
+  it('returns 404 for non-existent task', async () => {
     const res = await api('/api/tasks/99999/dependencies');
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body.blockers).toHaveLength(0);
-    expect(body.blocking).toHaveLength(0);
+    expect(body.error).toBeDefined();
   });
 });
 

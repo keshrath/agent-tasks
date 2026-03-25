@@ -165,7 +165,13 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
     if (clients.size === 0) return;
     try {
       const row = ctx.db.queryOne<{ fp: string }>(
-        `SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at),'') || ':' || COALESCE(MAX(id),0) as fp FROM tasks`,
+        `SELECT
+           (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at),'') || ':' || COALESCE(MAX(id),0) FROM tasks)
+           || '|' ||
+           (SELECT COALESCE(MAX(id),0) FROM task_comments)
+           || '|' ||
+           (SELECT COALESCE(MAX(id),0) FROM task_artifacts)
+         as fp`,
       );
       const fp = row?.fp ?? '';
       if (fp !== lastFingerprint) {

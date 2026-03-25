@@ -8,6 +8,7 @@ import { ValidationError } from '../types.js';
 
 export const MAX_TITLE_LENGTH = 500;
 export const MAX_DESCRIPTION_LENGTH = 50_000;
+export const MAX_COMMENT_LENGTH = 50_000;
 export const MAX_RESULT_LENGTH = 50_000;
 export const MAX_ARTIFACT_CONTENT_LENGTH = 100_000;
 export const MAX_ARTIFACT_NAME_LENGTH = 128;
@@ -16,6 +17,7 @@ export const MAX_TAG_LENGTH = 64;
 export const MAX_TAGS_COUNT = 20;
 export const MAX_STAGE_NAME_LENGTH = 64;
 export const MAX_STAGES_COUNT = 20;
+export const MAX_AGENT_ID_LENGTH = 128;
 export const MAX_LIST_LIMIT = 500;
 
 // eslint-disable-next-line no-control-regex

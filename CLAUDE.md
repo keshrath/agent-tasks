@@ -87,7 +87,7 @@ Custom error hierarchy in `src/types.ts`:
 ## Testing
 
 - Framework: vitest with global test functions
-- Test files: `tests/*.test.ts` (7 files, 109 tests)
+- Test files: `tests/*.test.ts` (10 files, 280+ tests)
 - In-memory SQLite via `createTestContext()` from `tests/helpers.ts`
 - Each test gets a fresh context in `beforeEach`, closed in `afterEach`
 - Pattern: Arrange-Act-Assert with descriptive `describe`/`it` blocks

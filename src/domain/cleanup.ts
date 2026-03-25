@@ -24,7 +24,12 @@ export class CleanupService {
     }
   }
 
-  run(): { purgedTasks: number; purgedComments: number; purgedApprovals: number } {
+  run(): {
+    purgedTasks: number;
+    purgedComments: number;
+    purgedArtifacts: number;
+    purgedApprovals: number;
+  } {
     const cutoff = new Date(Date.now() - this.retentionDays * 24 * 60 * 60 * 1000)
       .toISOString()
       .replace('T', ' ')
@@ -40,6 +45,11 @@ export class CleanupService {
       `DELETE FROM task_comments WHERE task_id NOT IN (SELECT id FROM tasks)`,
     );
 
+    // Orphaned artifacts (defensive — CASCADE should handle this)
+    const artifacts = this.db.run(
+      `DELETE FROM task_artifacts WHERE task_id NOT IN (SELECT id FROM tasks)`,
+    );
+
     // Resolved approvals older than retention
     const approvals = this.db.run(
       `DELETE FROM task_approvals WHERE status != 'pending' AND resolved_at < ?`,
@@ -49,19 +59,29 @@ export class CleanupService {
     return {
       purgedTasks: tasks.changes,
       purgedComments: comments.changes,
+      purgedArtifacts: artifacts.changes,
       purgedApprovals: approvals.changes,
     };
   }
 
-  purgeAll(): { purgedTasks: number; purgedComments: number; purgedApprovals: number } {
+  purgeAll(): {
+    purgedTasks: number;
+    purgedComments: number;
+    purgedArtifacts: number;
+    purgedApprovals: number;
+  } {
     const tasks = this.db.run(`DELETE FROM tasks WHERE status IN ('completed', 'cancelled')`);
     const comments = this.db.run(
       `DELETE FROM task_comments WHERE task_id NOT IN (SELECT id FROM tasks)`,
+    );
+    const artifacts = this.db.run(
+      `DELETE FROM task_artifacts WHERE task_id NOT IN (SELECT id FROM tasks)`,
     );
     const approvals = this.db.run(`DELETE FROM task_approvals WHERE status != 'pending'`);
     return {
       purgedTasks: tasks.changes,
       purgedComments: comments.changes,
+      purgedArtifacts: artifacts.changes,
       purgedApprovals: approvals.changes,
     };
   }

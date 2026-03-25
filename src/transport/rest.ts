@@ -23,6 +23,7 @@ const RATE_LIMIT_MAX = 100;
 const RATE_LIMIT_CLEANUP_INTERVAL_MS = 5 * 60_000;
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
+<<<<<<< HEAD
 const rateLimitCleanup = setInterval(() => {
   const now = Date.now();
   for (const [ip, entry] of rateLimitMap) {
@@ -30,10 +31,27 @@ const rateLimitCleanup = setInterval(() => {
   }
 }, RATE_LIMIT_CLEANUP_INTERVAL_MS);
 rateLimitCleanup.unref();
+=======
+let lastRateLimitCleanup = Date.now();
+
+function cleanupRateLimitMap(): void {
+  const now = Date.now();
+  if (now - lastRateLimitCleanup < RATE_LIMIT_CLEANUP_INTERVAL_MS) return;
+  lastRateLimitCleanup = now;
+  for (const [ip, entry] of rateLimitMap) {
+    if (now >= entry.resetAt) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}
+>>>>>>> 9b4de5d (v1.2.5: dependency checks use status, getDependencies validates task, docs fixes)
 
 function checkRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
   const ip = req.socket.remoteAddress ?? 'unknown';
   const now = Date.now();
+
+  cleanupRateLimitMap();
+
   let entry = rateLimitMap.get(ip);
 
   if (!entry || now >= entry.resetAt) {
@@ -47,8 +65,8 @@ function checkRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
     res.writeHead(429, {
       'Content-Type': 'application/json',
       'Retry-After': String(Math.ceil((entry.resetAt - now) / 1000)),
-      'X-Frame-Options': 'SAMEORIGIN',
-      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+      'Access-Control-Allow-Origin': '*',
+      ...SECURITY_HEADERS,
     });
     res.end(JSON.stringify({ error: 'Too many requests. Try again later.' }));
     return false;
@@ -193,6 +211,28 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
     json(res, task);
   });
 
+  route('PUT', '/api/tasks/:id', async (req, res, params) => {
+    try {
+      const body = await parseBody(req);
+      const taskId = parseInt(params.id, 10);
+      const updated = ctx.tasks.update(taskId, {
+        title: body.title as string | undefined,
+        description: body.description as string | undefined,
+        priority: body.priority as number | undefined,
+        project: body.project as string | undefined,
+        tags: body.tags as string[] | undefined,
+        assigned_to: body.assigned_to as string | undefined,
+      });
+      json(res, updated);
+    } catch (err) {
+      if (err instanceof TasksError) {
+        json(res, { error: err.message }, err.statusCode);
+      } else {
+        json(res, { error: 'Internal error' }, 500);
+      }
+    }
+  });
+
   route('GET', '/api/tasks/:id/artifacts', (req, res, params) => {
     const url = new URL(req.url!, `http://${req.headers.host}`);
     const stage = url.searchParams.get('stage') ?? undefined;
@@ -243,6 +283,33 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   route('POST', '/api/tasks', async (req, res) => {
     try {
       const body = await parseBody(req);
+      if (body.title !== undefined && typeof body.title !== 'string') {
+        throw new ValidationError('"title" must be a string.');
+      }
+      if (body.description !== undefined && typeof body.description !== 'string') {
+        throw new ValidationError('"description" must be a string.');
+      }
+      if (body.priority !== undefined && typeof body.priority !== 'number') {
+        throw new ValidationError('"priority" must be a number.');
+      }
+      if (body.parent_id !== undefined && typeof body.parent_id !== 'number') {
+        throw new ValidationError('"parent_id" must be a number.');
+      }
+      if (body.assign_to !== undefined && typeof body.assign_to !== 'string') {
+        throw new ValidationError('"assign_to" must be a string.');
+      }
+      if (body.stage !== undefined && typeof body.stage !== 'string') {
+        throw new ValidationError('"stage" must be a string.');
+      }
+      if (body.project !== undefined && typeof body.project !== 'string') {
+        throw new ValidationError('"project" must be a string.');
+      }
+      if (
+        body.tags !== undefined &&
+        (!Array.isArray(body.tags) || !body.tags.every((t: unknown) => typeof t === 'string'))
+      ) {
+        throw new ValidationError('"tags" must be an array of strings.');
+      }
       const task = ctx.tasks.create(
         {
           title: body.title as string,
@@ -254,7 +321,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
           tags: body.tags as string[] | undefined,
           parent_id: body.parent_id as number | undefined,
         },
-        (body.created_by as string) || 'api',
+        typeof body.created_by === 'string' && body.created_by ? body.created_by : 'api',
       );
       json(res, task, 201);
     } catch (err) {
@@ -322,11 +389,17 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   route('POST', '/api/tasks/:id/comments', async (req, res, params) => {
     try {
       const body = await parseBody(req);
+      if (body.content !== undefined && typeof body.content !== 'string') {
+        throw new ValidationError('"content" must be a string.');
+      }
+      if (body.parent_comment_id !== undefined && typeof body.parent_comment_id !== 'number') {
+        throw new ValidationError('"parent_comment_id" must be a number.');
+      }
       const comment = ctx.comments.add(
         parseInt(params.id, 10),
-        (body.agent_id as string) || 'api',
+        typeof body.agent_id === 'string' && body.agent_id ? body.agent_id : 'api',
         body.content as string,
-        body.parent_comment_id as number | undefined,
+        typeof body.parent_comment_id === 'number' ? body.parent_comment_id : undefined,
       );
       json(res, comment, 201);
     } catch (err) {
@@ -468,9 +541,18 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
       if (!match) continue;
 
       const params: Record<string, string> = {};
+      let decodeFailed = false;
       r.paramNames.forEach((name, i) => {
-        params[name] = decodeURIComponent(match[i + 1]);
+        try {
+          params[name] = decodeURIComponent(match[i + 1]);
+        } catch {
+          decodeFailed = true;
+        }
       });
+      if (decodeFailed) {
+        json(res, { error: 'Malformed URL encoding in path parameter.' }, 400);
+        return;
+      }
 
       try {
         const result = r.handler(req, res, params);

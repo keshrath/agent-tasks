@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-109%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-271%2B%20passing-brightgreen)]()
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-33-purple)]()
 [![REST Endpoints](https://img.shields.io/badge/REST-15%20endpoints-orange)]()
 

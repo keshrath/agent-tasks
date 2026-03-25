@@ -144,7 +144,8 @@ function quickFingerprint(data) {
   let fp = tasks.length + ':';
   for (let i = 0; i < tasks.length; i++) {
     const t = tasks[i];
-    fp += t.id + '.' + t.stage + '.' + t.status + '.' + (t.updated_at || '') + '.' + t.priority + ',';
+    fp +=
+      t.id + '.' + t.stage + '.' + t.status + '.' + (t.updated_at || '') + '.' + t.priority + ',';
   }
   fp += '|' + (data.dependencies || []).length;
   fp += '|' + JSON.stringify(data.artifactCounts || {});

@@ -43,7 +43,6 @@ export interface TaskUpdateInput {
   project?: string;
   tags?: string[];
   assigned_to?: string;
-  parent_id?: number;
 }
 
 export interface TaskListFilter {

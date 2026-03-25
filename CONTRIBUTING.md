@@ -12,7 +12,7 @@ npm run build
 ## Running Tests
 
 ```bash
-npm test              # Run all 109 tests
+npm test              # Run all tests (271+)
 npm run test:watch    # Watch mode
 npm run test:coverage # Coverage report
 ```
