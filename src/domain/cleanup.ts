@@ -70,7 +70,10 @@ export class CleanupService {
     purgedArtifacts: number;
     purgedApprovals: number;
   } {
-    const tasks = this.db.run(`DELETE FROM tasks WHERE status IN ('completed', 'cancelled')`);
+    // Purge completed/cancelled by status OR tasks in done/cancelled stage
+    const tasks = this.db.run(
+      `DELETE FROM tasks WHERE status IN ('completed', 'cancelled') OR stage IN ('done', 'cancelled')`,
+    );
     const comments = this.db.run(
       `DELETE FROM task_comments WHERE task_id NOT IN (SELECT id FROM tasks)`,
     );
@@ -78,6 +81,25 @@ export class CleanupService {
       `DELETE FROM task_artifacts WHERE task_id NOT IN (SELECT id FROM tasks)`,
     );
     const approvals = this.db.run(`DELETE FROM task_approvals WHERE status != 'pending'`);
+    return {
+      purgedTasks: tasks.changes,
+      purgedComments: comments.changes,
+      purgedArtifacts: artifacts.changes,
+      purgedApprovals: approvals.changes,
+    };
+  }
+
+  purgeEverything(): {
+    purgedTasks: number;
+    purgedComments: number;
+    purgedArtifacts: number;
+    purgedApprovals: number;
+  } {
+    // Nuclear option — delete ALL tasks regardless of status/stage
+    const tasks = this.db.run(`DELETE FROM tasks`);
+    const comments = this.db.run(`DELETE FROM task_comments`);
+    const artifacts = this.db.run(`DELETE FROM task_artifacts`);
+    const approvals = this.db.run(`DELETE FROM task_approvals`);
     return {
       purgedTasks: tasks.changes,
       purgedComments: comments.changes,

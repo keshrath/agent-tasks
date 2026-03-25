@@ -1901,6 +1901,30 @@ document.getElementById('cleanup-all')?.addEventListener('click', () => {
     .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
 });
 
+document.getElementById('cleanup-everything')?.addEventListener('click', () => {
+  if (
+    !confirm(
+      'This will remove ALL tasks — completed, in-progress, everything. This cannot be undone. Continue?',
+    )
+  )
+    return;
+  document.getElementById('cleanup-modal').classList.add('hidden');
+  fetch('/api/cleanup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ all: true }),
+  })
+    .then((r) => r.json())
+    .then((result) => {
+      showToast(
+        'Everything purged',
+        `Purged ${result.purgedTasks} tasks, ${result.purgedComments} comments, ${result.purgedApprovals} approvals`,
+        'success',
+      );
+    })
+    .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
+});
+
 // ---- Artifact interactions ----
 
 function toggleArtifact(id) {

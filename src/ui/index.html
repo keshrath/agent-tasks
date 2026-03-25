@@ -128,15 +128,22 @@
             <button id="cleanup-completed" class="cleanup-option">
               <span class="material-symbols-outlined">auto_delete</span>
               <div>
-                <strong>Archive completed</strong>
-                <span>Remove completed and cancelled tasks older than retention period</span>
+                <strong>Purge completed</strong>
+                <span>Remove completed and cancelled tasks (respects retention period)</span>
               </div>
             </button>
             <button id="cleanup-all" class="cleanup-option cleanup-option-danger">
-              <span class="material-symbols-outlined">delete_forever</span>
+              <span class="material-symbols-outlined">delete_sweep</span>
               <div>
                 <strong>Purge all done</strong>
-                <span>Remove ALL completed and cancelled tasks immediately</span>
+                <span>Remove ALL completed/done tasks immediately</span>
+              </div>
+            </button>
+            <button id="cleanup-everything" class="cleanup-option cleanup-option-danger">
+              <span class="material-symbols-outlined">delete_forever</span>
+              <div>
+                <strong>Purge everything</strong>
+                <span>Remove ALL tasks regardless of status (cannot be undone)</span>
               </div>
             </button>
           </div>

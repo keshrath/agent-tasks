@@ -2,59 +2,90 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-271%2B%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-337%20passing-brightgreen)]()
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-33-purple)]()
-[![REST Endpoints](https://img.shields.io/badge/REST-15%20endpoints-orange)]()
+[![REST Endpoints](https://img.shields.io/badge/REST-18%20endpoints-orange)]()
 
-Pipeline-driven task management for AI coding agents. An [MCP](https://modelcontextprotocol.io/) server with stage-gated pipelines, multi-agent collaboration, and a real-time kanban dashboard.
+**Pipeline-driven task management for AI coding agents.** An [MCP](https://modelcontextprotocol.io/) server with stage-gated pipelines, multi-agent collaboration, and a real-time kanban dashboard. Tasks flow through configurable stages — `backlog`, `spec`, `plan`, `implement`, `test`, `review`, `done` — with dependency tracking, approval workflows, artifact versioning, and threaded comments.
 
-Part of the **agent-\*** family: [`agent-comm`](https://github.com/keshrath/agent-comm) (messaging) + `agent-tasks` (pipeline).
+Built for AI coding agents (Claude Code, Codex CLI, Gemini CLI, Aider) but works equally well with any MCP client, REST consumer, or WebSocket listener.
 
-<p align="center">
-  <img src="docs/assets/dashboard-dark.png" alt="agent-tasks kanban dashboard" width="800">
-</p>
+---
+
+| Light Theme                                              | Dark Theme                                             |
+| -------------------------------------------------------- | ------------------------------------------------------ |
+| ![Light mode dashboard](docs/assets/dashboard-light.png) | ![Dark mode dashboard](docs/assets/dashboard-dark.png) |
+
+---
 
 ## Why agent-tasks?
 
-|                                  | agent-tasks | alternative tools | other kanban tools |
-| -------------------------------- | :---------: | :----------------: | :---------: |
-| Configurable pipeline stages     |     Yes     |         No         |   Partial   |
-| Multi-agent collaboration        |     Yes     |         No         |     No      |
-| Approval workflows               |     Yes     |         No         |     No      |
-| Real-time kanban dashboard       |     Yes     |         No         |     Yes     |
-| Dependency DAG + cycle detection |     Yes     |        Yes         |     No      |
-| Subtask hierarchies              |     Yes     |        Yes         |     Yes     |
-| Threaded comments                |     Yes     |         No         |     No      |
-| Artifact versioning              |     Yes     |         No         |     No      |
-| Full-text search (FTS5)          |     Yes     |         No         |     No      |
-| Zero frameworks                  |     Yes     |         No         |     No      |
-| MCP + REST + WebSocket           |     Yes     |      MCP only      | MCP + HTTP  |
+When you run multiple AI agents on the same codebase, they need a shared task pipeline — not just a flat todo list. They need stages, dependencies, approvals, and visibility.
+
+---
 
 ## Features
 
-- **Pipeline stages** — tasks flow through configurable stages: `backlog → spec → plan → implement → test → review → done`
-- **Subtasks** — parent/child task hierarchies with progress tracking
-- **Dependencies** — DAG with cycle detection; blocks advancement until resolved
-- **Artifacts** — per-stage documents with automatic versioning (spec v1 → v2 → v3)
-- **Comments** — threaded async discussion between agents on any task
-- **Collaborators** — multiple agents per task with roles: collaborator, reviewer, watcher
-- **Approvals** — stage-gated approval workflow (request → approve/reject)
-- **Full-text search** — FTS5 search across titles and descriptions
-- **Maker-checker** — review cycles with automatic regress on rejection
-- **Auto-assignment** — configure agents to auto-assign at specific stages
-- **Drag-and-drop kanban** — real-time dashboard at `:3422` with WebSocket live updates
-- **TodoWrite bridge** — intercepts built-in TodoWrite calls and syncs to the pipeline
-- **IDE rules** — generate `.mdc` (Cursor) or `CLAUDE.md` snippets for agent adoption
-- **Agent-comm bridge** — notifies agents via agent-comm on task events
+- **Pipeline stages** — configurable per project: `backlog` > `spec` > `plan` > `implement` > `test` > `review` > `done`
+- **Task dependencies** — DAG with automatic cycle detection; blocks advancement until resolved
+- **Approval workflows** — stage-gated approve/reject with auto-regress on rejection
+- **Multi-agent collaboration** — roles (collaborator, reviewer, watcher), claiming, assignment
+- **Subtask hierarchies** — parent/child task trees with progress tracking
+- **Threaded comments** — async discussions between agents on any task
+- **Artifact versioning** — per-stage document attachments with automatic versioning and diff viewer
+- **Full-text search** — FTS5 search across task titles and descriptions
+- **Real-time kanban dashboard** — drag-and-drop, side panel, inline creation, dark/light theme
+- **3 transport layers** — MCP (stdio), REST API (HTTP), WebSocket (real-time events)
+- **TodoWrite bridge** — intercepts Claude Code's built-in TodoWrite and syncs to the pipeline
+- **Agent bridge** — notifies connected agents on task events
+
+---
 
 ## Quick Start
 
+### Install from npm
+
 ```bash
+npm install -g agent-tasks
+```
+
+### Or clone from source
+
+```bash
+git clone https://github.com/keshrath/agent-tasks.git
+cd agent-tasks
 npm install
 npm run build
 ```
 
-### As MCP Server (stdio)
+### Option 1: MCP server (for AI agents)
+
+Add to your MCP client config (Claude Code, Cline, etc.):
+
+```json
+{
+  "mcpServers": {
+    "agent-tasks": {
+      "command": "npx",
+      "args": ["agent-tasks"]
+    }
+  }
+}
+```
+
+The dashboard auto-starts at http://localhost:3422 on the first MCP connection.
+
+### Option 2: Standalone server (for REST/WebSocket clients)
+
+```bash
+node dist/server.js --port 3422
+```
+
+---
+
+## Claude Code Integration
+
+Add agent-tasks as an MCP server in `~/.claude/settings.json`:
 
 ```json
 {
@@ -67,113 +98,91 @@ npm run build
 }
 ```
 
-### Standalone Dashboard
+Once configured, Claude Code can use all 33 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
 
-```bash
-npm run start:server        # http://localhost:3422
-npm run start:server -- --port 8080
-```
+---
 
 ## MCP Tools (33)
 
-| Tool                       | Description                                                                   |
-| -------------------------- | ----------------------------------------------------------------------------- |
-| `task_create`              | Create task (title, description, priority, project, tags, parent_id)          |
-| `task_list`                | List with filters (status, stage, project, assignee, collaborator, root_only) |
-| `task_claim`               | Claim pending task — assigns and advances from backlog                        |
-| `task_advance`             | Advance to next stage (validates dependencies)                                |
-| `task_regress`             | Regress to earlier stage with reason artifact                                 |
-| `task_complete`            | Mark completed with result                                                    |
-| `task_fail`                | Mark failed with error                                                        |
-| `task_cancel`              | Cancel with reason                                                            |
-| `task_update`              | Update metadata (title, description, priority, tags, assignee)                |
-| `task_delete`              | Delete with cascading cleanup                                                 |
-| `task_next`                | Get highest-priority unassigned unblocked task                                |
-| `task_search`              | Full-text search across titles and descriptions                               |
-| `task_get_subtasks`        | Get child tasks of a parent                                                   |
-| `task_add_dependency`      | Add dependency (cycle detection)                                              |
-| `task_remove_dependency`   | Remove dependency                                                             |
-| `task_add_artifact`        | Attach document with auto-versioning                                          |
-| `task_get_artifacts`       | Retrieve artifacts (filter by stage)                                          |
-| `task_comment`             | Add threaded comment                                                          |
-| `task_get_comments`        | List comments on a task                                                       |
-| `task_add_collaborator`    | Add agent with role (collaborator/reviewer/watcher)                           |
-| `task_remove_collaborator` | Remove collaborator                                                           |
-| `task_request_approval`    | Request stage approval                                                        |
-| `task_approve`             | Approve pending approval                                                      |
-| `task_reject`              | Reject with required comment                                                  |
-| `task_pending_approvals`   | List pending approvals                                                        |
-| `task_review_cycle`        | Convenience approve/reject with auto stage change                             |
-| `task_pipeline_config`     | Get or set pipeline stages per project                                        |
-| `task_set_session`         | Set session identity                                                          |
-| `task_generate_rules`      | Generate IDE rule files (.mdc or CLAUDE.md)                                   |
+| Category                | Tools                                                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Task lifecycle** (12) | `task_create`, `task_list`, `task_next`, `task_claim`, `task_advance`, `task_regress`, `task_complete`, ... |
+| **Subtasks & deps** (4) | `task_expand`, `task_get_subtasks`, `task_add_dependency`, `task_remove_dependency`                         |
+| **Artifacts** (2)       | `task_add_artifact`, `task_get_artifacts`                                                                   |
+| **Comments** (2)        | `task_comment`, `task_get_comments`                                                                         |
+| **Collaboration** (2)   | `task_add_collaborator`, `task_remove_collaborator`                                                         |
+| **Approvals** (5)       | `task_request_approval`, `task_approve`, `task_reject`, `task_pending_approvals`, `task_review_cycle`       |
+| **Config & utils** (4)  | `task_pipeline_config`, `task_set_session`, `task_cleanup`, `task_generate_rules`                           |
 
-## REST API (15 endpoints)
+See [full API reference](docs/api.md) for detailed descriptions of every tool and endpoint.
 
-| Method | Path                          | Description                             |
-| ------ | ----------------------------- | --------------------------------------- |
-| GET    | `/health`                     | Health check + version                  |
-| GET    | `/api/tasks`                  | List tasks (query params for filters)   |
-| POST   | `/api/tasks`                  | Create task                             |
-| GET    | `/api/tasks/:id`              | Get task detail                         |
-| PUT    | `/api/tasks/:id/stage`        | Change stage (advance or regress)       |
-| GET    | `/api/tasks/:id/subtasks`     | Get subtasks                            |
-| GET    | `/api/tasks/:id/artifacts`    | Get artifacts                           |
-| GET    | `/api/tasks/:id/comments`     | Get comments                            |
-| POST   | `/api/tasks/:id/comments`     | Add comment                             |
-| GET    | `/api/tasks/:id/dependencies` | Get dependencies                        |
-| GET    | `/api/dependencies`           | All dependencies                        |
-| GET    | `/api/pipeline`               | Pipeline stages                         |
-| GET    | `/api/overview`               | Full state dump                         |
-| GET    | `/api/agents`                 | Online agents (proxied from agent-comm) |
-| GET    | `/api/search?q=`              | Full-text search                        |
+## REST API (18 endpoints)
 
-## Configuration
-
-| Variable                   | Description                                          | Default                         |
-| -------------------------- | ---------------------------------------------------- | ------------------------------- |
-| `AGENT_TASKS_DB`           | SQLite database path                                 | `~/.agent-tasks/agent-tasks.db` |
-| `AGENT_TASKS_PORT`         | Dashboard HTTP port                                  | `3422`                          |
-| `AGENT_TASKS_INSTRUCTIONS` | Set to `0` to disable response-embedded instructions | enabled                         |
-| `AGENT_COMM_URL`           | Agent-comm REST URL for bridge notifications         | `http://localhost:3421`         |
-
-## Architecture
+All endpoints return JSON. CORS enabled. See [full API reference](docs/api.md#rest-api-18-endpoints) for details.
 
 ```
-src/
-  context.ts          DI root — wires all services
-  index.ts            MCP entry point (stdio JSON-RPC)
-  server.ts           HTTP + WebSocket server
-  domain/
-    tasks.ts          Pipeline logic, CRUD, search, subtasks
-    comments.ts       Threaded comments
-    collaborators.ts  Multi-agent collaboration
-    approvals.ts      Stage-gated approvals
-    agent-bridge.ts   Agent-comm notification bridge
-    rules.ts          IDE rule generation
-    events.ts         In-process event bus
-    validate.ts       Input validation constants
-  storage/
-    database.ts       SQLite (WAL, schema versioning, FK cascades)
-  transport/
-    mcp.ts            33 MCP tool definitions + dispatch
-    rest.ts           15 REST endpoints + static file serving
-    ws.ts             WebSocket event streaming + livereload
-  ui/
-    index.html        Dashboard (vanilla HTML)
-    app.js            Kanban client (vanilla JS, no framework)
-    styles.css        Light/dark theme, responsive
+GET  /health                          Health check with version + uptime
+GET  /api/tasks                       List tasks (status, stage, project, assignee filters)
+GET  /api/tasks/:id                   Get a single task
+GET  /api/tasks/:id/subtasks          Subtasks of a parent
+GET  /api/tasks/:id/artifacts         Artifacts (filter by stage)
+GET  /api/tasks/:id/comments          Comments on a task
+GET  /api/tasks/:id/dependencies      Dependencies for a task
+GET  /api/dependencies                All dependencies across all tasks
+GET  /api/pipeline                    Pipeline stage configuration
+GET  /api/overview                    Full state dump
+GET  /api/agents                      Online agents
+GET  /api/search?q=                   Full-text search
+
+POST /api/tasks                       Create a new task
+PUT  /api/tasks/:id                   Update task fields
+PUT  /api/tasks/:id/stage             Change stage (advance or regress)
+POST /api/tasks/:id/comments          Add a comment
+POST /api/cleanup                     Trigger manual cleanup
 ```
 
-## Development
+---
+
+## Testing
 
 ```bash
-npm run dev          # TypeScript watch mode
-npm run start:server # Start dashboard on :3422
-npm test             # Run 109 tests
-npm run check        # typecheck + lint + format + test
+npm test              # 337 tests across 12 suites
+npm run test:watch    # Watch mode
+npm run test:coverage # Coverage report
+npm run check         # Full CI: typecheck + lint + format + test
 ```
+
+---
+
+## Environment variables
+
+| Variable                   | Default                         | Description                                          |
+| -------------------------- | ------------------------------- | ---------------------------------------------------- |
+| `AGENT_TASKS_DB`           | `~/.agent-tasks/agent-tasks.db` | SQLite database file path                            |
+| `AGENT_TASKS_PORT`         | `3422`                          | Dashboard HTTP/WebSocket port                        |
+| `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable response-embedded instructions |
+| `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications         |
+
+---
+
+## Documentation
+
+- [API Reference](docs/api.md) — all 33 MCP tools, 18 REST endpoints, WebSocket protocol
+- [Architecture](docs/architecture.md) — source structure, design principles, database schema
+- [Dashboard](docs/dashboard.md) — kanban board features, keyboard shortcuts, screenshots
+- [Hooks](docs/hooks.md) — TodoWrite bridge hook for Claude Code
+- [Setup Guide](docs/SETUP.md) — detailed installation, integration, and configuration
+- [Changelog](CHANGELOG.md)
+
+---
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE)
+
+---
+
+<p align="center">
+  <a href="https://github.com/keshrath/agent-tasks">Repository</a> &middot;
+  <a href="https://github.com/keshrath/agent-tasks/issues">Issues</a>
+</p>
