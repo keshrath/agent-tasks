@@ -73,7 +73,14 @@
       <div class="filter-chips" id="filter-chips"></div>
     </div>
 
-    <main id="board" class="kanban-board" role="region" aria-label="Task board"></main>
+    <div class="board-wrapper" id="board-wrapper">
+      <main id="board" class="kanban-board" role="region" aria-label="Task board"></main>
+
+      <aside id="side-panel" class="side-panel" role="complementary" aria-label="Task details">
+        <div class="panel-header" id="panel-header-content"></div>
+        <div class="panel-body" id="panel-body"></div>
+      </aside>
+    </div>
 
     <div id="loading-overlay" class="loading-overlay" aria-label="Loading">
       <div class="loading-spinner"></div>

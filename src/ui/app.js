@@ -1,18 +1,57 @@
 // =============================================================================
 // agent-tasks — Pipeline dashboard client
 //
-// Kanban board with real-time WebSocket updates, drag-and-drop,
-// filters, comments, subtask progress, and keyboard navigation.
+// Complete UI overhaul: side panel detail view, rich task cards, inline editing,
+// inline task creation, drag-and-drop polish, animations, responsive design.
 // =============================================================================
 
 // ---- DOM morphing (morphdom) ----
-// Diff-patches the DOM instead of replacing innerHTML, preserving focus,
-// scroll position, and CSS transitions. Only changed nodes are touched.
+
 function morph(el, newInnerHTML) {
   const wrap = document.createElement(el.tagName);
   wrap.innerHTML = newInnerHTML;
   morphdom(el, wrap, { childrenOnly: true });
 }
+
+// ---- Constants ----
+
+const STAGE_ICONS = {
+  backlog: 'inbox',
+  spec: 'description',
+  plan: 'map',
+  implement: 'code',
+  test: 'science',
+  review: 'rate_review',
+  done: 'check_circle',
+  cancelled: 'cancel',
+};
+
+const STAGE_EMPTY_MESSAGES = {
+  backlog: { icon: 'inbox', text: 'Nothing in backlog', cta: 'Add a task' },
+  spec: { icon: 'description', text: 'No specs yet', cta: 'Drag tasks here' },
+  plan: { icon: 'map', text: 'No plans in progress', cta: 'Drag tasks here' },
+  implement: { icon: 'code', text: 'Nothing being built', cta: 'Drag tasks here' },
+  test: { icon: 'science', text: 'Nothing to test', cta: 'Drag tasks here' },
+  review: { icon: 'rate_review', text: 'Nothing in review', cta: 'Drag tasks here' },
+  done: { icon: 'check_circle', text: 'No completed tasks', cta: '' },
+  cancelled: { icon: 'cancel', text: 'No cancelled tasks', cta: '' },
+};
+
+const AVATAR_COLORS = [
+  '#5d8da8',
+  '#6f42c1',
+  '#28a745',
+  '#fd7e14',
+  '#dc3545',
+  '#007bff',
+  '#5856d6',
+  '#f59e0b',
+  '#e83e8c',
+  '#20c997',
+];
+
+const WIP_WARNING = 5;
+const WIP_DANGER = 8;
 
 // ---- State ----
 
@@ -23,6 +62,8 @@ const state = {
   commentCounts: {},
   subtaskProgress: {},
   stages: ['backlog', 'spec', 'plan', 'implement', 'test', 'review', 'done', 'cancelled'],
+  collapsedColumns: new Set(),
+  panelTaskId: null,
 };
 
 const filters = {
@@ -36,9 +77,13 @@ let ws = null;
 let reconnectTimer = null;
 let searchDebounce = null;
 let draggedTaskId = null;
-let lastOpenedCardEl = null;
+let dragScrollInterval = null;
+let activeInlineCreate = null;
+let activeDropdown = null;
+let _lastStatValues = {};
 
-// Restore filters from localStorage
+// ---- Restore persisted state ----
+
 try {
   const saved = JSON.parse(localStorage.getItem('agent-tasks-filters') || '{}');
   if (saved.search) filters.search = saved.search;
@@ -49,8 +94,19 @@ try {
   /* ignore */
 }
 
+try {
+  const collapsed = JSON.parse(localStorage.getItem('agent-tasks-collapsed') || '[]');
+  if (Array.isArray(collapsed)) collapsed.forEach((s) => state.collapsedColumns.add(s));
+} catch {
+  /* ignore */
+}
+
 function saveFilters() {
   localStorage.setItem('agent-tasks-filters', JSON.stringify(filters));
+}
+
+function saveCollapsed() {
+  localStorage.setItem('agent-tasks-collapsed', JSON.stringify([...state.collapsedColumns]));
 }
 
 // ---- Theme ----
@@ -121,13 +177,11 @@ function setConnectionStatus(status) {
 
 // ---- State handlers ----
 
-// Fingerprint cache: skip re-renders when data hasn't changed
 let _lastStateFingerprint = '';
 
 function handleFullState(data) {
-  // Build a fingerprint from the incoming data to detect actual changes
   const fp = quickFingerprint(data);
-  if (fp === _lastStateFingerprint) return; // nothing changed — skip render
+  if (fp === _lastStateFingerprint) return;
   _lastStateFingerprint = fp;
 
   state.tasks = data.tasks || [];
@@ -145,11 +199,8 @@ function handleFullState(data) {
   dismissLoading();
 }
 
-/** Fast fingerprint: hash task count, IDs, stages, updated_at timestamps.
- *  Avoids JSON.stringify of the full payload (which can be large). */
 function quickFingerprint(data) {
   const tasks = data.tasks || [];
-  // Combine: task count + each task's id:stage:status:updated_at:priority + dependency count
   let fp = tasks.length + ':';
   for (let i = 0; i < tasks.length; i++) {
     const t = tasks[i];
@@ -194,7 +245,11 @@ function handleEvent(event) {
 
   switch (event.type) {
     case 'task:created': {
-      if (d.task) state.tasks.unshift(d.task);
+      if (d.task) {
+        const idx = state.tasks.findIndex((t) => t.id === d.task.id);
+        if (idx >= 0) state.tasks[idx] = d.task;
+        else state.tasks.unshift(d.task);
+      }
       showToast('Task created', d.task?.title || '');
       break;
     }
@@ -215,6 +270,7 @@ function handleEvent(event) {
     case 'task:deleted': {
       if (d.task) {
         state.tasks = state.tasks.filter((t) => t.id !== d.task.id);
+        if (state.panelTaskId === d.task.id) closePanel();
       }
       break;
     }
@@ -251,6 +307,13 @@ function handleEvent(event) {
   }
 
   render();
+
+  if (state.panelTaskId) {
+    const updated = d.task && d.task.id === state.panelTaskId;
+    if (updated || event.type === 'artifact:created' || event.type === 'comment:created') {
+      openPanel(state.panelTaskId);
+    }
+  }
 }
 
 // ---- Filters ----
@@ -332,6 +395,59 @@ function getBlockedTaskIds() {
   return blocked;
 }
 
+// ---- Relative time ----
+
+function relativeTime(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso + 'Z');
+    const now = Date.now();
+    const diff = now - d.getTime();
+    if (diff < 0) return 'just now';
+    const secs = Math.floor(diff / 1000);
+    if (secs < 60) return 'just now';
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 30) return `${days}d ago`;
+    const months = Math.floor(days / 30);
+    if (months < 12) return `${months}mo ago`;
+    return `${Math.floor(months / 12)}y ago`;
+  } catch {
+    return '';
+  }
+}
+
+// ---- Avatar ----
+
+function avatarColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function avatarInitials(name) {
+  if (!name) return '?';
+  const parts = name
+    .replace(/[^a-zA-Z0-9\s-]/g, '')
+    .split(/[\s-]+/)
+    .filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.substring(0, 2).toUpperCase();
+}
+
+function renderAvatar(name, sizeClass) {
+  if (!name) return '';
+  const color = avatarColor(name);
+  const initials = avatarInitials(name);
+  const cls = sizeClass ? `avatar-circle ${sizeClass}` : 'avatar-circle';
+  return `<div class="${cls}" style="background:${color}" title="${esc(name)}">${esc(initials)}</div>`;
+}
+
 // ---- Rendering ----
 
 function render() {
@@ -345,13 +461,28 @@ function renderStats() {
   const pending = state.tasks.filter((t) => t.status === 'pending').length;
   const done = state.tasks.filter((t) => t.status === 'completed').length;
 
+  const statsEl = document.getElementById('stats');
+  const values = { total, active, pending, done };
+
   morph(
-    document.getElementById('stats'),
-    `<span class="stat">Total <span class="stat-value">${total}</span></span>` +
-      `<span class="stat">Active <span class="stat-value">${active}</span></span>` +
-      `<span class="stat">Pending <span class="stat-value">${pending}</span></span>` +
-      `<span class="stat">Done <span class="stat-value">${done}</span></span>`,
+    statsEl,
+    `<span class="stat">Total <span class="stat-value" data-stat="total">${total}</span></span>` +
+      `<span class="stat">Active <span class="stat-value" data-stat="active">${active}</span></span>` +
+      `<span class="stat">Pending <span class="stat-value" data-stat="pending">${pending}</span></span>` +
+      `<span class="stat">Done <span class="stat-value" data-stat="done">${done}</span></span>`,
   );
+
+  for (const key of Object.keys(values)) {
+    if (_lastStatValues[key] !== undefined && _lastStatValues[key] !== values[key]) {
+      const el = statsEl.querySelector(`[data-stat="${key}"]`);
+      if (el) {
+        el.classList.remove('pulse');
+        void el.offsetWidth;
+        el.classList.add('pulse');
+      }
+    }
+  }
+  _lastStatValues = values;
 }
 
 function renderBoard() {
@@ -364,9 +495,23 @@ function renderBoard() {
     morph(
       board,
       `<div class="board-empty">
-        <span class="material-symbols-outlined">assignment</span>
+        <span class="material-symbols-outlined">view_kanban</span>
         <h3>No tasks yet</h3>
-        <p>Create tasks via MCP tools (task_create) or the REST API (POST /api/tasks)</p>
+        <p>Create tasks via MCP tools (task_create) or the REST API (POST /api/tasks) to get started.</p>
+        <div class="empty-steps">
+          <div class="empty-step">
+            <span class="material-symbols-outlined">add_task</span>
+            <span>Create a task</span>
+          </div>
+          <div class="empty-step">
+            <span class="material-symbols-outlined">drag_indicator</span>
+            <span>Drag through stages</span>
+          </div>
+          <div class="empty-step">
+            <span class="material-symbols-outlined">check_circle</span>
+            <span>Complete the work</span>
+          </div>
+        </div>
       </div>`,
     );
     return;
@@ -393,32 +538,74 @@ function renderBoard() {
     columnsToShow
       .map((stage) => {
         const tasks = byStage[stage] || [];
-        return `
-      <div class="kanban-column" data-stage="${esc(stage)}">
-        <div class="column-header" role="tablist">
-          <h3>${esc(stage)}</h3>
-          <span class="column-count" aria-label="${tasks.length} tasks">${tasks.length}</span>
-        </div>
-        <div class="column-body" role="tabpanel" aria-label="${esc(stage)} tasks">
-          ${tasks.map((t) => renderCard(t, blocked.has(t.id))).join('')}
-        </div>
+        const isCollapsed = state.collapsedColumns.has(stage);
+        const colClass = isCollapsed ? 'kanban-column collapsed' : 'kanban-column';
+        const icon = STAGE_ICONS[stage] || 'label';
+
+        let countClass = 'column-count';
+        if (tasks.length >= WIP_DANGER) countClass += ' wip-danger';
+        else if (tasks.length >= WIP_WARNING) countClass += ' wip-warning';
+
+        const emptyMsg = STAGE_EMPTY_MESSAGES[stage] || {
+          icon: 'label',
+          text: 'No tasks',
+          cta: '',
+        };
+
+        let bodyContent;
+        if (tasks.length === 0 && !isCollapsed) {
+          bodyContent = `<div class="column-empty">
+        <span class="material-symbols-outlined">${emptyMsg.icon}</span>
+        <div class="empty-text">${esc(emptyMsg.text)}</div>
+        ${emptyMsg.cta ? `<div class="empty-cta" data-action="add-task" data-stage="${esc(stage)}">${esc(emptyMsg.cta)}</div>` : ''}
       </div>`;
+        } else {
+          bodyContent = tasks.map((t, i) => renderCard(t, blocked.has(t.id), stage, i)).join('');
+        }
+
+        return `<div class="${colClass}" data-stage="${esc(stage)}">
+      <div class="column-header" data-action="toggle-collapse" data-stage="${esc(stage)}">
+        <div class="column-header-left">
+          <span class="material-symbols-outlined">${icon}</span>
+          <h3>${esc(stage)}</h3>
+        </div>
+        <span class="${countClass}" aria-label="${tasks.length} tasks">${tasks.length}</span>
+      </div>
+      <div class="column-body" role="listbox" aria-label="${esc(stage)} tasks">
+        ${bodyContent}
+      </div>
+      ${
+        !isCollapsed
+          ? `<button class="column-add-btn" data-action="inline-create" data-stage="${esc(stage)}">
+        <span class="material-symbols-outlined">add</span> New task
+      </button>`
+          : ''
+      }
+    </div>`;
       })
       .join(''),
   );
+
+  requestAnimationFrame(() => {
+    const cards = board.querySelectorAll('.task-card:not(.no-anim):not(.animated)');
+    cards.forEach((card, i) => {
+      card.classList.add('animated');
+      card.style.animationDelay = `${i * 30}ms`;
+      card.classList.add('animate-in');
+    });
+  });
 }
 
-function renderCard(task, isBlocked) {
+function renderCard(task, isBlocked, stage, index) {
   const tags = [];
 
   if (task.project) {
     tags.push(`<span class="task-tag tag-project">${esc(task.project)}</span>`);
   }
-  if (task.assigned_to) {
-    tags.push(`<span class="task-tag tag-assignee">${esc(task.assigned_to)}</span>`);
-  }
   if (task.priority > 0) {
-    tags.push(`<span class="task-tag tag-priority">P${task.priority}</span>`);
+    tags.push(
+      `<span class="task-tag tag-priority clickable" data-action="cycle-priority" data-task-id="${task.id}" title="Click to cycle priority">P${task.priority}</span>`,
+    );
   }
   const artCount = state.artifactCounts[task.id];
   if (artCount) {
@@ -441,45 +628,120 @@ function renderCard(task, isBlocked) {
   }
 
   const priorityClass =
-    task.priority >= 5
-      ? ' priority-high'
-      : task.priority >= 3
-        ? ' priority-medium'
-        : task.priority >= 1
-          ? ' priority-low'
-          : '';
+    task.priority >= 5 ? ' priority-high' : task.priority >= 3 ? ' priority-medium' : '';
 
-  return `
-    <div class="task-card${priorityClass}" tabindex="0" draggable="true"
-         data-task-id="${task.id}"
-         role="button"
-         aria-label="Task #${task.id}: ${esc(task.title)}">
-      <div class="task-card-id">#${task.id}</div>
-      <div class="task-card-title">${esc(task.title)}</div>
-      ${tags.length ? `<div class="task-card-meta">${tags.join('')}</div>` : ''}
-      ${progressBar}
-    </div>`;
+  const descPreview = task.description ? task.description.split('\n')[0].substring(0, 120) : '';
+
+  const timeAgo = relativeTime(task.updated_at);
+
+  const assigneeAvatar = task.assigned_to ? renderAvatar(task.assigned_to) : '';
+
+  const isActive = state.panelTaskId === task.id;
+  const activeClass = isActive ? ' active-card' : '';
+
+  return `<div class="task-card${priorityClass}${activeClass}" tabindex="0" draggable="true"
+       data-task-id="${task.id}" data-stage="${esc(stage)}"
+       role="option"
+       style="animation-delay: ${index * 30}ms"
+       aria-label="Task #${task.id}: ${esc(task.title)}">
+    <div class="task-card-header">
+      <span class="task-card-id">#${task.id}</span>
+      ${timeAgo ? `<span class="task-card-time">${esc(timeAgo)}</span>` : ''}
+    </div>
+    <div class="task-card-title" data-action="edit-title" data-task-id="${task.id}">${esc(task.title)}</div>
+    ${descPreview ? `<div class="task-card-desc">${esc(descPreview)}</div>` : ''}
+    <div class="task-card-footer">
+      <div class="task-card-meta">${tags.join('')}</div>
+      ${assigneeAvatar ? `<div class="task-card-assignee" data-action="change-assignee" data-task-id="${task.id}">${assigneeAvatar}</div>` : ''}
+    </div>
+    ${progressBar}
+  </div>`;
 }
 
-// ---- Event Delegation (replaces inline handlers) ----
+// ---- Event Delegation (board) ----
 
 document.getElementById('board').addEventListener('click', (e) => {
+  const action = e.target.closest('[data-action]');
+
+  if (action) {
+    const act = action.dataset.action;
+
+    if (act === 'toggle-collapse') {
+      e.stopPropagation();
+      const stage = action.dataset.stage;
+      if (state.collapsedColumns.has(stage)) {
+        state.collapsedColumns.delete(stage);
+      } else {
+        state.collapsedColumns.add(stage);
+      }
+      saveCollapsed();
+      render();
+      return;
+    }
+
+    if (act === 'inline-create') {
+      e.stopPropagation();
+      showInlineCreate(action.dataset.stage);
+      return;
+    }
+
+    if (act === 'add-task') {
+      e.stopPropagation();
+      showInlineCreate(action.dataset.stage);
+      return;
+    }
+
+    if (act === 'cycle-priority') {
+      e.stopPropagation();
+      cyclePriority(parseInt(action.dataset.taskId, 10));
+      return;
+    }
+
+    if (act === 'change-assignee') {
+      e.stopPropagation();
+      showAssigneeDropdown(parseInt(action.dataset.taskId, 10), action);
+      return;
+    }
+  }
+
   const card = e.target.closest('.task-card[data-task-id]');
   if (card) {
-    openTask(parseInt(card.dataset.taskId, 10));
+    openPanel(parseInt(card.dataset.taskId, 10));
+  }
+});
+
+document.getElementById('board').addEventListener('dblclick', (e) => {
+  const titleEl = e.target.closest('[data-action="edit-title"]');
+  if (titleEl) {
+    e.stopPropagation();
+    startInlineEdit(titleEl);
   }
 });
 
 document.getElementById('board').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     const card = e.target.closest('.task-card[data-task-id]');
-    if (card) openTask(parseInt(card.dataset.taskId, 10));
+    if (card) openPanel(parseInt(card.dataset.taskId, 10));
   }
 });
 
+// ---- Collapsed column click (expand) ----
+
+document.getElementById('board').addEventListener('click', (e) => {
+  const col = e.target.closest('.kanban-column.collapsed');
+  if (col) {
+    const stage = col.dataset.stage;
+    state.collapsedColumns.delete(stage);
+    saveCollapsed();
+    render();
+  }
+});
+
+// ---- Drag and Drop ----
+
 document.getElementById('board').addEventListener('dragstart', (e) => {
   const card = e.target.closest('.task-card[data-task-id]');
-  if (card) onDragStart(e, parseInt(card.dataset.taskId, 10));
+  if (card) onDragStart(e, card);
 });
 
 document.getElementById('board').addEventListener('dragend', (e) => {
@@ -493,7 +755,9 @@ document.getElementById('board').addEventListener('dragover', (e) => {
 
 document.getElementById('board').addEventListener('dragleave', (e) => {
   const col = e.target.closest('.kanban-column');
-  if (col && !col.contains(e.relatedTarget)) col.classList.remove('drag-over');
+  if (col && !col.contains(e.relatedTarget)) {
+    col.classList.remove('drag-over');
+  }
 });
 
 document.getElementById('board').addEventListener('drop', (e) => {
@@ -501,55 +765,46 @@ document.getElementById('board').addEventListener('drop', (e) => {
   if (col) onDrop(e, col);
 });
 
-// Delegation for modal subtask links and comment button
-document.getElementById('modal-body')?.addEventListener('click', (e) => {
-  const subtask = e.target.closest('[data-subtask-id]');
-  if (subtask) {
-    openTask(parseInt(subtask.dataset.subtaskId, 10));
-    return;
-  }
-  const sendBtn = e.target.closest('#comment-send-btn');
-  if (sendBtn) {
-    submitComment(parseInt(sendBtn.dataset.taskId, 10));
-  }
-});
-
-// ---- Drag and Drop ----
-
-function onDragStart(e, taskId) {
-  draggedTaskId = taskId;
+function onDragStart(e, card) {
+  draggedTaskId = parseInt(card.dataset.taskId, 10);
   e.dataTransfer.effectAllowed = 'move';
-  const card = e.target.closest('.task-card');
-  if (card) card.classList.add('dragging');
+  e.dataTransfer.setData('text/plain', String(draggedTaskId));
+
+  requestAnimationFrame(() => {
+    card.classList.add('dragging');
+  });
+
+  startDragAutoScroll();
 }
 
 function onDragEnd(e) {
   const card = e.target.closest('.task-card');
   if (card) card.classList.remove('dragging');
   draggedTaskId = null;
+  stopDragAutoScroll();
   document
     .querySelectorAll('.kanban-column.drag-over')
     .forEach((c) => c.classList.remove('drag-over'));
+  document.querySelectorAll('.drop-placeholder').forEach((p) => p.remove());
+  const board = document.getElementById('board');
+  board.classList.remove('drag-scroll-left', 'drag-scroll-right');
 }
 
 function onDragOver(e, col) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
   if (col && !col.classList.contains('drag-over')) {
+    document
+      .querySelectorAll('.kanban-column.drag-over')
+      .forEach((c) => c.classList.remove('drag-over'));
     col.classList.add('drag-over');
-  }
-}
-
-function onDragLeave(e) {
-  const col = e.target.closest('.kanban-column');
-  if (col && !col.contains(e.relatedTarget)) {
-    col.classList.remove('drag-over');
   }
 }
 
 function onDrop(e, col) {
   e.preventDefault();
   if (col) col.classList.remove('drag-over');
+  document.querySelectorAll('.drop-placeholder').forEach((p) => p.remove());
 
   if (!draggedTaskId) return;
   const targetStage = col.dataset.stage;
@@ -570,81 +825,198 @@ function onDrop(e, col) {
     .catch(() => showToast('Move failed', 'Network error', 'error'));
 }
 
-// ---- Modal ----
+function startDragAutoScroll() {
+  const board = document.getElementById('board');
+  dragScrollInterval = setInterval(() => {
+    if (!draggedTaskId) return;
+    const rect = board.getBoundingClientRect();
+    const mouseX = _lastMouseX;
+    const edgeSize = 80;
 
-function openTask(id) {
+    if (mouseX < rect.left + edgeSize) {
+      board.scrollLeft -= 8;
+      board.classList.add('drag-scroll-left');
+    } else {
+      board.classList.remove('drag-scroll-left');
+    }
+
+    if (mouseX > rect.right - edgeSize) {
+      board.scrollLeft += 8;
+      board.classList.add('drag-scroll-right');
+    } else {
+      board.classList.remove('drag-scroll-right');
+    }
+  }, 16);
+}
+
+function stopDragAutoScroll() {
+  clearInterval(dragScrollInterval);
+  dragScrollInterval = null;
+}
+
+let _lastMouseX = 0;
+document.addEventListener('dragover', (e) => {
+  _lastMouseX = e.clientX;
+});
+
+// ---- Side Panel ----
+
+function openPanel(id) {
   const task = state.tasks.find((t) => t.id === id);
   if (!task) return;
 
-  lastOpenedCardEl = document.querySelector(`[data-task-id="${id}"]`);
-  document.getElementById('modal-title').textContent = `#${task.id} — ${task.title}`;
+  state.panelTaskId = id;
+  const wrapper = document.getElementById('board-wrapper');
+  wrapper.classList.add('panel-open');
+
+  renderPanelContent(task);
+  highlightActiveCard(id);
+
+  showPanelBackdrop();
+}
+
+function closePanel() {
+  state.panelTaskId = null;
+  const wrapper = document.getElementById('board-wrapper');
+  wrapper.classList.remove('panel-open');
+  hidePanelBackdrop();
+  highlightActiveCard(null);
+}
+
+function showPanelBackdrop() {
+  let backdrop = document.getElementById('panel-backdrop');
+  if (!backdrop) {
+    backdrop = document.createElement('div');
+    backdrop.id = 'panel-backdrop';
+    backdrop.className = 'panel-backdrop';
+    backdrop.addEventListener('click', closePanel);
+    document.body.appendChild(backdrop);
+  }
+  backdrop.style.display = '';
+}
+
+function hidePanelBackdrop() {
+  const backdrop = document.getElementById('panel-backdrop');
+  if (backdrop) backdrop.style.display = 'none';
+}
+
+function highlightActiveCard(id) {
+  document
+    .querySelectorAll('.task-card.active-card')
+    .forEach((c) => c.classList.remove('active-card'));
+  if (id) {
+    const card = document.querySelector(`.task-card[data-task-id="${id}"]`);
+    if (card) card.classList.add('active-card');
+  }
+}
+
+function renderPanelContent(task) {
+  const panel = document.getElementById('side-panel');
+  const panelBody = document.getElementById('panel-body');
+  const panelHeader = document.getElementById('panel-header-content');
+
+  const stageClass = `stage-${task.stage}`;
+
+  panelHeader.innerHTML = `
+    <div class="panel-header-left">
+      <span class="panel-task-id">#${task.id}</span>
+      <span class="panel-stage-badge ${stageClass}">${esc(task.stage)}</span>
+    </div>
+    <button class="panel-close-btn" data-action="close-panel" aria-label="Close panel">
+      <span class="material-symbols-outlined">close</span>
+    </button>`;
 
   const deps = state.dependencies.filter((d) => d.task_id === task.id);
   const blocking = state.dependencies.filter((d) => d.depends_on === task.id);
 
-  let html = '<div class="detail-rows">';
+  let html = `<div class="panel-title">${esc(task.title)}</div>`;
 
-  const rows = [
+  html += '<div class="panel-section">';
+  html +=
+    '<div class="panel-section-title"><span class="material-symbols-outlined">info</span> Details</div>';
+  html += '<div class="panel-grid">';
+
+  const gridRows = [
     ['Status', task.status],
-    ['Stage', task.stage],
-    ['Priority', task.priority],
-    ['Created by', task.created_by],
+    ['Priority', `P${task.priority}`],
+    ['Created by', task.created_by || '\u2014'],
     ['Assigned to', task.assigned_to || '\u2014'],
     ['Project', task.project || '\u2014'],
     ['Created', formatDate(task.created_at)],
-    ['Updated', formatDate(task.updated_at)],
+    ['Updated', relativeTime(task.updated_at) || formatDate(task.updated_at)],
   ];
 
   if (task.parent_id) {
     const parent = state.tasks.find((t) => t.id === task.parent_id);
-    rows.push(['Parent', parent ? `#${parent.id} ${parent.title}` : `#${task.parent_id}`]);
+    gridRows.push(['Parent', parent ? `#${parent.id} ${parent.title}` : `#${task.parent_id}`]);
   }
 
   if (task.tags) {
     try {
       const parsed = JSON.parse(task.tags);
       if (Array.isArray(parsed) && parsed.length) {
-        rows.push(['Tags', parsed.join(', ')]);
+        gridRows.push(['Tags', parsed.join(', ')]);
       }
     } catch {
       /* ignore */
     }
   }
 
-  if (task.description) {
-    rows.push(['Description', task.description]);
-  }
-  if (task.result) {
-    rows.push(['Result', task.result]);
+  for (const [label, value] of gridRows) {
+    html += `<span class="panel-label">${esc(label)}</span><span class="panel-value">${esc(String(value))}</span>`;
   }
 
-  for (const [label, value] of rows) {
-    html += `<div class="detail-row"><span class="detail-label">${esc(label)}</span><span class="detail-value">${esc(String(value))}</span></div>`;
+  html += '</div></div>';
+
+  if (task.description) {
+    html += '<div class="panel-section">';
+    html +=
+      '<div class="panel-section-title"><span class="material-symbols-outlined">notes</span> Description</div>';
+    html += `<div class="panel-description">${esc(task.description)}</div>`;
+    html += '</div>';
+  }
+
+  if (task.result) {
+    html += '<div class="panel-section">';
+    html +=
+      '<div class="panel-section-title"><span class="material-symbols-outlined">output</span> Result</div>';
+    html += `<div class="panel-description">${esc(task.result)}</div>`;
+    html += '</div>';
   }
 
   if (deps.length) {
-    const depNames = deps.map((d) => {
+    html += '<div class="panel-section">';
+    html +=
+      '<div class="panel-section-title"><span class="material-symbols-outlined">link</span> Dependencies</div>';
+    for (const d of deps) {
       const t = state.tasks.find((x) => x.id === d.depends_on);
-      return t ? `#${t.id} ${t.title}` : `#${d.depends_on}`;
-    });
-    html += `<div class="detail-row"><span class="detail-label">Depends on</span><span class="detail-value">${depNames.map(esc).join('<br>')}</span></div>`;
+      const name = t ? `${t.title}` : `Task`;
+      html += `<div class="panel-subtask" data-subtask-id="${d.depends_on}">
+        <span class="subtask-id">#${d.depends_on}</span>
+        <span>${esc(name)}</span>
+        ${t ? `<span class="subtask-stage stage-${t.stage}">${esc(t.stage)}</span>` : ''}
+      </div>`;
+    }
+    html += '</div>';
   }
 
   if (blocking.length) {
-    const blockNames = blocking.map((d) => {
+    html += '<div class="panel-section">';
+    html +=
+      '<div class="panel-section-title"><span class="material-symbols-outlined">block</span> Blocks</div>';
+    for (const d of blocking) {
       const t = state.tasks.find((x) => x.id === d.task_id);
-      return t ? `#${t.id} ${t.title}` : `#${d.task_id}`;
-    });
-    html += `<div class="detail-row"><span class="detail-label">Blocks</span><span class="detail-value">${blockNames.map(esc).join('<br>')}</span></div>`;
+      const name = t ? `${t.title}` : `Task`;
+      html += `<div class="panel-subtask" data-subtask-id="${d.task_id}">
+        <span class="subtask-id">#${d.task_id}</span>
+        <span>${esc(name)}</span>
+        ${t ? `<span class="subtask-stage stage-${t.stage}">${esc(t.stage)}</span>` : ''}
+      </div>`;
+    }
+    html += '</div>';
   }
 
-  html += '</div>';
-
-  const modalBody = document.getElementById('modal-body');
-  modalBody.innerHTML = html;
-  document.getElementById('task-modal').hidden = false;
-  const closeBtn = document.getElementById('modal-close-btn');
-  if (closeBtn) closeBtn.focus();
+  panelBody.innerHTML = html;
 
   Promise.all([
     fetch(`/api/tasks/${task.id}/artifacts`)
@@ -660,51 +1032,271 @@ function openTask(id) {
     let extra = '';
 
     if (subtasks.length) {
-      extra +=
-        '<div class="artifact-list"><h3 style="margin-bottom:8px;font-size:13px;">Subtasks</h3>';
+      extra += '<div class="panel-section">';
+      extra += `<div class="panel-section-title"><span class="material-symbols-outlined">account_tree</span> Subtasks (${subtasks.length})</div>`;
       for (const s of subtasks) {
-        extra += `<div class="artifact-item subtask-link" style="cursor:pointer" data-subtask-id="${s.id}">
-          <h4>#${s.id} ${esc(s.title)} <span style="color:var(--text-dim);font-weight:400">(${esc(s.stage)})</span></h4>
+        extra += `<div class="panel-subtask" data-subtask-id="${s.id}">
+          <span class="subtask-id">#${s.id}</span>
+          <span>${esc(s.title)}</span>
+          <span class="subtask-stage stage-${s.stage}">${esc(s.stage)}</span>
         </div>`;
       }
       extra += '</div>';
     }
 
     if (artifacts.length) {
-      extra +=
-        '<div class="artifact-list"><h3 style="margin-bottom:8px;font-size:13px;">Artifacts</h3>';
+      extra += '<div class="panel-section">';
+      extra += `<div class="panel-section-title"><span class="material-symbols-outlined">inventory_2</span> Artifacts (${artifacts.length})</div>`;
       for (const a of artifacts) {
         const vLabel = a.version > 1 ? ` v${a.version}` : '';
-        extra += `<div class="artifact-item">
-          <h4>${esc(a.name)}${vLabel} <span style="color:var(--text-dim);font-weight:400">(${esc(a.stage)}, ${esc(a.created_by)})</span></h4>
+        extra += `<div class="panel-artifact">
+          <h4><span class="material-symbols-outlined" style="font-size:14px">description</span> ${esc(a.name)}${vLabel} <span style="color:var(--text-dim);font-weight:400">(${esc(a.stage)}, ${esc(a.created_by)})</span></h4>
           <pre>${esc(a.content)}</pre>
         </div>`;
       }
       extra += '</div>';
     }
 
-    if (comments.length || true) {
-      extra += `<div class="comments-section">
-        <h3><span class="material-symbols-outlined" style="font-size:16px">chat</span> Comments (${comments.length})</h3>`;
-      for (const c of comments) {
-        const isReply = c.parent_comment_id ? ' reply' : '';
-        extra += `<div class="comment-item${isReply}">
-          <div class="comment-header">
-            <span class="comment-agent">${esc(c.agent_id)}</span>
-            <span class="comment-time">${formatDate(c.created_at)}</span>
-          </div>
-          <div class="comment-body">${esc(c.content)}</div>
-        </div>`;
-      }
-      extra += `<div class="comment-form">
-        <textarea id="comment-input" placeholder="Add a comment..." rows="1" aria-label="Add a comment"></textarea>
-        <button id="comment-send-btn" data-task-id="${task.id}" aria-label="Send comment">Send</button>
-      </div></div>`;
+    extra += '<div class="panel-section panel-comments">';
+    extra += `<div class="panel-section-title"><span class="material-symbols-outlined">chat</span> Comments (${comments.length})</div>`;
+    for (const c of comments) {
+      const isReply = c.parent_comment_id ? ' reply' : '';
+      extra += `<div class="comment-item${isReply}">
+        <div class="comment-header">
+          ${renderAvatar(c.agent_id, 'avatar-sm')}
+          <span class="comment-agent">${esc(c.agent_id)}</span>
+          <span class="comment-time">${relativeTime(c.created_at) || formatDate(c.created_at)}</span>
+        </div>
+        <div class="comment-body">${esc(c.content)}</div>
+      </div>`;
     }
+    extra += `<div class="comment-form">
+      <textarea id="comment-input" placeholder="Add a comment..." rows="1" aria-label="Add a comment"></textarea>
+      <button id="comment-send-btn" data-task-id="${task.id}" aria-label="Send comment">Send</button>
+    </div></div>`;
 
-    modalBody.innerHTML = html + extra;
+    panelBody.innerHTML = html + extra;
   });
 }
+
+// ---- Panel event delegation ----
+
+document.getElementById('side-panel').addEventListener('click', (e) => {
+  const closeBtn = e.target.closest('[data-action="close-panel"]');
+  if (closeBtn) {
+    closePanel();
+    return;
+  }
+
+  const subtask = e.target.closest('[data-subtask-id]');
+  if (subtask) {
+    openPanel(parseInt(subtask.dataset.subtaskId, 10));
+    return;
+  }
+
+  const sendBtn = e.target.closest('#comment-send-btn');
+  if (sendBtn) {
+    submitComment(parseInt(sendBtn.dataset.taskId, 10));
+  }
+});
+
+// ---- Inline Task Creation ----
+
+function showInlineCreate(stage) {
+  dismissInlineCreate();
+
+  const col = document.querySelector(`.kanban-column[data-stage="${stage}"]`);
+  if (!col) return;
+
+  const addBtn = col.querySelector('.column-add-btn');
+  if (addBtn) addBtn.style.display = 'none';
+
+  const form = document.createElement('div');
+  form.className = 'inline-create-form';
+  form.innerHTML = `<div class="inline-create-card">
+    <input class="inline-create-input" type="text" placeholder="Task title..." autofocus />
+    <div class="inline-create-hint">
+      <span><kbd>Enter</kbd> to create</span>
+      <span><kbd>Esc</kbd> to cancel</span>
+    </div>
+  </div>`;
+
+  col.appendChild(form);
+  activeInlineCreate = { stage, form, col };
+
+  const input = form.querySelector('.inline-create-input');
+  input.focus();
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && input.value.trim()) {
+      e.preventDefault();
+      createTaskInline(input.value.trim(), stage);
+      dismissInlineCreate();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      dismissInlineCreate();
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    setTimeout(() => dismissInlineCreate(), 150);
+  });
+}
+
+function dismissInlineCreate() {
+  if (!activeInlineCreate) return;
+  const { form, col } = activeInlineCreate;
+  if (form && form.parentNode) form.remove();
+  const addBtn = col.querySelector('.column-add-btn');
+  if (addBtn) addBtn.style.display = '';
+  activeInlineCreate = null;
+}
+
+function createTaskInline(title, stage) {
+  fetch('/api/tasks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, stage, created_by: 'dashboard' }),
+  })
+    .then((r) => r.json())
+    .then((result) => {
+      if (result.error) {
+        showToast('Create failed', result.error, 'error');
+      }
+    })
+    .catch(() => showToast('Create failed', 'Network error', 'error'));
+}
+
+// ---- Inline Editing ----
+
+function startInlineEdit(titleEl) {
+  const taskId = parseInt(titleEl.dataset.taskId, 10);
+  const task = state.tasks.find((t) => t.id === taskId);
+  if (!task) return;
+
+  titleEl.setAttribute('contenteditable', 'true');
+  titleEl.focus();
+
+  const range = document.createRange();
+  range.selectNodeContents(titleEl);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  const finish = () => {
+    titleEl.removeAttribute('contenteditable');
+    const newTitle = titleEl.textContent.trim();
+    if (newTitle && newTitle !== task.title) {
+      updateTask(taskId, { title: newTitle });
+    } else {
+      titleEl.textContent = task.title;
+    }
+  };
+
+  titleEl.addEventListener('blur', finish, { once: true });
+  titleEl.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        titleEl.blur();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        titleEl.textContent = task.title;
+        titleEl.removeAttribute('contenteditable');
+      }
+    },
+    { once: true },
+  );
+}
+
+function cyclePriority(taskId) {
+  const task = state.tasks.find((t) => t.id === taskId);
+  if (!task) return;
+
+  const levels = [0, 1, 3, 5, 10];
+  const current = levels.indexOf(task.priority);
+  const next = levels[(current + 1) % levels.length];
+  updateTask(taskId, { priority: next });
+}
+
+function showAssigneeDropdown(taskId, anchor) {
+  dismissDropdown();
+
+  const task = state.tasks.find((t) => t.id === taskId);
+  if (!task) return;
+
+  const assignees = [...new Set(state.tasks.map((t) => t.assigned_to).filter(Boolean))].sort();
+  if (!assignees.length) return;
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'inline-dropdown';
+
+  dropdown.innerHTML =
+    `<div class="inline-dropdown-item${!task.assigned_to ? ' active' : ''}" data-value="">
+    <span style="color:var(--text-dim)">Unassigned</span>
+  </div>` +
+    assignees
+      .map(
+        (a) =>
+          `<div class="inline-dropdown-item${task.assigned_to === a ? ' active' : ''}" data-value="${esc(a)}">
+      ${renderAvatar(a, 'avatar-sm')}
+      <span>${esc(a)}</span>
+    </div>`,
+      )
+      .join('');
+
+  const rect = anchor.getBoundingClientRect();
+  dropdown.style.position = 'fixed';
+  dropdown.style.top = `${rect.bottom + 4}px`;
+  dropdown.style.left = `${Math.max(8, rect.left - 100)}px`;
+
+  document.body.appendChild(dropdown);
+  activeDropdown = dropdown;
+
+  dropdown.addEventListener('click', (e) => {
+    const item = e.target.closest('.inline-dropdown-item');
+    if (item) {
+      const value = item.dataset.value || null;
+      updateTask(taskId, { assigned_to: value });
+      dismissDropdown();
+    }
+  });
+
+  setTimeout(() => {
+    document.addEventListener('click', dismissDropdownOnOutsideClick, { once: true });
+  }, 0);
+}
+
+function dismissDropdown() {
+  if (activeDropdown) {
+    activeDropdown.remove();
+    activeDropdown = null;
+  }
+}
+
+function dismissDropdownOnOutsideClick(e) {
+  if (activeDropdown && !activeDropdown.contains(e.target)) {
+    dismissDropdown();
+  }
+}
+
+function updateTask(taskId, updates) {
+  fetch(`/api/tasks/${taskId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  })
+    .then((r) => r.json())
+    .then((result) => {
+      if (result.error) {
+        showToast('Update failed', result.error, 'error');
+      }
+    })
+    .catch(() => showToast('Update failed', 'Network error', 'error'));
+}
+
+// ---- Comment submission ----
 
 function submitComment(taskId) {
   const input = document.getElementById('comment-input');
@@ -718,47 +1310,16 @@ function submitComment(taskId) {
   })
     .then((r) => r.json())
     .then(() => {
-      openTask(taskId);
+      openPanel(taskId);
     })
     .catch(() => showToast('Error', 'Failed to post comment', 'error'));
 }
 
+// ---- Legacy Modal (cleanup only) ----
+
 function closeModal() {
   document.getElementById('task-modal').hidden = true;
-  if (lastOpenedCardEl) {
-    lastOpenedCardEl.focus();
-    lastOpenedCardEl = null;
-  }
 }
-
-// ---- Focus Trap (modal) ----
-
-function getFocusableElements(container) {
-  return container.querySelectorAll(
-    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-  );
-}
-
-document.getElementById('task-modal').addEventListener('keydown', (e) => {
-  if (e.key !== 'Tab') return;
-  const modal = document.querySelector('#task-modal .modal');
-  if (!modal) return;
-  const focusable = getFocusableElements(modal);
-  if (focusable.length === 0) return;
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (e.shiftKey) {
-    if (document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    }
-  } else {
-    if (document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }
-});
 
 document.getElementById('modal-close-btn')?.addEventListener('click', closeModal);
 document.getElementById('task-modal').addEventListener('click', (e) => {
@@ -769,14 +1330,35 @@ document.getElementById('task-modal').addEventListener('click', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    if (activeDropdown) {
+      dismissDropdown();
+      return;
+    }
+    if (activeInlineCreate) {
+      dismissInlineCreate();
+      return;
+    }
+    if (state.panelTaskId) {
+      closePanel();
+      return;
+    }
     const modal = document.getElementById('task-modal');
     if (!modal.hidden) {
       closeModal();
       return;
     }
+    const cleanupModal = document.getElementById('cleanup-modal');
+    if (!cleanupModal.classList.contains('hidden')) {
+      cleanupModal.classList.add('hidden');
+      return;
+    }
   }
+
   const isInput =
-    document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
+    document.activeElement?.tagName === 'INPUT' ||
+    document.activeElement?.tagName === 'TEXTAREA' ||
+    document.activeElement?.getAttribute('contenteditable') === 'true';
+
   if (
     (e.key === '/' && !e.ctrlKey && !e.metaKey && !isInput) ||
     ((e.ctrlKey || e.metaKey) && e.key === 'k')
