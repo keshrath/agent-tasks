@@ -390,9 +390,11 @@ export class TaskService {
       const newStage = activeStages[targetIdx];
       const newStatus = syncStatusForStage(newStage, activeStages);
 
+      const autoAssignee = this.getAutoAssignee(newStage, task.project ?? undefined);
+
       this.db.run(
-        `UPDATE tasks SET stage = ?, status = ?, updated_at = datetime('now') WHERE id = ?`,
-        [newStage, newStatus, taskId],
+        `UPDATE tasks SET stage = ?, status = ?, ${autoAssignee ? 'assigned_to = ?, ' : ''}updated_at = datetime('now') WHERE id = ?`,
+        autoAssignee ? [newStage, newStatus, autoAssignee, taskId] : [newStage, newStatus, taskId],
       );
       const advanced = this.getById(taskId)!;
       this.events.emit('task:advanced', {
@@ -691,6 +693,24 @@ export class TaskService {
   private validateStage(stage: string, stages: string[]): void {
     if (!stages.includes(stage)) {
       throw new ValidationError(`Invalid stage: ${stage}. Valid: ${stages.join(', ')}`);
+    }
+  }
+
+  private getAutoAssignee(stage: string, project?: string): string | null {
+    if (!project) return null;
+    const config = this.db.queryOne<PipelineConfig>(
+      'SELECT * FROM pipeline_config WHERE project = ?',
+      [project],
+    );
+    if (!config?.assignment_config) return null;
+    try {
+      const assignmentConfig = JSON.parse(config.assignment_config) as Record<
+        string,
+        { auto_assign?: string }
+      >;
+      return assignmentConfig[stage]?.auto_assign ?? null;
+    } catch {
+      return null;
     }
   }
 

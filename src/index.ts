@@ -18,6 +18,13 @@ const DASHBOARD_PORT = parseInt(process.env.AGENT_TASKS_PORT ?? '3422', 10);
 const SERVER_INFO = { name: 'agent-tasks', version: '1.0.0' };
 const CAPABILITIES = { tools: {} };
 
+const INSTRUCTIONS =
+  process.env.AGENT_TASKS_INSTRUCTIONS !== '0'
+    ? '\n\n---\nPIPELINE: Tasks flow through stages: backlog → spec → plan → implement → test → review → done. ' +
+      'Always advance tasks through stages (task_advance). Attach artifacts at each stage (task_add_artifact). ' +
+      'Use task_next to pick up unblocked work. Add comments (task_comment) to discuss decisions.'
+    : '';
+
 function send(response: JsonRpcResponse): void {
   process.stdout.write(JSON.stringify(response) + '\n');
 }
@@ -67,10 +74,11 @@ function main() {
         const toolArgs = (params as { arguments?: Record<string, unknown> }).arguments || {};
         try {
           const result = handleTool(toolName, toolArgs);
+          const text = JSON.stringify(result, null, 2) + INSTRUCTIONS;
           return {
             jsonrpc: '2.0',
             id,
-            result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] },
+            result: { content: [{ type: 'text', text }] },
           };
         } catch (err) {
           return {
