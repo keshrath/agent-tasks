@@ -5,6 +5,15 @@
 // filters, comments, subtask progress, and keyboard navigation.
 // =============================================================================
 
+// ---- DOM morphing (morphdom) ----
+// Diff-patches the DOM instead of replacing innerHTML, preserving focus,
+// scroll position, and CSS transitions. Only changed nodes are touched.
+function morph(el, newInnerHTML) {
+  const wrap = document.createElement(el.tagName);
+  wrap.innerHTML = newInnerHTML;
+  morphdom(el, wrap, { childrenOnly: true });
+}
+
 // ---- State ----
 
 const state = {
@@ -336,11 +345,13 @@ function renderStats() {
   const pending = state.tasks.filter((t) => t.status === 'pending').length;
   const done = state.tasks.filter((t) => t.status === 'completed').length;
 
-  document.getElementById('stats').innerHTML =
+  morph(
+    document.getElementById('stats'),
     `<span class="stat">Total <span class="stat-value">${total}</span></span>` +
-    `<span class="stat">Active <span class="stat-value">${active}</span></span>` +
-    `<span class="stat">Pending <span class="stat-value">${pending}</span></span>` +
-    `<span class="stat">Done <span class="stat-value">${done}</span></span>`;
+      `<span class="stat">Active <span class="stat-value">${active}</span></span>` +
+      `<span class="stat">Pending <span class="stat-value">${pending}</span></span>` +
+      `<span class="stat">Done <span class="stat-value">${done}</span></span>`,
+  );
 }
 
 function renderBoard() {
@@ -350,12 +361,14 @@ function renderBoard() {
   const visibleStages = state.stages.filter((s) => s !== 'cancelled');
 
   if (state.tasks.length === 0) {
-    board.innerHTML = `
-      <div class="board-empty">
+    morph(
+      board,
+      `<div class="board-empty">
         <span class="material-symbols-outlined">assignment</span>
         <h3>No tasks yet</h3>
         <p>Create tasks via MCP tools (task_create) or the REST API (POST /api/tasks)</p>
-      </div>`;
+      </div>`,
+    );
     return;
   }
 
@@ -375,10 +388,12 @@ function renderBoard() {
     columnsToShow.push('cancelled');
   }
 
-  board.innerHTML = columnsToShow
-    .map((stage) => {
-      const tasks = byStage[stage] || [];
-      return `
+  morph(
+    board,
+    columnsToShow
+      .map((stage) => {
+        const tasks = byStage[stage] || [];
+        return `
       <div class="kanban-column" data-stage="${esc(stage)}">
         <div class="column-header" role="tablist">
           <h3>${esc(stage)}</h3>
@@ -388,8 +403,9 @@ function renderBoard() {
           ${tasks.map((t) => renderCard(t, blocked.has(t.id))).join('')}
         </div>
       </div>`;
-    })
-    .join('');
+      })
+      .join(''),
+  );
 }
 
 function renderCard(task, isBlocked) {

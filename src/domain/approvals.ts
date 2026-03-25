@@ -8,7 +8,7 @@ import type { Db } from '../storage/database.js';
 import type { EventBus } from './events.js';
 import type { TaskApproval, PipelineConfig } from '../types.js';
 import { NotFoundError, ConflictError, ValidationError } from '../types.js';
-import { rejectNullBytes } from './validate.js';
+import { rejectNullBytes, rejectControlChars, MAX_AGENT_ID_LENGTH } from './validate.js';
 
 export class ApprovalService {
   constructor(
@@ -22,6 +22,10 @@ export class ApprovalService {
       project: string | null;
     } | null;
     if (!task) throw new NotFoundError('Task', taskId);
+
+    if (reviewer) {
+      this.validateReviewer(reviewer);
+    }
 
     const existing = this.db.queryOne<TaskApproval>(
       `SELECT * FROM task_approvals WHERE task_id = ? AND stage = ? AND status = 'pending'`,
@@ -46,12 +50,12 @@ export class ApprovalService {
   }
 
   approve(approvalId: number, reviewer: string, comment?: string): TaskApproval {
-    rejectNullBytes(reviewer, 'reviewer');
+    this.validateReviewer(reviewer);
     return this.resolve(approvalId, 'approved', reviewer, comment);
   }
 
   reject(approvalId: number, reviewer: string, comment?: string): TaskApproval {
-    rejectNullBytes(reviewer, 'reviewer');
+    this.validateReviewer(reviewer);
     if (!comment?.trim()) throw new ValidationError('Rejection requires a comment.');
     return this.resolve(approvalId, 'rejected', reviewer, comment);
   }
@@ -107,6 +111,14 @@ export class ApprovalService {
       [taskId, stage],
     );
     return !!approved;
+  }
+
+  private validateReviewer(reviewer: string): void {
+    rejectNullBytes(reviewer, 'reviewer');
+    rejectControlChars(reviewer, 'reviewer');
+    if (reviewer.length > MAX_AGENT_ID_LENGTH) {
+      throw new ValidationError(`Reviewer name too long (max ${MAX_AGENT_ID_LENGTH} chars).`);
+    }
   }
 
   private resolve(

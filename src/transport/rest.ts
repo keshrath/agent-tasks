@@ -23,15 +23,6 @@ const RATE_LIMIT_MAX = 100;
 const RATE_LIMIT_CLEANUP_INTERVAL_MS = 5 * 60_000;
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
-<<<<<<< HEAD
-const rateLimitCleanup = setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of rateLimitMap) {
-    if (now >= entry.resetAt) rateLimitMap.delete(ip);
-  }
-}, RATE_LIMIT_CLEANUP_INTERVAL_MS);
-rateLimitCleanup.unref();
-=======
 let lastRateLimitCleanup = Date.now();
 
 function cleanupRateLimitMap(): void {
@@ -44,7 +35,6 @@ function cleanupRateLimitMap(): void {
     }
   }
 }
->>>>>>> 9b4de5d (v1.2.5: dependency checks use status, getDependencies validates task, docs fixes)
 
 function checkRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
   const ip = req.socket.remoteAddress ?? 'unknown';
@@ -163,6 +153,12 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
     routes.push({ method, pattern: new RegExp(`^${pattern}$`), paramNames, handler });
   }
 
+  function parseId(params: Record<string, string>, key = 'id'): number {
+    const n = parseInt(params[key], 10);
+    if (Number.isNaN(n)) throw new ValidationError(`Invalid ${key}: must be an integer.`);
+    return n;
+  }
+
   function json(res: ServerResponse, data: unknown, status = 200): void {
     res.writeHead(status, {
       'Content-Type': 'application/json',
@@ -203,7 +199,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   });
 
   route('GET', '/api/tasks/:id', (_req, res, params) => {
-    const task = ctx.tasks.getById(parseInt(params.id, 10));
+    const task = ctx.tasks.getById(parseId(params));
     if (!task) {
       json(res, { error: 'Task not found' }, 404);
       return;
@@ -214,7 +210,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   route('PUT', '/api/tasks/:id', async (req, res, params) => {
     try {
       const body = await parseBody(req);
-      const taskId = parseInt(params.id, 10);
+      const taskId = parseId(params);
       const updated = ctx.tasks.update(taskId, {
         title: body.title as string | undefined,
         description: body.description as string | undefined,
@@ -237,7 +233,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
     const url = new URL(req.url!, `http://${req.headers.host}`);
     const stage = url.searchParams.get('stage') ?? undefined;
     try {
-      json(res, ctx.tasks.getArtifacts(parseInt(params.id, 10), stage));
+      json(res, ctx.tasks.getArtifacts(parseId(params), stage));
     } catch (err) {
       if (err instanceof TasksError) {
         json(res, { error: err.message }, err.statusCode);
@@ -249,7 +245,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
 
   route('GET', '/api/tasks/:id/dependencies', (_req, res, params) => {
     try {
-      json(res, ctx.tasks.getDependencies(parseInt(params.id, 10)));
+      json(res, ctx.tasks.getDependencies(parseId(params)));
     } catch (err) {
       if (err instanceof TasksError) {
         json(res, { error: err.message }, err.statusCode);
@@ -336,7 +332,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   route('PUT', '/api/tasks/:id/stage', async (req, res, params) => {
     try {
       const body = await parseBody(req);
-      const taskId = parseInt(params.id, 10);
+      const taskId = parseId(params);
       const targetStage = body.stage as string;
       const task = ctx.tasks.getById(taskId);
       if (!task) {
@@ -364,7 +360,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
 
   route('GET', '/api/tasks/:id/subtasks', (_req, res, params) => {
     try {
-      json(res, ctx.tasks.getSubtasks(parseInt(params.id, 10)));
+      json(res, ctx.tasks.getSubtasks(parseId(params)));
     } catch (err) {
       if (err instanceof TasksError) {
         json(res, { error: err.message }, err.statusCode);
@@ -376,7 +372,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
 
   route('GET', '/api/tasks/:id/comments', (_req, res, params) => {
     try {
-      json(res, ctx.comments.list(parseInt(params.id, 10)));
+      json(res, ctx.comments.list(parseId(params)));
     } catch (err) {
       if (err instanceof TasksError) {
         json(res, { error: err.message }, err.statusCode);
@@ -396,7 +392,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
         throw new ValidationError('"parent_comment_id" must be a number.');
       }
       const comment = ctx.comments.add(
-        parseInt(params.id, 10),
+        parseId(params),
         typeof body.agent_id === 'string' && body.agent_id ? body.agent_id : 'api',
         body.content as string,
         typeof body.parent_comment_id === 'number' ? body.parent_comment_id : undefined,

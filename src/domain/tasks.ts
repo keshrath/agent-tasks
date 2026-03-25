@@ -260,10 +260,6 @@ export class TaskService {
     return this.db.queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [id]);
   }
 
-<<<<<<< HEAD
-  count(): number {
-    const row = this.db.queryOne<{ cnt: number }>('SELECT COUNT(*) as cnt FROM tasks');
-=======
   count(filter?: { status?: TaskStatus; project?: string; stage?: string }): number {
     let sql = 'SELECT COUNT(*) as cnt FROM tasks';
     const conditions: string[] = [];
@@ -284,7 +280,6 @@ export class TaskService {
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
 
     const row = this.db.queryOne<{ cnt: number }>(sql, params);
->>>>>>> 9b4de5d (v1.2.5: dependency checks use status, getDependencies validates task, docs fixes)
     return row?.cnt ?? 0;
   }
 
