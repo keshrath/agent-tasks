@@ -353,7 +353,7 @@ function renderBoard() {
     .map((stage) => {
       const tasks = byStage[stage] || [];
       return `
-      <div class="kanban-column" data-stage="${esc(stage)}"
+      <div class="kanban-column" data-stage="${esc(stage)}">
         <div class="column-header" role="tablist">
           <h3>${esc(stage)}</h3>
           <span class="column-count" aria-label="${tasks.length} tasks">${tasks.length}</span>
