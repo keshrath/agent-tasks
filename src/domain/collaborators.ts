@@ -8,7 +8,7 @@ import type { Db } from '../storage/database.js';
 import type { EventBus } from './events.js';
 import type { CollaboratorRole, TaskCollaborator } from '../types.js';
 import { NotFoundError, ValidationError, ConflictError } from '../types.js';
-import { rejectNullBytes, rejectControlChars } from './validate.js';
+import { rejectNullBytes, rejectControlChars, MAX_AGENT_ID_LENGTH } from './validate.js';
 
 const VALID_ROLES: readonly CollaboratorRole[] = ['collaborator', 'reviewer', 'watcher'];
 
@@ -76,5 +76,8 @@ export class CollaboratorService {
     rejectNullBytes(agentId, 'agent_id');
     rejectControlChars(agentId, 'agent_id');
     if (!agentId.trim()) throw new ValidationError('Agent ID must not be empty.');
+    if (agentId.length > MAX_AGENT_ID_LENGTH) {
+      throw new ValidationError(`Agent ID too long (max ${MAX_AGENT_ID_LENGTH} chars).`);
+    }
   }
 }
