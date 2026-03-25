@@ -527,6 +527,9 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
         'Content-Type': contentType,
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy': CSP_HEADER,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
         ...SECURITY_HEADERS,
       });
       res.end(content);

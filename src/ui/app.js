@@ -881,7 +881,7 @@ function renderCard(task, isBlocked, stage, index) {
   }
   if (task.priority > 0) {
     tags.push(
-      `<span class="task-tag tag-priority clickable" data-action="cycle-priority" data-task-id="${task.id}" title="Click to cycle priority">P${task.priority}</span>`,
+      `<span class="task-tag tag-priority">P${task.priority}</span>`,
     );
   }
   const artCount = state.artifactCounts[task.id];

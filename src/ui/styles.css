@@ -1298,6 +1298,7 @@ header {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
   transition:
     width var(--transition-slow),
     min-width var(--transition-slow);
