@@ -1868,21 +1868,6 @@ document.getElementById('cleanup-modal')?.addEventListener('click', (e) => {
 
 document.getElementById('cleanup-completed')?.addEventListener('click', () => {
   document.getElementById('cleanup-modal').classList.add('hidden');
-  fetch('/api/cleanup', { method: 'POST' })
-    .then((r) => r.json())
-    .then((result) => {
-      showToast(
-        'Cleanup complete',
-        `Purged ${result.purgedTasks} tasks, ${result.purgedComments} comments, ${result.purgedApprovals} approvals`,
-        'success',
-      );
-    })
-    .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
-});
-
-document.getElementById('cleanup-all')?.addEventListener('click', () => {
-  if (!confirm('This will remove ALL completed and cancelled tasks. Continue?')) return;
-  document.getElementById('cleanup-modal').classList.add('hidden');
   fetch('/api/cleanup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1891,7 +1876,7 @@ document.getElementById('cleanup-all')?.addEventListener('click', () => {
     .then((r) => r.json())
     .then((result) => {
       showToast(
-        'Full cleanup complete',
+        'Cleanup complete',
         `Purged ${result.purgedTasks} tasks, ${result.purgedComments} comments, ${result.purgedApprovals} approvals`,
         'success',
       );
