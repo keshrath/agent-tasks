@@ -38,6 +38,7 @@ interface Route {
 }
 
 export function createRouter(ctx: AppContext): (req: IncomingMessage, res: ServerResponse) => void {
+  const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
   const routes: Route[] = [];
   const uiDir = resolve(join(__dirname, '..', 'ui'));
 
@@ -66,7 +67,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   route('GET', '/health', (_req, res) => {
     json(res, {
       status: 'ok',
-      version: '1.0.0',
+      version: pkg.version,
       uptime: process.uptime(),
       tasks: ctx.tasks.list().length,
     });

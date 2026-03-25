@@ -8,18 +8,31 @@
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='2' y='3' width='8' height='26' rx='2' fill='%235d8da8'/><rect x='12' y='3' width='8' height='26' rx='2' fill='%235d8da8' opacity='.6'/><rect x='22' y='3' width='8' height='26' rx='2' fill='%235d8da8' opacity='.3'/></svg>"
     />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header>
       <div class="header-left">
+        <span class="material-symbols-outlined brand-icon">view_kanban</span>
         <h1>agent-tasks</h1>
+        <span class="version" id="version"></span>
         <span id="connection-status" class="status-badge disconnected">Connecting</span>
       </div>
       <div class="header-right">
         <div class="stats" id="stats"></div>
         <button id="theme-toggle" class="icon-btn" title="Toggle theme">
-          <span class="icon-light">☀</span><span class="icon-dark">☾</span>
+          <span class="material-symbols-outlined icon-light">light_mode</span>
+          <span class="material-symbols-outlined icon-dark">dark_mode</span>
         </button>
       </div>
     </header>

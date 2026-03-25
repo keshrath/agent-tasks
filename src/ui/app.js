@@ -82,6 +82,9 @@ function handleFullState(data) {
   state.dependencies = data.dependencies || [];
   state.artifactCounts = data.artifactCounts || {};
   if (data.stages) state.stages = data.stages;
+  if (data.version) {
+    document.getElementById('version').textContent = 'v' + data.version;
+  }
   render();
 }
 

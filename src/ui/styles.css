@@ -1,7 +1,11 @@
 /* =============================================================================
    agent-tasks — Pipeline dashboard styles
-   Light/dark theme with CSS custom properties.
+   M3 design tokens + custom components. Light/dark theme via CSS custom props.
    ============================================================================= */
+
+/* --------------------------------------------------------------------------
+   Theme tokens
+   -------------------------------------------------------------------------- */
 
 :root {
   --bg: #f4f5f7;
@@ -26,6 +30,9 @@
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --column-min: 220px;
+  --shadow-1: 0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 1px 3px 1px rgba(0, 0, 0, 0.15);
+  --shadow-2: 0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 2px 6px 2px rgba(0, 0, 0, 0.15);
+  --shadow-3: 0px 1px 3px 0px rgba(0, 0, 0, 0.3), 0px 4px 8px 3px rgba(0, 0, 0, 0.15);
 }
 
 [data-theme='dark'] {
@@ -40,6 +47,10 @@
   --text-dim: #4a5568;
   --accent: #5d8da8;
   --accent-dim: rgba(93, 141, 168, 0.2);
+
+  --md-icon-button-icon-color: var(--text-muted);
+  --md-icon-button-hover-icon-color: var(--text);
+  --md-icon-button-hover-state-layer-color: var(--bg-hover);
 }
 
 *,
@@ -66,7 +77,9 @@ body {
   flex-direction: column;
 }
 
-/* ---- Header ---- */
+/* --------------------------------------------------------------------------
+   Header
+   -------------------------------------------------------------------------- */
 
 header {
   display: flex;
@@ -82,13 +95,25 @@ header {
 .header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+}
+
+.brand-icon {
+  font-size: 22px;
+  color: var(--accent);
 }
 
 .header-left h1 {
   font-size: 15px;
   font-weight: 600;
+  font-family: var(--font-mono);
   letter-spacing: -0.3px;
+}
+
+.version {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
 }
 
 .header-right {
@@ -146,6 +171,7 @@ header {
 .icon-btn:hover {
   background: var(--bg-hover);
 }
+
 [data-theme='dark'] .icon-light {
   display: none;
 }
@@ -153,7 +179,9 @@ header {
   display: none;
 }
 
-/* ---- Kanban Board ---- */
+/* --------------------------------------------------------------------------
+   Kanban Board
+   -------------------------------------------------------------------------- */
 
 .kanban-board {
   display: flex;
@@ -222,7 +250,9 @@ header {
   padding: 20px 0;
 }
 
-/* ---- Task Cards ---- */
+/* --------------------------------------------------------------------------
+   Task Cards
+   -------------------------------------------------------------------------- */
 
 .task-card {
   background: var(--bg-elevated);
@@ -288,7 +318,9 @@ header {
   color: var(--red);
 }
 
-/* ---- Modal ---- */
+/* --------------------------------------------------------------------------
+   Modal
+   -------------------------------------------------------------------------- */
 
 .modal-overlay {
   position: fixed;
@@ -338,6 +370,11 @@ header {
 }
 
 .modal-body .detail-row {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.modal-body .detail-row {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
@@ -377,7 +414,9 @@ header {
   overflow-y: auto;
 }
 
-/* ---- Toast ---- */
+/* --------------------------------------------------------------------------
+   Toast
+   -------------------------------------------------------------------------- */
 
 .toast-container {
   position: fixed;
@@ -395,7 +434,7 @@ header {
   border-radius: var(--radius-sm);
   padding: 8px 14px;
   font-size: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-2);
   animation: toast-in 0.2s ease-out;
   max-width: 320px;
 }
@@ -418,7 +457,9 @@ header {
   }
 }
 
-/* ---- Scrollbar ---- */
+/* --------------------------------------------------------------------------
+   Scrollbar
+   -------------------------------------------------------------------------- */
 
 ::-webkit-scrollbar {
   width: 6px;
