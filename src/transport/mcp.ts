@@ -6,7 +6,7 @@
 // =============================================================================
 
 import type { AppContext } from '../context.js';
-import type { TaskStatus, ToolDefinition } from '../types.js';
+import type { CollaboratorRole, TaskStatus, ToolDefinition } from '../types.js';
 import { ValidationError } from '../types.js';
 
 // ---------------------------------------------------------------------------
@@ -30,6 +30,7 @@ export const tools: ToolDefinition[] = [
         },
         project: { type: 'string', description: 'Project name for grouping' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
+        parent_id: { type: 'number', description: 'Parent task ID (creates a subtask)' },
       },
       required: ['title'],
     },
@@ -268,6 +269,132 @@ export const tools: ToolDefinition[] = [
       required: ['task_id'],
     },
   },
+  {
+    name: 'task_comment',
+    description: 'Add a comment to a task for async discussion between agents.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'Task ID' },
+        content: { type: 'string', description: 'Comment text' },
+        parent_comment_id: { type: 'number', description: 'Reply to this comment (threading)' },
+      },
+      required: ['task_id', 'content'],
+    },
+  },
+  {
+    name: 'task_get_comments',
+    description: 'Get comments on a task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'Task ID' },
+        limit: { type: 'number', description: 'Max comments (default: 100)' },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'task_add_collaborator',
+    description: 'Add an agent as collaborator on a task (roles: collaborator, reviewer, watcher).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'Task ID' },
+        agent_id: { type: 'string', description: 'Agent name or ID' },
+        role: {
+          type: 'string',
+          enum: ['collaborator', 'reviewer', 'watcher'],
+          description: 'Role (default: collaborator)',
+        },
+      },
+      required: ['task_id', 'agent_id'],
+    },
+  },
+  {
+    name: 'task_remove_collaborator',
+    description: 'Remove a collaborator from a task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'Task ID' },
+        agent_id: { type: 'string', description: 'Agent name or ID' },
+      },
+      required: ['task_id', 'agent_id'],
+    },
+  },
+  {
+    name: 'task_search',
+    description: 'Full-text search across task titles and descriptions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query' },
+        project: { type: 'string', description: 'Filter by project' },
+        limit: { type: 'number', description: 'Max results (default: 50)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'task_get_subtasks',
+    description: 'Get subtasks of a parent task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'Parent task ID' },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'task_request_approval',
+    description: 'Request approval for a task at a specific stage.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'Task ID' },
+        stage: { type: 'string', description: 'Stage requiring approval (defaults to current)' },
+        reviewer: { type: 'string', description: 'Specific reviewer to assign' },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'task_approve',
+    description: 'Approve a pending approval request.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        approval_id: { type: 'number', description: 'Approval ID' },
+        comment: { type: 'string', description: 'Approval comment' },
+      },
+      required: ['approval_id'],
+    },
+  },
+  {
+    name: 'task_reject',
+    description: 'Reject a pending approval and optionally regress the task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        approval_id: { type: 'number', description: 'Approval ID' },
+        comment: { type: 'string', description: 'Rejection reason (required)' },
+        regress_to: { type: 'string', description: 'Stage to regress task to' },
+      },
+      required: ['approval_id', 'comment'],
+    },
+  },
+  {
+    name: 'task_pending_approvals',
+    description: 'List pending approval requests, optionally filtered by reviewer.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        reviewer: { type: 'string', description: 'Filter by reviewer' },
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -301,6 +428,13 @@ function optNumber(args: Record<string, unknown>, key: string): number | undefin
   const val = args[key];
   if (val === undefined || val === null) return undefined;
   if (typeof val !== 'number') throw new ValidationError(`"${key}" must be a number.`);
+  return val;
+}
+
+function optBoolean(args: Record<string, unknown>, key: string): boolean | undefined {
+  const val = args[key];
+  if (val === undefined || val === null) return undefined;
+  if (typeof val !== 'boolean') throw new ValidationError(`"${key}" must be a boolean.`);
   return val;
 }
 
@@ -345,6 +479,7 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
             priority: optNumber(args, 'priority'),
             project: optString(args, 'project'),
             tags: optStringArray(args, 'tags'),
+            parent_id: optNumber(args, 'parent_id'),
           },
           sessionName(),
         );
@@ -356,6 +491,9 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
           assigned_to: optString(args, 'assigned_to'),
           stage: optString(args, 'stage'),
           project: optString(args, 'project'),
+          parent_id: optNumber(args, 'parent_id'),
+          root_only: optBoolean(args, 'root_only'),
+          collaborator: optString(args, 'collaborator'),
           limit: optNumber(args, 'limit'),
           offset: optNumber(args, 'offset'),
         });
@@ -441,6 +579,71 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
         ctx.tasks.delete(requireNumber(args, 'task_id'));
         return { success: true };
       }
+
+      case 'task_comment': {
+        return ctx.comments.add(
+          requireNumber(args, 'task_id'),
+          sessionName(),
+          requireString(args, 'content'),
+          optNumber(args, 'parent_comment_id'),
+        );
+      }
+
+      case 'task_get_comments':
+        return ctx.comments.list(requireNumber(args, 'task_id'), optNumber(args, 'limit'));
+
+      case 'task_add_collaborator': {
+        return ctx.collaborators.add(
+          requireNumber(args, 'task_id'),
+          requireString(args, 'agent_id'),
+          (optString(args, 'role') ?? 'collaborator') as CollaboratorRole,
+        );
+      }
+
+      case 'task_remove_collaborator': {
+        ctx.collaborators.remove(requireNumber(args, 'task_id'), requireString(args, 'agent_id'));
+        return { success: true };
+      }
+
+      case 'task_search':
+        return ctx.tasks.search(requireString(args, 'query'), {
+          project: optString(args, 'project'),
+          limit: optNumber(args, 'limit'),
+        });
+
+      case 'task_get_subtasks':
+        return ctx.tasks.getSubtasks(requireNumber(args, 'task_id'));
+
+      case 'task_request_approval': {
+        const taskId = requireNumber(args, 'task_id');
+        const task = ctx.tasks.getById(taskId);
+        if (!task) throw new ValidationError(`Task ${taskId} not found.`);
+        const stage = optString(args, 'stage') ?? task.stage;
+        return ctx.approvals.request(taskId, stage, optString(args, 'reviewer'));
+      }
+
+      case 'task_approve':
+        return ctx.approvals.approve(
+          requireNumber(args, 'approval_id'),
+          sessionName(),
+          optString(args, 'comment'),
+        );
+
+      case 'task_reject': {
+        const approval = ctx.approvals.reject(
+          requireNumber(args, 'approval_id'),
+          sessionName(),
+          requireString(args, 'comment'),
+        );
+        const regressTo = optString(args, 'regress_to');
+        if (regressTo) {
+          ctx.tasks.regress(approval.task_id, regressTo, requireString(args, 'comment'));
+        }
+        return approval;
+      }
+
+      case 'task_pending_approvals':
+        return ctx.approvals.getPending(optString(args, 'reviewer'));
 
       default:
         throw new ValidationError(`Unknown tool: ${name}`);

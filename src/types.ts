@@ -20,6 +20,7 @@ export interface Task {
   readonly project: string | null;
   readonly tags: string | null;
   readonly result: string | null;
+  readonly parent_id: number | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -32,6 +33,7 @@ export interface TaskCreateInput {
   priority?: number;
   project?: string;
   tags?: string[];
+  parent_id?: number;
 }
 
 export interface TaskUpdateInput {
@@ -41,6 +43,7 @@ export interface TaskUpdateInput {
   project?: string;
   tags?: string[];
   assigned_to?: string;
+  parent_id?: number;
 }
 
 export interface TaskListFilter {
@@ -48,6 +51,9 @@ export interface TaskListFilter {
   assigned_to?: string;
   stage?: string;
   project?: string;
+  parent_id?: number;
+  root_only?: boolean;
+  collaborator?: string;
   limit?: number;
   offset?: number;
 }
@@ -63,7 +69,52 @@ export interface TaskArtifact {
   readonly name: string;
   readonly content: string;
   readonly created_by: string;
+  readonly version: number;
+  readonly previous_id: number | null;
   readonly created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Comments
+// ---------------------------------------------------------------------------
+
+export interface TaskComment {
+  readonly id: number;
+  readonly task_id: number;
+  readonly agent_id: string;
+  readonly content: string;
+  readonly parent_comment_id: number | null;
+  readonly created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Collaborators
+// ---------------------------------------------------------------------------
+
+export type CollaboratorRole = 'collaborator' | 'reviewer' | 'watcher';
+
+export interface TaskCollaborator {
+  readonly task_id: number;
+  readonly agent_id: string;
+  readonly role: CollaboratorRole;
+  readonly added_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Approvals
+// ---------------------------------------------------------------------------
+
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface TaskApproval {
+  readonly id: number;
+  readonly task_id: number;
+  readonly stage: string;
+  readonly status: ApprovalStatus;
+  readonly reviewer: string | null;
+  readonly requested_at: string;
+  readonly resolved_at: string | null;
+  readonly comment: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +133,19 @@ export interface TaskDependency {
 export interface PipelineConfig {
   readonly project: string;
   readonly stages: string;
+  readonly approval_config: string | null;
+  readonly assignment_config: string | null;
   readonly updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+export interface SearchResult {
+  readonly task: Task;
+  readonly snippet: string;
+  readonly rank: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +165,13 @@ export type EventType =
   | 'artifact:created'
   | 'dependency:added'
   | 'dependency:removed'
-  | 'pipeline:configured';
+  | 'pipeline:configured'
+  | 'comment:created'
+  | 'collaborator:added'
+  | 'collaborator:removed'
+  | 'approval:requested'
+  | 'approval:approved'
+  | 'approval:rejected';
 
 export interface TasksEvent {
   readonly type: EventType;

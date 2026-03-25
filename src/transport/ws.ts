@@ -46,6 +46,12 @@ const VALID_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
   'dependency:added',
   'dependency:removed',
   'pipeline:configured',
+  'comment:created',
+  'collaborator:added',
+  'collaborator:removed',
+  'approval:requested',
+  'approval:approved',
+  'approval:rejected',
 ]);
 
 export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHandle {
@@ -196,6 +202,8 @@ function sendFullState(ws: WebSocket, ctx: AppContext): void {
         tasks: ctx.tasks.list(),
         dependencies: ctx.tasks.getAllDependencies(),
         artifactCounts: ctx.tasks.getArtifactCounts(),
+        commentCounts: ctx.comments.countByTask(),
+        subtaskProgress: ctx.tasks.getAllSubtaskProgress(),
         stages: ctx.tasks.getPipelineStages(),
       }),
     );

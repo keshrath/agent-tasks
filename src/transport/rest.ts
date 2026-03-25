@@ -10,7 +10,46 @@ import { readFileSync, realpathSync, existsSync } from 'fs';
 import { join, extname, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { AppContext } from '../context.js';
-import { TasksError } from '../types.js';
+import { TasksError, ValidationError } from '../types.js';
+
+const MAX_BODY_SIZE = 65536;
+
+function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(new ValidationError('Request body too large (max 64KB).'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on('end', () => {
+      try {
+        const raw = Buffer.concat(chunks).toString('utf-8');
+        if (!raw.trim()) {
+          resolve({});
+          return;
+        }
+        const parsed = JSON.parse(raw);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          reject(new ValidationError('Request body must be a JSON object.'));
+          return;
+        }
+        resolve(parsed as Record<string, unknown>);
+      } catch {
+        reject(new ValidationError('Invalid JSON in request body.'));
+      }
+    });
+
+    req.on('error', reject);
+  });
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -139,8 +178,130 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
       tasks: ctx.tasks.list(),
       dependencies: ctx.tasks.getAllDependencies(),
       artifactCounts: ctx.tasks.getArtifactCounts(),
+      commentCounts: ctx.comments.countByTask(),
+      subtaskProgress: ctx.tasks.getAllSubtaskProgress(),
       stages: ctx.tasks.getPipelineStages(),
     });
+  });
+
+  route('POST', '/api/tasks', async (req, res) => {
+    try {
+      const body = await parseBody(req);
+      const task = ctx.tasks.create(
+        {
+          title: body.title as string,
+          description: body.description as string | undefined,
+          assign_to: body.assign_to as string | undefined,
+          stage: body.stage as string | undefined,
+          priority: body.priority as number | undefined,
+          project: body.project as string | undefined,
+          tags: body.tags as string[] | undefined,
+          parent_id: body.parent_id as number | undefined,
+        },
+        (body.created_by as string) || 'api',
+      );
+      json(res, task, 201);
+    } catch (err) {
+      if (err instanceof TasksError) {
+        json(res, { error: err.message }, err.statusCode);
+      } else {
+        json(res, { error: 'Internal error' }, 500);
+      }
+    }
+  });
+
+  route('PUT', '/api/tasks/:id/stage', async (req, res, params) => {
+    try {
+      const body = await parseBody(req);
+      const taskId = parseInt(params.id, 10);
+      const targetStage = body.stage as string;
+      const task = ctx.tasks.getById(taskId);
+      if (!task) {
+        json(res, { error: 'Task not found' }, 404);
+        return;
+      }
+      const stages = ctx.tasks.getPipelineStages(task.project ?? undefined);
+      const currentIdx = stages.indexOf(task.stage);
+      const targetIdx = stages.indexOf(targetStage);
+      if (targetIdx > currentIdx) {
+        json(res, ctx.tasks.advance(taskId, targetStage));
+      } else if (targetIdx < currentIdx) {
+        json(res, ctx.tasks.regress(taskId, targetStage, body.reason as string | undefined));
+      } else {
+        json(res, task);
+      }
+    } catch (err) {
+      if (err instanceof TasksError) {
+        json(res, { error: err.message }, err.statusCode);
+      } else {
+        json(res, { error: 'Internal error' }, 500);
+      }
+    }
+  });
+
+  route('GET', '/api/tasks/:id/subtasks', (_req, res, params) => {
+    try {
+      json(res, ctx.tasks.getSubtasks(parseInt(params.id, 10)));
+    } catch (err) {
+      if (err instanceof TasksError) {
+        json(res, { error: err.message }, err.statusCode);
+      } else {
+        json(res, { error: 'Internal error' }, 500);
+      }
+    }
+  });
+
+  route('GET', '/api/tasks/:id/comments', (_req, res, params) => {
+    try {
+      json(res, ctx.comments.list(parseInt(params.id, 10)));
+    } catch (err) {
+      if (err instanceof TasksError) {
+        json(res, { error: err.message }, err.statusCode);
+      } else {
+        json(res, { error: 'Internal error' }, 500);
+      }
+    }
+  });
+
+  route('POST', '/api/tasks/:id/comments', async (req, res, params) => {
+    try {
+      const body = await parseBody(req);
+      const comment = ctx.comments.add(
+        parseInt(params.id, 10),
+        (body.agent_id as string) || 'api',
+        body.content as string,
+        body.parent_comment_id as number | undefined,
+      );
+      json(res, comment, 201);
+    } catch (err) {
+      if (err instanceof TasksError) {
+        json(res, { error: err.message }, err.statusCode);
+      } else {
+        json(res, { error: 'Internal error' }, 500);
+      }
+    }
+  });
+
+  route('GET', '/api/search', (req, res) => {
+    const url = new URL(req.url!, `http://${req.headers.host}`);
+    const query = url.searchParams.get('q') ?? '';
+    try {
+      json(
+        res,
+        ctx.tasks.search(query, {
+          project: url.searchParams.get('project') ?? undefined,
+          limit: url.searchParams.has('limit')
+            ? parseInt(url.searchParams.get('limit')!, 10)
+            : undefined,
+        }),
+      );
+    } catch (err) {
+      if (err instanceof TasksError) {
+        json(res, { error: err.message }, err.statusCode);
+      } else {
+        json(res, { error: 'Internal error' }, 500);
+      }
+    }
   });
 
   // -----------------------------------------------------------------------

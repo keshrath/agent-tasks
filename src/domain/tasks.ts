@@ -16,6 +16,7 @@ import type {
   TaskStatus,
   TaskUpdateInput,
   PipelineConfig,
+  SearchResult,
 } from '../types.js';
 import { NotFoundError, ConflictError, ValidationError } from '../types.js';
 import {
@@ -116,6 +117,7 @@ export class TaskService {
     if (input.project !== undefined) this.validateProjectName(input.project);
     if (input.tags !== undefined) this.validateTags(input.tags);
     if (input.assign_to !== undefined) this.validateAssignee(input.assign_to);
+    if (input.parent_id !== undefined) this.requireTask(input.parent_id);
 
     const stages = this.getPipelineStages(input.project);
     const effectiveStage = input.stage || stages[0];
@@ -124,8 +126,8 @@ export class TaskService {
     const status = syncStatusForStage(effectiveStage, stages);
 
     const result = this.db.run(
-      `INSERT INTO tasks (title, description, created_by, assigned_to, status, stage, priority, project, tags)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (title, description, created_by, assigned_to, status, stage, priority, project, tags, parent_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.title.trim(),
         input.description?.trim() ?? null,
@@ -136,6 +138,7 @@ export class TaskService {
         input.priority ?? 0,
         input.project ?? null,
         input.tags ? JSON.stringify(input.tags) : null,
+        input.parent_id ?? null,
       ],
     );
 
@@ -201,27 +204,44 @@ export class TaskService {
       );
     }
 
-    let sql = 'SELECT * FROM tasks WHERE 1=1';
+    let sql = 'SELECT DISTINCT t.* FROM tasks t';
     const params: unknown[] = [];
 
+    if (filter.collaborator) {
+      sql += ' JOIN task_collaborators tc ON tc.task_id = t.id';
+    }
+
+    sql += ' WHERE 1=1';
+
     if (filter.status) {
-      sql += ' AND status = ?';
+      sql += ' AND t.status = ?';
       params.push(filter.status);
     }
     if (filter.assigned_to) {
-      sql += ' AND assigned_to = ?';
+      sql += ' AND t.assigned_to = ?';
       params.push(filter.assigned_to);
     }
     if (filter.stage) {
-      sql += ' AND stage = ?';
+      sql += ' AND t.stage = ?';
       params.push(filter.stage);
     }
     if (filter.project) {
-      sql += ' AND project = ?';
+      sql += ' AND t.project = ?';
       params.push(filter.project);
     }
+    if (filter.parent_id !== undefined) {
+      sql += ' AND t.parent_id = ?';
+      params.push(filter.parent_id);
+    }
+    if (filter.root_only) {
+      sql += ' AND t.parent_id IS NULL';
+    }
+    if (filter.collaborator) {
+      sql += ' AND tc.agent_id = ?';
+      params.push(filter.collaborator);
+    }
 
-    sql += ' ORDER BY priority DESC, created_at DESC';
+    sql += ' ORDER BY t.priority DESC, t.created_at DESC';
 
     const limit = Math.min(filter.limit ?? MAX_LIST_LIMIT, MAX_LIST_LIMIT);
     sql += ' LIMIT ?';
@@ -527,9 +547,16 @@ export class TaskService {
 
     const effectiveStage = stage && stage !== '_current_' ? stage : task.stage;
 
+    const existing = this.db.queryOne<TaskArtifact>(
+      'SELECT * FROM task_artifacts WHERE task_id = ? AND stage = ? AND name = ? ORDER BY version DESC LIMIT 1',
+      [taskId, effectiveStage, name],
+    );
+    const version = existing ? existing.version + 1 : 1;
+    const previousId = existing?.id ?? null;
+
     const result = this.db.run(
-      `INSERT INTO task_artifacts (task_id, stage, name, content, created_by) VALUES (?, ?, ?, ?, ?)`,
-      [taskId, effectiveStage, name, content, createdBy],
+      `INSERT INTO task_artifacts (task_id, stage, name, content, created_by, version, previous_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [taskId, effectiveStage, name, content, createdBy, version, previousId],
     );
     const artifact = this.db.queryOne<TaskArtifact>('SELECT * FROM task_artifacts WHERE id = ?', [
       Number(result.lastInsertRowid),
@@ -559,6 +586,90 @@ export class TaskService {
     const counts: Record<number, number> = {};
     for (const r of rows) counts[r.task_id] = r.cnt;
     return counts;
+  }
+
+  // ---- Subtasks ----
+
+  getSubtasks(taskId: number): Task[] {
+    this.requireTask(taskId);
+    return this.db.queryAll<Task>(
+      'SELECT * FROM tasks WHERE parent_id = ? ORDER BY priority DESC, created_at ASC',
+      [taskId],
+    );
+  }
+
+  getSubtaskProgress(taskId: number): { total: number; done: number } {
+    const rows = this.db.queryAll<{ status: string; cnt: number }>(
+      `SELECT status, COUNT(*) as cnt FROM tasks WHERE parent_id = ? GROUP BY status`,
+      [taskId],
+    );
+    let total = 0;
+    let done = 0;
+    for (const r of rows) {
+      total += r.cnt;
+      if (r.status === 'completed') done += r.cnt;
+    }
+    return { total, done };
+  }
+
+  getAllSubtaskProgress(): Record<number, { total: number; done: number }> {
+    const rows = this.db.queryAll<{ parent_id: number; status: string; cnt: number }>(
+      `SELECT parent_id, status, COUNT(*) as cnt FROM tasks WHERE parent_id IS NOT NULL GROUP BY parent_id, status`,
+    );
+    const progress: Record<number, { total: number; done: number }> = {};
+    for (const r of rows) {
+      if (!progress[r.parent_id]) progress[r.parent_id] = { total: 0, done: 0 };
+      progress[r.parent_id].total += r.cnt;
+      if (r.status === 'completed') progress[r.parent_id].done += r.cnt;
+    }
+    return progress;
+  }
+
+  // ---- Search ----
+
+  search(query: string, options?: { project?: string; limit?: number }): SearchResult[] {
+    if (!query.trim()) return [];
+
+    const sanitized = this.sanitizeFtsQuery(query);
+    if (!sanitized) return [];
+
+    let sql = `
+      SELECT t.*, snippet(tasks_fts, 0, '<mark>', '</mark>', '...', 32) as snippet,
+             rank
+      FROM tasks_fts
+      JOIN tasks t ON t.id = tasks_fts.rowid
+      WHERE tasks_fts MATCH ?`;
+    const params: unknown[] = [sanitized];
+
+    if (options?.project) {
+      sql += ' AND t.project = ?';
+      params.push(options.project);
+    }
+
+    sql += ' ORDER BY rank LIMIT ?';
+    params.push(Math.min(options?.limit ?? 50, 200));
+
+    const rows = this.db.queryAll<Task & { snippet: string; rank: number }>(sql, params);
+    return rows.map((r) => ({
+      task: r,
+      snippet: r.snippet,
+      rank: r.rank,
+    }));
+  }
+
+  private sanitizeFtsQuery(query: string): string {
+    const cleaned = query
+      .replace(/["*^{}[\]:()\\/]/g, '')
+      .replace(/\b(AND|OR|NOT|NEAR)\b/gi, '')
+      .trim();
+
+    if (!cleaned) return '';
+
+    return cleaned
+      .split(/\s+/)
+      .filter((w) => w.length > 0)
+      .map((w) => `"${w}"`)
+      .join(' ');
   }
 
   // ---- Delete ----
