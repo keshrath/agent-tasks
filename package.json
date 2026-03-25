@@ -1,0 +1,84 @@
+{
+  "name": "agent-tasks",
+  "version": "1.5.1",
+  "description": "Pipeline-driven task management for AI coding agents — stages, dependencies, artifacts, and multi-agent claiming",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "agent-tasks": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc && node scripts/copy-ui.js",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "start:server": "node dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/ tests/",
+    "lint:fix": "eslint src/ tests/ --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,js}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{json,md,css,html}": [
+      "prettier --write"
+    ]
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "morphdom": "^2.7.8",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^10.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.1",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.57.2",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "keywords": [
+    "mcp",
+    "agent",
+    "tasks",
+    "pipeline",
+    "multi-agent",
+    "model-context-protocol",
+    "ai-agents",
+    "kanban",
+    "workflow",
+    "claude-code"
+  ],
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "author": "keshrath",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keshrath/agent-tasks.git"
+  },
+  "homepage": "https://github.com/keshrath/agent-tasks",
+  "bugs": {
+    "url": "https://github.com/keshrath/agent-tasks/issues"
+  }
+}
