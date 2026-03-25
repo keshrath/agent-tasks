@@ -8,7 +8,12 @@ import type { Db } from '../storage/database.js';
 import type { EventBus } from './events.js';
 import type { TaskComment } from '../types.js';
 import { NotFoundError, ValidationError } from '../types.js';
-import { MAX_DESCRIPTION_LENGTH, rejectNullBytes, rejectControlChars } from './validate.js';
+import {
+  MAX_COMMENT_LENGTH,
+  MAX_AGENT_ID_LENGTH,
+  rejectNullBytes,
+  rejectControlChars,
+} from './validate.js';
 
 export class CommentService {
   constructor(
@@ -20,6 +25,9 @@ export class CommentService {
     this.validateContent(content);
     rejectNullBytes(agentId, 'agent_id');
     rejectControlChars(agentId, 'agent_id');
+    if (agentId.length > MAX_AGENT_ID_LENGTH) {
+      throw new ValidationError(`Agent ID too long (max ${MAX_AGENT_ID_LENGTH} chars).`);
+    }
 
     const task = this.db.queryOne('SELECT id FROM tasks WHERE id = ?', [taskId]);
     if (!task) throw new NotFoundError('Task', taskId);
@@ -78,8 +86,8 @@ export class CommentService {
     rejectNullBytes(content, 'comment content');
     const trimmed = content.trim();
     if (!trimmed) throw new ValidationError('Comment content must not be empty.');
-    if (trimmed.length > MAX_DESCRIPTION_LENGTH) {
-      throw new ValidationError(`Comment too long (max ${MAX_DESCRIPTION_LENGTH} chars).`);
+    if (trimmed.length > MAX_COMMENT_LENGTH) {
+      throw new ValidationError(`Comment too long (max ${MAX_COMMENT_LENGTH} chars).`);
     }
   }
 }

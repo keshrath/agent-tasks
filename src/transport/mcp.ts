@@ -10,7 +10,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import type { AppContext } from '../context.js';
 import type { CollaboratorRole, TaskStatus, ToolDefinition } from '../types.js';
-import { ValidationError } from '../types.js';
+import { ValidationError, type TaskRelationshipType } from '../types.js';
 import { generateRules } from '../domain/rules.js';
 
 // ---------------------------------------------------------------------------
@@ -53,6 +53,9 @@ export const tools: ToolDefinition[] = [
         assigned_to: { type: 'string', description: 'Filter by assigned agent name' },
         stage: { type: 'string', description: 'Filter by pipeline stage' },
         project: { type: 'string', description: 'Filter by project' },
+        collaborator: { type: 'string', description: 'Filter tasks where agent is a collaborator' },
+        root_only: { type: 'boolean', description: 'Only show top-level tasks (no subtasks)' },
+        parent_id: { type: 'number', description: 'Filter subtasks of a specific parent' },
         limit: { type: 'number', description: 'Max results (default/max: 500)' },
         offset: { type: 'number', description: 'Skip first N results (for pagination)' },
       },
@@ -172,12 +175,21 @@ export const tools: ToolDefinition[] = [
   },
   {
     name: 'task_add_dependency',
-    description: 'Make a task depend on another (blocks advancement until dependency is done).',
+    description:
+      'Add a relationship between tasks. "blocks" prevents advancement until dependency is done. "related" and "duplicate" are informational only.',
     inputSchema: {
       type: 'object',
       properties: {
         task_id: { type: 'number', description: 'Task that depends on another' },
-        depends_on: { type: 'number', description: 'Task that must complete first' },
+        depends_on: {
+          type: 'number',
+          description: 'Task that must complete first (for blocks) or related task',
+        },
+        relationship: {
+          type: 'string',
+          enum: ['blocks', 'related', 'duplicate'],
+          description: 'Relationship type (default: blocks)',
+        },
       },
       required: ['task_id', 'depends_on'],
     },
@@ -422,6 +434,43 @@ export const tools: ToolDefinition[] = [
     },
   },
   {
+    name: 'task_expand',
+    description:
+      'Break a task into subtasks. Creates subtasks with parent_id pointing to the given task, inheriting project and priority.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'Parent task ID to expand' },
+        subtasks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Subtask title' },
+              description: { type: 'string', description: 'Subtask description' },
+              priority: {
+                type: 'number',
+                description: 'Priority override (inherits from parent if omitted)',
+              },
+            },
+            required: ['title'],
+          },
+          description: 'Array of subtasks to create',
+        },
+      },
+      required: ['task_id', 'subtasks'],
+    },
+  },
+  {
+    name: 'task_cleanup',
+    description:
+      'Run data cleanup manually — purges completed/cancelled tasks and stale data older than the retention period.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
     name: 'task_generate_rules',
     description:
       'Generate IDE-specific rule files that instruct agents to use the pipeline. Supports Cursor (.mdc) and Claude Code (CLAUDE.md) formats.',
@@ -586,8 +635,13 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
       }
 
       case 'task_add_dependency': {
-        ctx.tasks.addDependency(requireNumber(args, 'task_id'), requireNumber(args, 'depends_on'));
-        return { success: true, task_id: args.task_id, depends_on: args.depends_on };
+        const relationship = (optString(args, 'relationship') ?? 'blocks') as TaskRelationshipType;
+        ctx.tasks.addDependency(
+          requireNumber(args, 'task_id'),
+          requireNumber(args, 'depends_on'),
+          relationship,
+        );
+        return { success: true, task_id: args.task_id, depends_on: args.depends_on, relationship };
       }
 
       case 'task_remove_dependency': {
@@ -707,6 +761,43 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
           throw new ValidationError(`Invalid action: ${action}. Use "approve" or "reject".`);
         }
       }
+
+      case 'task_expand': {
+        const parentId = requireNumber(args, 'task_id');
+        const parent = ctx.tasks.getById(parentId);
+        if (!parent) throw new ValidationError(`Task ${parentId} not found.`);
+        const subtaskDefs = args.subtasks;
+        if (!Array.isArray(subtaskDefs) || subtaskDefs.length === 0) {
+          throw new ValidationError('"subtasks" must be a non-empty array.');
+        }
+        const created = [];
+        for (const sub of subtaskDefs) {
+          if (
+            typeof sub !== 'object' ||
+            sub === null ||
+            typeof (sub as Record<string, unknown>).title !== 'string'
+          ) {
+            throw new ValidationError('Each subtask must have a "title" string.');
+          }
+          const s = sub as Record<string, unknown>;
+          created.push(
+            ctx.tasks.create(
+              {
+                title: s.title as string,
+                description: (s.description as string) ?? undefined,
+                priority: typeof s.priority === 'number' ? s.priority : parent.priority,
+                project: parent.project ?? undefined,
+                parent_id: parentId,
+              },
+              sessionName(),
+            ),
+          );
+        }
+        return created;
+      }
+
+      case 'task_cleanup':
+        return ctx.cleanup.run();
 
       case 'task_generate_rules': {
         const format = requireString(args, 'format') as 'mdc' | 'claude_md';

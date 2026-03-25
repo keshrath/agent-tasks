@@ -88,6 +88,29 @@ describe('task CRUD', () => {
     const artifacts = ctx.db.queryAll('SELECT * FROM task_artifacts WHERE task_id = ?', [task.id]);
     expect(artifacts).toHaveLength(0);
   });
+
+  it('counts tasks efficiently', () => {
+    expect(ctx.tasks.count()).toBe(0);
+    ctx.tasks.create({ title: 'A' }, 'agent-1');
+    ctx.tasks.create({ title: 'B' }, 'agent-1');
+    expect(ctx.tasks.count()).toBe(2);
+    ctx.tasks.create({ title: 'C' }, 'agent-1');
+    expect(ctx.tasks.count()).toBe(3);
+  });
+
+  it('counts tasks with filters', () => {
+    ctx.tasks.create({ title: 'A', project: 'proj1' }, 'agent-1');
+    ctx.tasks.create({ title: 'B', project: 'proj2' }, 'agent-1');
+    const t3 = ctx.tasks.create({ title: 'C', project: 'proj1' }, 'agent-1');
+    ctx.tasks.claim(t3.id, 'agent-1');
+
+    expect(ctx.tasks.count()).toBe(3);
+    expect(ctx.tasks.count({ project: 'proj1' })).toBe(2);
+    expect(ctx.tasks.count({ status: 'pending' })).toBe(2);
+    expect(ctx.tasks.count({ status: 'in_progress' })).toBe(1);
+    expect(ctx.tasks.count({ project: 'proj1', status: 'in_progress' })).toBe(1);
+    expect(ctx.tasks.count({ stage: 'backlog' })).toBe(2);
+  });
 });
 
 describe('claiming', () => {
@@ -196,6 +219,33 @@ describe('completion / failure / cancellation', () => {
     ctx.tasks.complete(task.id, 'done');
     expect(() => ctx.tasks.cancel(task.id, 'nope')).toThrow('already completed');
   });
+
+  it('rejects failing a pending task', () => {
+    const task = ctx.tasks.create({ title: 'Pending' }, 'agent-1');
+    expect(() => ctx.tasks.fail(task.id, 'oops')).toThrow('not in progress');
+  });
+
+  it('rejects failing a nonexistent task', () => {
+    expect(() => ctx.tasks.fail(999, 'oops')).toThrow('not found');
+  });
+
+  it('rejects completing a pending task', () => {
+    const task = ctx.tasks.create({ title: 'Pending' }, 'agent-1');
+    expect(() => ctx.tasks.complete(task.id, 'done')).toThrow('not in progress');
+  });
+});
+
+describe('count', () => {
+  it('returns 0 when empty', () => {
+    expect(ctx.tasks.count()).toBe(0);
+  });
+
+  it('counts all tasks', () => {
+    ctx.tasks.create({ title: 'A' }, 'agent-1');
+    ctx.tasks.create({ title: 'B' }, 'agent-1');
+    ctx.tasks.create({ title: 'C' }, 'agent-1');
+    expect(ctx.tasks.count()).toBe(3);
+  });
 });
 
 describe('dependencies', () => {
@@ -251,6 +301,53 @@ describe('dependencies', () => {
     ctx.tasks.delete(b.id);
     expect(ctx.tasks.getDependencies(a.id).blockers).toHaveLength(0);
   });
+
+  it('related relationship does not block advancement', () => {
+    const related = ctx.tasks.create({ title: 'Related' }, 'agent-1');
+    const task = ctx.tasks.create({ title: 'Main' }, 'agent-1');
+    ctx.tasks.addDependency(task.id, related.id, 'related');
+
+    ctx.tasks.claim(task.id, 'agent-1');
+    const advanced = ctx.tasks.advance(task.id);
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('duplicate relationship does not block advancement', () => {
+    const dup = ctx.tasks.create({ title: 'Duplicate' }, 'agent-1');
+    const task = ctx.tasks.create({ title: 'Original' }, 'agent-1');
+    ctx.tasks.addDependency(task.id, dup.id, 'duplicate');
+
+    ctx.tasks.claim(task.id, 'agent-1');
+    const advanced = ctx.tasks.advance(task.id);
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('defaults to blocks relationship for backward compatibility', () => {
+    const dep = ctx.tasks.create({ title: 'Dependency' }, 'agent-1');
+    const task = ctx.tasks.create({ title: 'Blocked' }, 'agent-1');
+    ctx.tasks.addDependency(task.id, dep.id);
+
+    ctx.tasks.claim(task.id, 'agent-1');
+    expect(() => ctx.tasks.advance(task.id)).toThrow('Blocked by incomplete dependencies');
+
+    const deps = ctx.tasks.getAllDependencies();
+    const found = deps.find((d) => d.task_id === task.id && d.depends_on === dep.id);
+    expect(found?.relationship).toBe('blocks');
+  });
+
+  it('allows circular related dependencies (no cycle check for non-blocks)', () => {
+    const a = ctx.tasks.create({ title: 'A' }, 'agent-1');
+    const b = ctx.tasks.create({ title: 'B' }, 'agent-1');
+    ctx.tasks.addDependency(a.id, b.id, 'related');
+    expect(() => ctx.tasks.addDependency(b.id, a.id, 'related')).not.toThrow();
+  });
+
+  it('allows circular duplicate dependencies (no cycle check for non-blocks)', () => {
+    const a = ctx.tasks.create({ title: 'A' }, 'agent-1');
+    const b = ctx.tasks.create({ title: 'B' }, 'agent-1');
+    ctx.tasks.addDependency(a.id, b.id, 'duplicate');
+    expect(() => ctx.tasks.addDependency(b.id, a.id, 'duplicate')).not.toThrow();
+  });
 });
 
 describe('next task', () => {
@@ -304,6 +401,52 @@ describe('artifacts', () => {
     const task = ctx.tasks.create({ title: 'Artifact test' }, 'agent-1');
     const artifact = ctx.tasks.addArtifact(task.id, 'notes', 'content', 'agent-1', 'plan');
     expect(artifact.stage).toBe('plan');
+  });
+
+  it('increments version and chains previous_id on same name+stage', () => {
+    const task = ctx.tasks.create({ title: 'Versioned' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+
+    const v1 = ctx.tasks.addArtifact(task.id, 'spec', 'Version 1', 'agent-1');
+    expect(v1.version).toBe(1);
+    expect(v1.previous_id).toBeNull();
+
+    const v2 = ctx.tasks.addArtifact(task.id, 'spec', 'Version 2', 'agent-1');
+    expect(v2.version).toBe(2);
+    expect(v2.previous_id).toBe(v1.id);
+
+    const v3 = ctx.tasks.addArtifact(task.id, 'spec', 'Version 3', 'agent-1');
+    expect(v3.version).toBe(3);
+    expect(v3.previous_id).toBe(v2.id);
+
+    const all = ctx.tasks.getArtifacts(task.id, 'spec');
+    expect(all).toHaveLength(3);
+  });
+
+  it('versions independently per name+stage', () => {
+    const task = ctx.tasks.create({ title: 'Multi artifact' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+
+    const spec1 = ctx.tasks.addArtifact(task.id, 'spec', 'Spec v1', 'agent-1');
+    const notes1 = ctx.tasks.addArtifact(task.id, 'notes', 'Notes v1', 'agent-1');
+    const spec2 = ctx.tasks.addArtifact(task.id, 'spec', 'Spec v2', 'agent-1');
+
+    expect(spec1.version).toBe(1);
+    expect(notes1.version).toBe(1);
+    expect(spec2.version).toBe(2);
+    expect(spec2.previous_id).toBe(spec1.id);
+  });
+
+  it('counts artifacts per task', () => {
+    const t1 = ctx.tasks.create({ title: 'T1' }, 'agent-1');
+    const t2 = ctx.tasks.create({ title: 'T2' }, 'agent-1');
+    ctx.tasks.addArtifact(t1.id, 'a', 'content', 'agent-1');
+    ctx.tasks.addArtifact(t1.id, 'b', 'content', 'agent-1');
+    ctx.tasks.addArtifact(t2.id, 'c', 'content', 'agent-1');
+
+    const counts = ctx.tasks.getArtifactCounts();
+    expect(counts[t1.id]).toBe(2);
+    expect(counts[t2.id]).toBe(1);
   });
 });
 

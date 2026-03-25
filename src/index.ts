@@ -8,14 +8,22 @@
 // =============================================================================
 
 import { createInterface } from 'readline';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { createContext } from './context.js';
 import { tools, createToolHandler } from './transport/mcp.js';
 import { startDashboard, type DashboardServer } from './server.js';
 import type { JsonRpcRequest, JsonRpcResponse } from './types.js';
 
+const __dirname_index = dirname(fileURLToPath(import.meta.url));
+const pkgVersion: string = JSON.parse(
+  readFileSync(join(__dirname_index, '..', 'package.json'), 'utf8'),
+).version;
+
 const DASHBOARD_PORT = parseInt(process.env.AGENT_TASKS_PORT ?? '3422', 10);
 
-const SERVER_INFO = { name: 'agent-tasks', version: '1.0.0' };
+const SERVER_INFO = { name: 'agent-tasks', version: pkgVersion };
 const CAPABILITIES = { tools: {} };
 
 const INSTRUCTIONS =

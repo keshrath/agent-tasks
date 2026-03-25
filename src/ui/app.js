@@ -5,6 +5,15 @@
 // filters, comments, subtask progress, and keyboard navigation.
 // =============================================================================
 
+// ---- DOM morphing (morphdom) ----
+// Diff-patches the DOM instead of replacing innerHTML, preserving focus,
+// scroll position, and CSS transitions. Only changed nodes are touched.
+function morph(el, newInnerHTML) {
+  const wrap = document.createElement(el.tagName);
+  wrap.innerHTML = newInnerHTML;
+  morphdom(el, wrap, { childrenOnly: true });
+}
+
 // ---- State ----
 
 const state = {
@@ -27,6 +36,22 @@ let ws = null;
 let reconnectTimer = null;
 let searchDebounce = null;
 let draggedTaskId = null;
+let lastOpenedCardEl = null;
+
+// Restore filters from localStorage
+try {
+  const saved = JSON.parse(localStorage.getItem('agent-tasks-filters') || '{}');
+  if (saved.search) filters.search = saved.search;
+  if (saved.project) filters.project = saved.project;
+  if (saved.assignee) filters.assignee = saved.assignee;
+  if (saved.minPriority) filters.minPriority = saved.minPriority;
+} catch {
+  /* ignore */
+}
+
+function saveFilters() {
+  localStorage.setItem('agent-tasks-filters', JSON.stringify(filters));
+}
 
 // ---- Theme ----
 
@@ -96,7 +121,15 @@ function setConnectionStatus(status) {
 
 // ---- State handlers ----
 
+// Fingerprint cache: skip re-renders when data hasn't changed
+let _lastStateFingerprint = '';
+
 function handleFullState(data) {
+  // Build a fingerprint from the incoming data to detect actual changes
+  const fp = quickFingerprint(data);
+  if (fp === _lastStateFingerprint) return; // nothing changed — skip render
+  _lastStateFingerprint = fp;
+
   state.tasks = data.tasks || [];
   state.dependencies = data.dependencies || [];
   state.artifactCounts = data.artifactCounts || {};
@@ -107,7 +140,53 @@ function handleFullState(data) {
     document.getElementById('version').textContent = 'v' + data.version;
   }
   updateFilterDropdowns();
+  applyRestoredFilters();
   render();
+  dismissLoading();
+}
+
+/** Fast fingerprint: hash task count, IDs, stages, updated_at timestamps.
+ *  Avoids JSON.stringify of the full payload (which can be large). */
+function quickFingerprint(data) {
+  const tasks = data.tasks || [];
+  // Combine: task count + each task's id:stage:status:updated_at:priority + dependency count
+  let fp = tasks.length + ':';
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    fp +=
+      t.id + '.' + t.stage + '.' + t.status + '.' + (t.updated_at || '') + '.' + t.priority + ',';
+  }
+  fp += '|' + (data.dependencies || []).length;
+  fp += '|' + JSON.stringify(data.artifactCounts || {});
+  fp += '|' + JSON.stringify(data.commentCounts || {});
+  fp += '|' + JSON.stringify(data.subtaskProgress || {});
+  return fp;
+}
+
+function dismissLoading() {
+  const overlay = document.getElementById('loading-overlay');
+  if (overlay && !overlay.classList.contains('hidden')) {
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.addEventListener(
+      'transitionend',
+      () => {
+        overlay.style.display = 'none';
+      },
+      { once: true },
+    );
+  }
+}
+
+function applyRestoredFilters() {
+  const searchInput = document.getElementById('filter-search');
+  if (filters.search && searchInput) searchInput.value = filters.search;
+  const projectSelect = document.getElementById('filter-project');
+  if (filters.project && projectSelect) projectSelect.value = filters.project;
+  const assigneeSelect = document.getElementById('filter-assignee');
+  if (filters.assignee && assigneeSelect) assigneeSelect.value = filters.assignee;
+  const prioritySelect = document.getElementById('filter-priority');
+  if (filters.minPriority && prioritySelect) prioritySelect.value = String(filters.minPriority);
 }
 
 function handleEvent(event) {
@@ -215,22 +294,26 @@ document.getElementById('filter-search').addEventListener('input', (e) => {
   clearTimeout(searchDebounce);
   searchDebounce = setTimeout(() => {
     filters.search = e.target.value;
+    saveFilters();
     render();
   }, 200);
 });
 
 document.getElementById('filter-project').addEventListener('change', (e) => {
   filters.project = e.target.value;
+  saveFilters();
   render();
 });
 
 document.getElementById('filter-assignee').addEventListener('change', (e) => {
   filters.assignee = e.target.value;
+  saveFilters();
   render();
 });
 
 document.getElementById('filter-priority').addEventListener('change', (e) => {
   filters.minPriority = parseInt(e.target.value) || 0;
+  saveFilters();
   render();
 });
 
@@ -262,11 +345,13 @@ function renderStats() {
   const pending = state.tasks.filter((t) => t.status === 'pending').length;
   const done = state.tasks.filter((t) => t.status === 'completed').length;
 
-  document.getElementById('stats').innerHTML =
+  morph(
+    document.getElementById('stats'),
     `<span class="stat">Total <span class="stat-value">${total}</span></span>` +
-    `<span class="stat">Active <span class="stat-value">${active}</span></span>` +
-    `<span class="stat">Pending <span class="stat-value">${pending}</span></span>` +
-    `<span class="stat">Done <span class="stat-value">${done}</span></span>`;
+      `<span class="stat">Active <span class="stat-value">${active}</span></span>` +
+      `<span class="stat">Pending <span class="stat-value">${pending}</span></span>` +
+      `<span class="stat">Done <span class="stat-value">${done}</span></span>`,
+  );
 }
 
 function renderBoard() {
@@ -276,12 +361,14 @@ function renderBoard() {
   const visibleStages = state.stages.filter((s) => s !== 'cancelled');
 
   if (state.tasks.length === 0) {
-    board.innerHTML = `
-      <div class="board-empty">
+    morph(
+      board,
+      `<div class="board-empty">
         <span class="material-symbols-outlined">assignment</span>
         <h3>No tasks yet</h3>
         <p>Create tasks via MCP tools (task_create) or the REST API (POST /api/tasks)</p>
-      </div>`;
+      </div>`,
+    );
     return;
   }
 
@@ -301,22 +388,24 @@ function renderBoard() {
     columnsToShow.push('cancelled');
   }
 
-  board.innerHTML = columnsToShow
-    .map((stage) => {
-      const tasks = byStage[stage] || [];
-      return `
-      <div class="kanban-column" data-stage="${esc(stage)}"
-           ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
-        <div class="column-header">
+  morph(
+    board,
+    columnsToShow
+      .map((stage) => {
+        const tasks = byStage[stage] || [];
+        return `
+      <div class="kanban-column" data-stage="${esc(stage)}">
+        <div class="column-header" role="tablist">
           <h3>${esc(stage)}</h3>
-          <span class="column-count">${tasks.length}</span>
+          <span class="column-count" aria-label="${tasks.length} tasks">${tasks.length}</span>
         </div>
-        <div class="column-body">
+        <div class="column-body" role="tabpanel" aria-label="${esc(stage)} tasks">
           ${tasks.map((t) => renderCard(t, blocked.has(t.id))).join('')}
         </div>
       </div>`;
-    })
-    .join('');
+      })
+      .join(''),
+  );
 }
 
 function renderCard(task, isBlocked) {
@@ -363,10 +452,8 @@ function renderCard(task, isBlocked) {
   return `
     <div class="task-card${priorityClass}" tabindex="0" draggable="true"
          data-task-id="${task.id}"
-         onclick="openTask(${task.id})"
-         onkeydown="if(event.key==='Enter')openTask(${task.id})"
-         ondragstart="onDragStart(event, ${task.id})"
-         ondragend="onDragEnd(event)">
+         role="button"
+         aria-label="Task #${task.id}: ${esc(task.title)}">
       <div class="task-card-id">#${task.id}</div>
       <div class="task-card-title">${esc(task.title)}</div>
       ${tags.length ? `<div class="task-card-meta">${tags.join('')}</div>` : ''}
@@ -374,42 +461,95 @@ function renderCard(task, isBlocked) {
     </div>`;
 }
 
+// ---- Event Delegation (replaces inline handlers) ----
+
+document.getElementById('board').addEventListener('click', (e) => {
+  const card = e.target.closest('.task-card[data-task-id]');
+  if (card) {
+    openTask(parseInt(card.dataset.taskId, 10));
+  }
+});
+
+document.getElementById('board').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const card = e.target.closest('.task-card[data-task-id]');
+    if (card) openTask(parseInt(card.dataset.taskId, 10));
+  }
+});
+
+document.getElementById('board').addEventListener('dragstart', (e) => {
+  const card = e.target.closest('.task-card[data-task-id]');
+  if (card) onDragStart(e, parseInt(card.dataset.taskId, 10));
+});
+
+document.getElementById('board').addEventListener('dragend', (e) => {
+  onDragEnd(e);
+});
+
+document.getElementById('board').addEventListener('dragover', (e) => {
+  const col = e.target.closest('.kanban-column');
+  if (col) onDragOver(e, col);
+});
+
+document.getElementById('board').addEventListener('dragleave', (e) => {
+  const col = e.target.closest('.kanban-column');
+  if (col && !col.contains(e.relatedTarget)) col.classList.remove('drag-over');
+});
+
+document.getElementById('board').addEventListener('drop', (e) => {
+  const col = e.target.closest('.kanban-column');
+  if (col) onDrop(e, col);
+});
+
+// Delegation for modal subtask links and comment button
+document.getElementById('modal-body')?.addEventListener('click', (e) => {
+  const subtask = e.target.closest('[data-subtask-id]');
+  if (subtask) {
+    openTask(parseInt(subtask.dataset.subtaskId, 10));
+    return;
+  }
+  const sendBtn = e.target.closest('#comment-send-btn');
+  if (sendBtn) {
+    submitComment(parseInt(sendBtn.dataset.taskId, 10));
+  }
+});
+
 // ---- Drag and Drop ----
 
 function onDragStart(e, taskId) {
   draggedTaskId = taskId;
   e.dataTransfer.effectAllowed = 'move';
-  e.target.classList.add('dragging');
+  const card = e.target.closest('.task-card');
+  if (card) card.classList.add('dragging');
 }
 
 function onDragEnd(e) {
-  e.target.classList.remove('dragging');
+  const card = e.target.closest('.task-card');
+  if (card) card.classList.remove('dragging');
   draggedTaskId = null;
   document
     .querySelectorAll('.kanban-column.drag-over')
     .forEach((c) => c.classList.remove('drag-over'));
 }
 
-function onDragOver(e) {
+function onDragOver(e, col) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
-  const col = e.currentTarget;
-  if (!col.classList.contains('drag-over')) {
+  if (col && !col.classList.contains('drag-over')) {
     col.classList.add('drag-over');
   }
 }
 
 function onDragLeave(e) {
-  const col = e.currentTarget;
-  if (!col.contains(e.relatedTarget)) {
+  const col = e.target.closest('.kanban-column');
+  if (col && !col.contains(e.relatedTarget)) {
     col.classList.remove('drag-over');
   }
 }
 
-function onDrop(e) {
+function onDrop(e, col) {
   e.preventDefault();
-  const col = e.currentTarget;
-  col.classList.remove('drag-over');
+  if (col) col.classList.remove('drag-over');
 
   if (!draggedTaskId) return;
   const targetStage = col.dataset.stage;
@@ -424,10 +564,10 @@ function onDrop(e) {
     .then((r) => r.json())
     .then((result) => {
       if (result.error) {
-        showToast('Move failed', result.error);
+        showToast('Move failed', result.error, 'error');
       }
     })
-    .catch(() => showToast('Move failed', 'Network error'));
+    .catch(() => showToast('Move failed', 'Network error', 'error'));
 }
 
 // ---- Modal ----
@@ -436,6 +576,7 @@ function openTask(id) {
   const task = state.tasks.find((t) => t.id === id);
   if (!task) return;
 
+  lastOpenedCardEl = document.querySelector(`[data-task-id="${id}"]`);
   document.getElementById('modal-title').textContent = `#${task.id} — ${task.title}`;
 
   const deps = state.dependencies.filter((d) => d.task_id === task.id);
@@ -502,6 +643,8 @@ function openTask(id) {
   const modalBody = document.getElementById('modal-body');
   modalBody.innerHTML = html;
   document.getElementById('task-modal').hidden = false;
+  const closeBtn = document.getElementById('modal-close-btn');
+  if (closeBtn) closeBtn.focus();
 
   Promise.all([
     fetch(`/api/tasks/${task.id}/artifacts`)
@@ -520,7 +663,7 @@ function openTask(id) {
       extra +=
         '<div class="artifact-list"><h3 style="margin-bottom:8px;font-size:13px;">Subtasks</h3>';
       for (const s of subtasks) {
-        extra += `<div class="artifact-item" style="cursor:pointer" onclick="openTask(${s.id})">
+        extra += `<div class="artifact-item subtask-link" style="cursor:pointer" data-subtask-id="${s.id}">
           <h4>#${s.id} ${esc(s.title)} <span style="color:var(--text-dim);font-weight:400">(${esc(s.stage)})</span></h4>
         </div>`;
       }
@@ -554,8 +697,8 @@ function openTask(id) {
         </div>`;
       }
       extra += `<div class="comment-form">
-        <textarea id="comment-input" placeholder="Add a comment..." rows="1"></textarea>
-        <button onclick="submitComment(${task.id})">Send</button>
+        <textarea id="comment-input" placeholder="Add a comment..." rows="1" aria-label="Add a comment"></textarea>
+        <button id="comment-send-btn" data-task-id="${task.id}" aria-label="Send comment">Send</button>
       </div></div>`;
     }
 
@@ -577,13 +720,47 @@ function submitComment(taskId) {
     .then(() => {
       openTask(taskId);
     })
-    .catch(() => showToast('Error', 'Failed to post comment'));
+    .catch(() => showToast('Error', 'Failed to post comment', 'error'));
 }
 
 function closeModal() {
   document.getElementById('task-modal').hidden = true;
+  if (lastOpenedCardEl) {
+    lastOpenedCardEl.focus();
+    lastOpenedCardEl = null;
+  }
 }
 
+// ---- Focus Trap (modal) ----
+
+function getFocusableElements(container) {
+  return container.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+  );
+}
+
+document.getElementById('task-modal').addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const modal = document.querySelector('#task-modal .modal');
+  if (!modal) return;
+  const focusable = getFocusableElements(modal);
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey) {
+    if (document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else {
+    if (document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+});
+
+document.getElementById('modal-close-btn')?.addEventListener('click', closeModal);
 document.getElementById('task-modal').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeModal();
 });
@@ -592,28 +769,46 @@ document.getElementById('task-modal').addEventListener('click', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    closeModal();
-    return;
-  }
-  if (e.key === '/' && !e.ctrlKey && !e.metaKey) {
-    const active = document.activeElement;
-    if (active?.tagName !== 'INPUT' && active?.tagName !== 'TEXTAREA') {
-      e.preventDefault();
-      document.getElementById('filter-search').focus();
+    const modal = document.getElementById('task-modal');
+    if (!modal.hidden) {
+      closeModal();
+      return;
     }
+  }
+  const isInput =
+    document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
+  if (
+    (e.key === '/' && !e.ctrlKey && !e.metaKey && !isInput) ||
+    ((e.ctrlKey || e.metaKey) && e.key === 'k')
+  ) {
+    e.preventDefault();
+    document.getElementById('filter-search').focus();
   }
 });
 
 // ---- Toast ----
 
-function showToast(title, body) {
+function showToast(title, body, type) {
   const container = document.getElementById('toast-container');
   const el = document.createElement('div');
   el.className = 'toast';
-  el.innerHTML = `<div class="toast-title">${esc(title)}</div><div class="toast-body">${esc(body)}</div>`;
+
+  const isError =
+    type === 'error' ||
+    title.toLowerCase().includes('fail') ||
+    title.toLowerCase().includes('error');
+  const iconName = isError ? 'error' : 'check_circle';
+  const iconClass = isError ? 'toast-icon-error' : 'toast-icon-success';
+
+  el.innerHTML =
+    `<span class="material-symbols-outlined toast-icon ${iconClass}" aria-hidden="true">${iconName}</span>` +
+    `<div class="toast-content"><div class="toast-title">${esc(title)}</div><div class="toast-body">${esc(body)}</div></div>`;
   container.appendChild(el);
+
   setTimeout(() => {
-    el.remove();
+    el.classList.add('fade-out');
+    el.addEventListener('animationend', () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 400);
   }, 4000);
 }
 
@@ -642,6 +837,55 @@ function formatDate(iso) {
     return iso;
   }
 }
+
+// ---- Cleanup Dialog ----
+
+document.getElementById('cleanup-btn')?.addEventListener('click', () => {
+  document.getElementById('cleanup-modal').classList.remove('hidden');
+});
+
+document.getElementById('cleanup-close-btn')?.addEventListener('click', () => {
+  document.getElementById('cleanup-modal').classList.add('hidden');
+});
+
+document.getElementById('cleanup-modal')?.addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) {
+    document.getElementById('cleanup-modal').classList.add('hidden');
+  }
+});
+
+document.getElementById('cleanup-completed')?.addEventListener('click', () => {
+  document.getElementById('cleanup-modal').classList.add('hidden');
+  fetch('/api/cleanup', { method: 'POST' })
+    .then((r) => r.json())
+    .then((result) => {
+      showToast(
+        'Cleanup complete',
+        `Purged ${result.purgedTasks} tasks, ${result.purgedComments} comments, ${result.purgedApprovals} approvals`,
+        'success',
+      );
+    })
+    .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
+});
+
+document.getElementById('cleanup-all')?.addEventListener('click', () => {
+  if (!confirm('This will remove ALL completed and cancelled tasks. Continue?')) return;
+  document.getElementById('cleanup-modal').classList.add('hidden');
+  fetch('/api/cleanup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ force: true }),
+  })
+    .then((r) => r.json())
+    .then((result) => {
+      showToast(
+        'Full cleanup complete',
+        `Purged ${result.purgedTasks} tasks, ${result.purgedComments} comments, ${result.purgedApprovals} approvals`,
+        'success',
+      );
+    })
+    .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
+});
 
 // ---- Boot ----
 

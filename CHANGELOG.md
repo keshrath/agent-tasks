@@ -3,6 +3,31 @@
 All notable changes to agent-tasks are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.1] - 2026-03-25
+
+### Added
+
+- **Schema V3** — dependency relationship types (blocks/related/duplicate)
+- **`task_expand` tool** — break a task into subtasks inheriting project and priority
+- **`task_cleanup` tool** — manual data cleanup for completed/cancelled tasks
+- **`count()` method** — efficient task counting without loading all rows
+- **Cleanup tests** — `tests/cleanup.test.ts` for CleanupService and retention logic
+- **Rules tests** — `tests/rules.test.ts` for IDE rule generation
+
+### Changed
+
+- Rate limiter now periodically cleans up stale entries (prevents unbounded memory growth)
+- `MAX_BODY_SIZE` increased to 128KB for larger artifact payloads
+- MCP server version now reads from package.json at runtime (was hardcoded 1.0.0)
+- `/health` endpoint uses `count()` instead of loading full task list
+- `fail()` method wrapped in transaction for consistency with `complete()`/`cancel()`
+- Rate limit 429 response now uses shared `SECURITY_HEADERS`
+- Updated docs: CLAUDE.md (V3 schema, 271+ tests), README badges, CONTRIBUTING test counts
+
+### Fixed
+
+- Rate limiter memory leak — stale IP entries now cleaned up every 5 minutes
+
 ## [1.2.0] - 2026-03-25
 
 ### Added

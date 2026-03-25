@@ -65,3 +65,37 @@ Configurable per project via `task_pipeline_config`. Tasks advance through stage
 ## Live Updates
 
 The dashboard server polls the SQLite DB every 2 seconds to detect changes made by other processes (MCP stdio servers). This ensures the kanban board stays in sync even when tasks are created/modified via MCP tools in separate Claude Code sessions.
+
+## Domain Model
+
+- **Task**: id, title, description, status (pending/in_progress/completed/failed/cancelled), stage, priority, project, assigned_to, parent_id, tags, result, created_by, created_at, updated_at
+- **Status transitions**: pending -> in_progress (claim), in_progress -> completed/failed, any non-terminal -> cancelled
+- **Stage transitions**: Sequential through pipeline; regress allowed to any earlier stage; dependencies block advancement
+- **Artifact**: name + stage + task_id = identity; version auto-incremented, previous_id links history
+- **Comment**: threaded via parent_comment_id; agent_id tracks author
+- **Collaborator**: task_id + agent_id + role (collaborator/reviewer/watcher)
+- **Approval**: task_id + stage + status (pending/approved/rejected); blocks advancement when required
+- **Dependency**: task_id -> depends_on_id (DAG with cycle detection)
+
+## Error Handling
+
+Custom error hierarchy in `src/types.ts`:
+
+- `TasksError` (base, 400) -> `NotFoundError` (404), `ConflictError` (409), `ValidationError` (422)
+- Always use these instead of plain `Error` — the MCP transport formats them for tool responses
+
+## Testing
+
+- Framework: vitest with global test functions
+- Test files: `tests/*.test.ts` (10 files, 280+ tests)
+- In-memory SQLite via `createTestContext()` from `tests/helpers.ts`
+- Each test gets a fresh context in `beforeEach`, closed in `afterEach`
+- Pattern: Arrange-Act-Assert with descriptive `describe`/`it` blocks
+
+## Database
+
+- SQLite with WAL mode, better-sqlite3
+- Schema versioning via `_meta` table (current: V3)
+- Migrations in `src/storage/database.ts`: `migrateV1()`, `migrateV2()`, `migrateV3()`
+- All tables use FK constraints with `ON DELETE CASCADE`
+- FTS5 virtual table for full-text search with triggers for sync

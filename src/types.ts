@@ -43,7 +43,6 @@ export interface TaskUpdateInput {
   project?: string;
   tags?: string[];
   assigned_to?: string;
-  parent_id?: number;
 }
 
 export interface TaskListFilter {
@@ -121,9 +120,12 @@ export interface TaskApproval {
 // Dependencies
 // ---------------------------------------------------------------------------
 
+export type TaskRelationshipType = 'blocks' | 'related' | 'duplicate';
+
 export interface TaskDependency {
   readonly task_id: number;
   readonly depends_on: number;
+  readonly relationship: TaskRelationshipType;
 }
 
 // ---------------------------------------------------------------------------

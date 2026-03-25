@@ -1,6 +1,6 @@
 {
   "name": "agent-tasks",
-  "version": "1.2.0",
+  "version": "1.2.9",
   "description": "Pipeline-driven task management for AI coding agents — stages, dependencies, artifacts, and multi-agent claiming",
   "type": "module",
   "main": "dist/index.js",
@@ -71,8 +71,13 @@
     "LICENSE"
   ],
   "license": "MIT",
+  "author": "keshrath",
   "repository": {
     "type": "git",
     "url": "https://github.com/keshrath/agent-tasks.git"
+  },
+  "homepage": "https://github.com/keshrath/agent-tasks",
+  "bugs": {
+    "url": "https://github.com/keshrath/agent-tasks/-/issues"
   }
 }

@@ -13,6 +13,7 @@ import type {
   TaskCreateInput,
   TaskDependency,
   TaskListFilter,
+  TaskRelationshipType,
   TaskStatus,
   TaskUpdateInput,
   PipelineConfig,
@@ -259,6 +260,29 @@ export class TaskService {
     return this.db.queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [id]);
   }
 
+  count(filter?: { status?: TaskStatus; project?: string; stage?: string }): number {
+    let sql = 'SELECT COUNT(*) as cnt FROM tasks';
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (filter?.status) {
+      conditions.push('status = ?');
+      params.push(filter.status);
+    }
+    if (filter?.project) {
+      conditions.push('project = ?');
+      params.push(filter.project);
+    }
+    if (filter?.stage) {
+      conditions.push('stage = ?');
+      params.push(filter.stage);
+    }
+    if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
+
+    const row = this.db.queryOne<{ cnt: number }>(sql, params);
+    return row?.cnt ?? 0;
+  }
+
   // ---- Claiming ----
 
   claim(taskId: number, claimerName: string): Task {
@@ -313,18 +337,20 @@ export class TaskService {
   fail(taskId: number, result: string): Task {
     this.validateResult(result);
 
-    const res = this.db.run(
-      `UPDATE tasks SET status = 'failed', result = ?, updated_at = datetime('now') WHERE id = ? AND status = 'in_progress'`,
-      [result, taskId],
-    );
-    if (res.changes === 0) {
-      const task = this.getById(taskId);
-      if (!task) throw new NotFoundError('Task', taskId);
-      throw new ConflictError(`Task ${taskId} not in progress (status: ${task.status}).`);
-    }
-    const failed = this.getById(taskId)!;
-    this.events.emit('task:failed', { task: failed });
-    return failed;
+    return this.db.transaction(() => {
+      const task = this.requireTask(taskId);
+      if (task.status !== 'in_progress') {
+        throw new ConflictError(`Task ${taskId} not in progress (status: ${task.status}).`);
+      }
+
+      this.db.run(
+        `UPDATE tasks SET status = 'failed', result = ?, updated_at = datetime('now') WHERE id = ?`,
+        [result, taskId],
+      );
+      const failed = this.getById(taskId)!;
+      this.events.emit('task:failed', { task: failed });
+      return failed;
+    });
   }
 
   cancel(taskId: number, reason: string): Task {
@@ -472,7 +498,7 @@ export class TaskService {
     sql += ` AND NOT EXISTS (
       SELECT 1 FROM task_dependencies d
       JOIN tasks dep ON dep.id = d.depends_on
-      WHERE d.task_id = t.id AND dep.stage NOT IN ('done', 'cancelled')
+      WHERE d.task_id = t.id AND d.relationship = 'blocks' AND dep.status NOT IN ('completed', 'cancelled', 'failed')
     )`;
 
     sql += ' ORDER BY t.priority DESC, t.created_at ASC LIMIT 1';
@@ -482,27 +508,38 @@ export class TaskService {
 
   // ---- Dependencies ----
 
-  addDependency(taskId: number, dependsOn: number): void {
+  addDependency(
+    taskId: number,
+    dependsOn: number,
+    relationship: TaskRelationshipType = 'blocks',
+  ): void {
     if (taskId === dependsOn) {
       throw new ValidationError('A task cannot depend on itself.');
+    }
+
+    const validRelationships: TaskRelationshipType[] = ['blocks', 'related', 'duplicate'];
+    if (!validRelationships.includes(relationship)) {
+      throw new ValidationError(
+        `Invalid relationship type: ${relationship}. Valid: ${validRelationships.join(', ')}`,
+      );
     }
 
     this.requireTask(taskId);
     this.requireTask(dependsOn);
 
-    if (this.wouldCreateCycle(taskId, dependsOn)) {
+    if (relationship === 'blocks' && this.wouldCreateCycle(taskId, dependsOn)) {
       throw new ConflictError(`Adding dependency ${taskId} → ${dependsOn} would create a cycle.`);
     }
 
     try {
-      this.db.run('INSERT INTO task_dependencies (task_id, depends_on) VALUES (?, ?)', [
-        taskId,
-        dependsOn,
-      ]);
+      this.db.run(
+        'INSERT INTO task_dependencies (task_id, depends_on, relationship) VALUES (?, ?, ?)',
+        [taskId, dependsOn, relationship],
+      );
     } catch {
       throw new ConflictError(`Dependency ${taskId} → ${dependsOn} already exists.`);
     }
-    this.events.emit('dependency:added', { task_id: taskId, depends_on: dependsOn });
+    this.events.emit('dependency:added', { task_id: taskId, depends_on: dependsOn, relationship });
   }
 
   removeDependency(taskId: number, dependsOn: number): void {
@@ -517,6 +554,7 @@ export class TaskService {
   }
 
   getDependencies(taskId: number): { blockers: Task[]; blocking: Task[] } {
+    this.requireTask(taskId);
     return {
       blockers: this.db.queryAll<Task>(
         'SELECT t.* FROM tasks t JOIN task_dependencies d ON t.id = d.depends_on WHERE d.task_id = ?',
@@ -786,7 +824,7 @@ export class TaskService {
   private checkDependencies(taskId: number): void {
     const blockers = this.db.queryAll<Task>(
       `SELECT t.* FROM tasks t JOIN task_dependencies d ON t.id = d.depends_on
-       WHERE d.task_id = ? AND t.stage NOT IN ('done', 'cancelled')`,
+       WHERE d.task_id = ? AND d.relationship = 'blocks' AND t.status NOT IN ('completed', 'cancelled', 'failed')`,
       [taskId],
     );
     if (blockers.length > 0) {
@@ -806,7 +844,7 @@ export class TaskService {
       visited.add(current);
 
       const deps = this.db.queryAll<TaskDependency>(
-        'SELECT * FROM task_dependencies WHERE task_id = ?',
+        `SELECT * FROM task_dependencies WHERE task_id = ? AND relationship = 'blocks'`,
         [current],
       );
       for (const d of deps) stack.push(d.depends_on);
@@ -822,7 +860,8 @@ function syncStatusForStage(
   stages: string[],
 ): 'pending' | 'in_progress' | 'completed' | 'cancelled' {
   if (stage === 'cancelled') return 'cancelled';
-  if (stage === 'done') return 'completed';
+  const activeStages = stages.filter((s) => s !== 'cancelled');
+  if (stage === activeStages[activeStages.length - 1]) return 'completed';
   if (stage === stages[0]) return 'pending';
   return 'in_progress';
 }

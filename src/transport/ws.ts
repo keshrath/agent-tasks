@@ -2,7 +2,8 @@
 // agent-tasks — WebSocket transport
 //
 // Real-time event streaming to connected UI clients.
-// Full state sent on connect; individual events streamed after.
+// Full state sent on connect. Uses DB polling (2s) to detect changes
+// from other MCP processes, since each has its own in-memory EventBus.
 // =============================================================================
 
 import { WebSocketServer, WebSocket } from 'ws';
@@ -14,6 +15,9 @@ import type { AppContext } from '../context.js';
 import type { EventType } from '../types.js';
 
 const __dirname_ws = dirname(fileURLToPath(import.meta.url));
+const pkgVersion: string = JSON.parse(
+  readFileSync(join(__dirname_ws, '..', '..', 'package.json'), 'utf8'),
+).version;
 
 const MAX_WS_MESSAGE_SIZE = 4096;
 const MAX_WS_CONNECTIONS = 50;
@@ -28,7 +32,6 @@ export interface WebSocketHandle {
 
 interface ClientState {
   alive: boolean;
-  unsub: () => void;
   subscribedEvents: Set<EventType | '*'>;
 }
 
@@ -68,15 +71,6 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
     const state: ClientState = {
       alive: true,
       subscribedEvents: new Set(),
-      unsub: ctx.events.on('*', (event) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
-        if (state.subscribedEvents.size > 0) {
-          if (!state.subscribedEvents.has('*') && !state.subscribedEvents.has(event.type)) {
-            return;
-          }
-        }
-        ws.send(JSON.stringify(event));
-      }),
     };
     clients.set(ws, state);
 
@@ -143,19 +137,11 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
     });
 
     ws.on('error', () => {
-      const s = clients.get(ws);
-      if (s) {
-        s.unsub();
-        clients.delete(ws);
-      }
+      clients.delete(ws);
     });
 
     ws.on('close', () => {
-      const s = clients.get(ws);
-      if (s) {
-        s.unsub();
-        clients.delete(ws);
-      }
+      clients.delete(ws);
     });
   });
 
@@ -179,7 +165,13 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
     if (clients.size === 0) return;
     try {
       const row = ctx.db.queryOne<{ fp: string }>(
-        `SELECT group_concat(id || ':' || stage || ':' || status || ':' || COALESCE(assigned_to,'') || ':' || updated_at, '|') as fp FROM (SELECT * FROM tasks ORDER BY id)`,
+        `SELECT
+           (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at),'') || ':' || COALESCE(MAX(id),0) FROM tasks)
+           || '|' ||
+           (SELECT COALESCE(MAX(id),0) FROM task_comments)
+           || '|' ||
+           (SELECT COALESCE(MAX(id),0) FROM task_artifacts)
+         as fp`,
       );
       const fp = row?.fp ?? '';
       if (fp !== lastFingerprint) {
@@ -208,8 +200,7 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
     close() {
       clearInterval(pingInterval);
       clearInterval(dbPollInterval);
-      for (const [ws, state] of clients) {
-        state.unsub();
+      for (const [ws] of clients) {
         ws.close(1001, 'Server shutting down');
       }
       clients.clear();
@@ -219,12 +210,11 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
 }
 
 function sendFullState(ws: WebSocket, ctx: AppContext): void {
-  const pkg = JSON.parse(readFileSync(join(__dirname_ws, '..', '..', 'package.json'), 'utf8'));
   try {
     ws.send(
       JSON.stringify({
         type: 'state',
-        version: pkg.version,
+        version: pkgVersion,
         tasks: ctx.tasks.list(),
         dependencies: ctx.tasks.getAllDependencies(),
         artifactCounts: ctx.tasks.getArtifactCounts(),

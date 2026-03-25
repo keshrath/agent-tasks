@@ -1,8 +1,34 @@
 # agent-tasks
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
+[![Tests](https://img.shields.io/badge/tests-271%2B%20passing-brightgreen)]()
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-33-purple)]()
+[![REST Endpoints](https://img.shields.io/badge/REST-15%20endpoints-orange)]()
+
 Pipeline-driven task management for AI coding agents. An [MCP](https://modelcontextprotocol.io/) server with stage-gated pipelines, multi-agent collaboration, and a real-time kanban dashboard.
 
 Part of the **agent-\*** family: [`agent-comm`](https://github.com/keshrath/agent-comm) (messaging) + `agent-tasks` (pipeline).
+
+<p align="center">
+  <img src="docs/assets/dashboard-dark.png" alt="agent-tasks kanban dashboard" width="800">
+</p>
+
+## Why agent-tasks?
+
+|                                  | agent-tasks | alternative tools | other kanban tools |
+| -------------------------------- | :---------: | :----------------: | :---------: |
+| Configurable pipeline stages     |     Yes     |         No         |   Partial   |
+| Multi-agent collaboration        |     Yes     |         No         |     No      |
+| Approval workflows               |     Yes     |         No         |     No      |
+| Real-time kanban dashboard       |     Yes     |         No         |     Yes     |
+| Dependency DAG + cycle detection |     Yes     |        Yes         |     No      |
+| Subtask hierarchies              |     Yes     |        Yes         |     Yes     |
+| Threaded comments                |     Yes     |         No         |     No      |
+| Artifact versioning              |     Yes     |         No         |     No      |
+| Full-text search (FTS5)          |     Yes     |         No         |     No      |
+| Zero frameworks                  |     Yes     |         No         |     No      |
+| MCP + REST + WebSocket           |     Yes     |      MCP only      | MCP + HTTP  |
 
 ## Features
 
