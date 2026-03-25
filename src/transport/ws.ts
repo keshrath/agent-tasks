@@ -14,6 +14,9 @@ import type { AppContext } from '../context.js';
 import type { EventType } from '../types.js';
 
 const __dirname_ws = dirname(fileURLToPath(import.meta.url));
+const pkgVersion: string = JSON.parse(
+  readFileSync(join(__dirname_ws, '..', '..', 'package.json'), 'utf8'),
+).version;
 
 const MAX_WS_MESSAGE_SIZE = 4096;
 const MAX_WS_CONNECTIONS = 50;
@@ -179,7 +182,7 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
     if (clients.size === 0) return;
     try {
       const row = ctx.db.queryOne<{ fp: string }>(
-        `SELECT group_concat(id || ':' || stage || ':' || status || ':' || COALESCE(assigned_to,'') || ':' || updated_at, '|') as fp FROM (SELECT * FROM tasks ORDER BY id)`,
+        `SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at),'') || ':' || COALESCE(MAX(id),0) as fp FROM tasks`,
       );
       const fp = row?.fp ?? '';
       if (fp !== lastFingerprint) {
@@ -219,12 +222,11 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
 }
 
 function sendFullState(ws: WebSocket, ctx: AppContext): void {
-  const pkg = JSON.parse(readFileSync(join(__dirname_ws, '..', '..', 'package.json'), 'utf8'));
   try {
     ws.send(
       JSON.stringify({
         type: 'state',
-        version: pkg.version,
+        version: pkgVersion,
         tasks: ctx.tasks.list(),
         dependencies: ctx.tasks.getAllDependencies(),
         artifactCounts: ctx.tasks.getArtifactCounts(),
