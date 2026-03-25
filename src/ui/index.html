@@ -21,38 +21,45 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header>
+    <header role="banner">
       <div class="header-left">
         <span class="material-symbols-outlined brand-icon">view_kanban</span>
         <h1>agent-tasks</h1>
         <span class="version" id="version"></span>
-        <span id="connection-status" class="status-badge disconnected">Connecting</span>
+        <span
+          id="connection-status"
+          class="status-badge disconnected"
+          role="status"
+          aria-live="polite"
+          >Connecting</span
+        >
       </div>
       <div class="header-right">
-        <div class="stats" id="stats"></div>
-        <button id="theme-toggle" class="icon-btn" title="Toggle theme">
+        <div class="stats" id="stats" aria-live="polite" aria-atomic="true"></div>
+        <button id="theme-toggle" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
           <span class="material-symbols-outlined theme-icon">dark_mode</span>
         </button>
       </div>
     </header>
 
-    <div class="filter-bar" id="filter-bar">
+    <div class="filter-bar" id="filter-bar" role="search" aria-label="Task filters">
       <div class="filter-group">
-        <span class="material-symbols-outlined filter-icon">filter_list</span>
+        <span class="material-symbols-outlined filter-icon" aria-hidden="true">filter_list</span>
         <input
           type="text"
           id="filter-search"
           class="filter-input"
-          placeholder="Search tasks... (/)"
+          placeholder="Search tasks... (/ or Ctrl+K)"
           autocomplete="off"
+          aria-label="Search tasks"
         />
-        <select id="filter-project" class="filter-select">
+        <select id="filter-project" class="filter-select" aria-label="Filter by project">
           <option value="">All projects</option>
         </select>
-        <select id="filter-assignee" class="filter-select">
+        <select id="filter-assignee" class="filter-select" aria-label="Filter by assignee">
           <option value="">All assignees</option>
         </select>
-        <select id="filter-priority" class="filter-select">
+        <select id="filter-priority" class="filter-select" aria-label="Filter by minimum priority">
           <option value="">Any priority</option>
           <option value="1">P1+</option>
           <option value="3">P3+</option>
@@ -63,19 +70,33 @@
       <div class="filter-chips" id="filter-chips"></div>
     </div>
 
-    <main id="board" class="kanban-board"></main>
+    <main id="board" class="kanban-board" role="region" aria-label="Task board"></main>
 
-    <div id="task-modal" class="modal-overlay" hidden>
+    <div id="loading-overlay" class="loading-overlay" aria-label="Loading">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Connecting to agent-tasks...</div>
+    </div>
+
+    <div
+      id="task-modal"
+      class="modal-overlay"
+      hidden
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+    >
       <div class="modal">
         <div class="modal-header">
           <h2 id="modal-title"></h2>
-          <button class="icon-btn modal-close" onclick="closeModal()">&times;</button>
+          <button class="icon-btn modal-close" id="modal-close-btn" aria-label="Close dialog">
+            &times;
+          </button>
         </div>
         <div id="modal-body" class="modal-body"></div>
       </div>
     </div>
 
-    <div id="toast-container" class="toast-container"></div>
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
     <script src="app.js"></script>
   </body>

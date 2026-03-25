@@ -171,6 +171,10 @@ header {
 .icon-btn:hover {
   background: var(--bg-hover);
 }
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 
 /* --------------------------------------------------------------------------
    Filter Bar
@@ -268,6 +272,48 @@ header {
 }
 
 /* --------------------------------------------------------------------------
+   Loading Overlay
+   -------------------------------------------------------------------------- */
+
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 300;
+  transition: opacity 0.3s ease;
+}
+
+.loading-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-text {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --------------------------------------------------------------------------
    Kanban Board
    -------------------------------------------------------------------------- */
 
@@ -352,10 +398,26 @@ header {
   transition:
     border-color 0.15s,
     box-shadow 0.15s;
+  animation: fadeInUp 0.25s ease both;
 }
 .task-card:hover {
   border-color: var(--accent);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.task-card.no-anim {
+  animation: none;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .task-card-id {
@@ -628,6 +690,7 @@ header {
   display: flex;
   flex-direction: column-reverse;
   gap: 6px;
+  pointer-events: none;
 }
 
 .toast {
@@ -639,13 +702,39 @@ header {
   box-shadow: var(--shadow-2);
   animation: toast-in 0.2s ease-out;
   max-width: 320px;
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 }
+
+.toast-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.toast-icon.toast-icon-success {
+  color: var(--green);
+}
+.toast-icon.toast-icon-error {
+  color: var(--red);
+}
+
+.toast-content {
+  flex: 1;
+  min-width: 0;
+}
+
 .toast-title {
   font-weight: 600;
   margin-bottom: 2px;
 }
 .toast-body {
   color: var(--text-muted);
+}
+
+.toast.fade-out {
+  animation: toast-out 0.3s ease forwards;
 }
 
 @keyframes toast-in {
@@ -656,6 +745,17 @@ header {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(30px);
   }
 }
 
@@ -761,6 +861,27 @@ header {
 }
 .comment-form button:hover {
   opacity: 0.9;
+}
+
+/* --------------------------------------------------------------------------
+   Reduced Motion
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .task-card,
+  .toast {
+    animation: none;
+  }
+  .toast.fade-out {
+    animation: none;
+    opacity: 0;
+  }
+  .loading-spinner {
+    animation-duration: 2s;
+  }
+  .subtask-progress-fill {
+    transition: none;
+  }
 }
 
 /* --------------------------------------------------------------------------

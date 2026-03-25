@@ -27,6 +27,22 @@ let ws = null;
 let reconnectTimer = null;
 let searchDebounce = null;
 let draggedTaskId = null;
+let lastOpenedCardEl = null;
+
+// Restore filters from localStorage
+try {
+  const saved = JSON.parse(localStorage.getItem('agent-tasks-filters') || '{}');
+  if (saved.search) filters.search = saved.search;
+  if (saved.project) filters.project = saved.project;
+  if (saved.assignee) filters.assignee = saved.assignee;
+  if (saved.minPriority) filters.minPriority = saved.minPriority;
+} catch {
+  /* ignore */
+}
+
+function saveFilters() {
+  localStorage.setItem('agent-tasks-filters', JSON.stringify(filters));
+}
 
 // ---- Theme ----
 
@@ -107,7 +123,35 @@ function handleFullState(data) {
     document.getElementById('version').textContent = 'v' + data.version;
   }
   updateFilterDropdowns();
+  applyRestoredFilters();
   render();
+  dismissLoading();
+}
+
+function dismissLoading() {
+  const overlay = document.getElementById('loading-overlay');
+  if (overlay && !overlay.classList.contains('hidden')) {
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.addEventListener(
+      'transitionend',
+      () => {
+        overlay.style.display = 'none';
+      },
+      { once: true },
+    );
+  }
+}
+
+function applyRestoredFilters() {
+  const searchInput = document.getElementById('filter-search');
+  if (filters.search && searchInput) searchInput.value = filters.search;
+  const projectSelect = document.getElementById('filter-project');
+  if (filters.project && projectSelect) projectSelect.value = filters.project;
+  const assigneeSelect = document.getElementById('filter-assignee');
+  if (filters.assignee && assigneeSelect) assigneeSelect.value = filters.assignee;
+  const prioritySelect = document.getElementById('filter-priority');
+  if (filters.minPriority && prioritySelect) prioritySelect.value = String(filters.minPriority);
 }
 
 function handleEvent(event) {
@@ -215,22 +259,26 @@ document.getElementById('filter-search').addEventListener('input', (e) => {
   clearTimeout(searchDebounce);
   searchDebounce = setTimeout(() => {
     filters.search = e.target.value;
+    saveFilters();
     render();
   }, 200);
 });
 
 document.getElementById('filter-project').addEventListener('change', (e) => {
   filters.project = e.target.value;
+  saveFilters();
   render();
 });
 
 document.getElementById('filter-assignee').addEventListener('change', (e) => {
   filters.assignee = e.target.value;
+  saveFilters();
   render();
 });
 
 document.getElementById('filter-priority').addEventListener('change', (e) => {
   filters.minPriority = parseInt(e.target.value) || 0;
+  saveFilters();
   render();
 });
 
@@ -307,11 +355,11 @@ function renderBoard() {
       return `
       <div class="kanban-column" data-stage="${esc(stage)}"
            ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
-        <div class="column-header">
+        <div class="column-header" role="tablist">
           <h3>${esc(stage)}</h3>
-          <span class="column-count">${tasks.length}</span>
+          <span class="column-count" aria-label="${tasks.length} tasks">${tasks.length}</span>
         </div>
-        <div class="column-body">
+        <div class="column-body" role="tabpanel" aria-label="${esc(stage)} tasks">
           ${tasks.map((t) => renderCard(t, blocked.has(t.id))).join('')}
         </div>
       </div>`;
@@ -363,6 +411,8 @@ function renderCard(task, isBlocked) {
   return `
     <div class="task-card${priorityClass}" tabindex="0" draggable="true"
          data-task-id="${task.id}"
+         role="button"
+         aria-label="Task #${task.id}: ${esc(task.title)}"
          onclick="openTask(${task.id})"
          onkeydown="if(event.key==='Enter')openTask(${task.id})"
          ondragstart="onDragStart(event, ${task.id})"
@@ -424,10 +474,10 @@ function onDrop(e) {
     .then((r) => r.json())
     .then((result) => {
       if (result.error) {
-        showToast('Move failed', result.error);
+        showToast('Move failed', result.error, 'error');
       }
     })
-    .catch(() => showToast('Move failed', 'Network error'));
+    .catch(() => showToast('Move failed', 'Network error', 'error'));
 }
 
 // ---- Modal ----
@@ -436,6 +486,7 @@ function openTask(id) {
   const task = state.tasks.find((t) => t.id === id);
   if (!task) return;
 
+  lastOpenedCardEl = document.querySelector(`[data-task-id="${id}"]`);
   document.getElementById('modal-title').textContent = `#${task.id} — ${task.title}`;
 
   const deps = state.dependencies.filter((d) => d.task_id === task.id);
@@ -502,6 +553,8 @@ function openTask(id) {
   const modalBody = document.getElementById('modal-body');
   modalBody.innerHTML = html;
   document.getElementById('task-modal').hidden = false;
+  const closeBtn = document.getElementById('modal-close-btn');
+  if (closeBtn) closeBtn.focus();
 
   Promise.all([
     fetch(`/api/tasks/${task.id}/artifacts`)
@@ -554,8 +607,8 @@ function openTask(id) {
         </div>`;
       }
       extra += `<div class="comment-form">
-        <textarea id="comment-input" placeholder="Add a comment..." rows="1"></textarea>
-        <button onclick="submitComment(${task.id})">Send</button>
+        <textarea id="comment-input" placeholder="Add a comment..." rows="1" aria-label="Add a comment"></textarea>
+        <button onclick="submitComment(${task.id})" aria-label="Send comment">Send</button>
       </div></div>`;
     }
 
@@ -577,13 +630,47 @@ function submitComment(taskId) {
     .then(() => {
       openTask(taskId);
     })
-    .catch(() => showToast('Error', 'Failed to post comment'));
+    .catch(() => showToast('Error', 'Failed to post comment', 'error'));
 }
 
 function closeModal() {
   document.getElementById('task-modal').hidden = true;
+  if (lastOpenedCardEl) {
+    lastOpenedCardEl.focus();
+    lastOpenedCardEl = null;
+  }
 }
 
+// ---- Focus Trap (modal) ----
+
+function getFocusableElements(container) {
+  return container.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+  );
+}
+
+document.getElementById('task-modal').addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const modal = document.querySelector('#task-modal .modal');
+  if (!modal) return;
+  const focusable = getFocusableElements(modal);
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey) {
+    if (document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else {
+    if (document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+});
+
+document.getElementById('modal-close-btn')?.addEventListener('click', closeModal);
 document.getElementById('task-modal').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeModal();
 });
@@ -595,12 +682,14 @@ document.addEventListener('keydown', (e) => {
     closeModal();
     return;
   }
-  if (e.key === '/' && !e.ctrlKey && !e.metaKey) {
-    const active = document.activeElement;
-    if (active?.tagName !== 'INPUT' && active?.tagName !== 'TEXTAREA') {
-      e.preventDefault();
-      document.getElementById('filter-search').focus();
-    }
+  const isInput =
+    document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
+  if (
+    (e.key === '/' && !e.ctrlKey && !e.metaKey && !isInput) ||
+    ((e.ctrlKey || e.metaKey) && e.key === 'k')
+  ) {
+    e.preventDefault();
+    document.getElementById('filter-search').focus();
   }
 });
 
