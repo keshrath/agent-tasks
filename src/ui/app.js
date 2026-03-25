@@ -18,18 +18,25 @@ let reconnectTimer = null;
 
 // ---- Theme ----
 
+function updateThemeIcon(theme) {
+  const icon = document.querySelector('.theme-icon');
+  if (icon) icon.textContent = theme === 'dark' ? 'light_mode' : 'dark_mode';
+}
+
 const savedTheme = localStorage.getItem('agent-tasks-theme');
 if (savedTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+updateThemeIcon(savedTheme || 'light');
 
 document.getElementById('theme-toggle').addEventListener('click', () => {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
   if (isDark) {
     document.documentElement.removeAttribute('data-theme');
-    localStorage.setItem('agent-tasks-theme', 'light');
   } else {
     document.documentElement.setAttribute('data-theme', 'dark');
-    localStorage.setItem('agent-tasks-theme', 'dark');
   }
+  localStorage.setItem('agent-tasks-theme', next);
+  updateThemeIcon(next);
 });
 
 // ---- WebSocket ----

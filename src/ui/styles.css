@@ -172,13 +172,6 @@ header {
   background: var(--bg-hover);
 }
 
-[data-theme='dark'] .icon-light {
-  display: none;
-}
-:not([data-theme='dark']) .icon-dark {
-  display: none;
-}
-
 /* --------------------------------------------------------------------------
    Kanban Board
    -------------------------------------------------------------------------- */
@@ -200,6 +193,7 @@ header {
   background: var(--bg-surface);
   border-radius: var(--radius);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
   display: flex;
   flex-direction: column;
   max-height: 100%;
