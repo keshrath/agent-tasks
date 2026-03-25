@@ -1334,3 +1334,61 @@ describe('task_expand', () => {
     ).toThrow('Task 99999 not found');
   });
 });
+
+// =============================================================================
+// task_cleanup
+// =============================================================================
+
+describe('task_cleanup', () => {
+  it('returns cleanup results', () => {
+    const result = handle('task_cleanup', {}) as {
+      purgedTasks: number;
+      purgedComments: number;
+      purgedApprovals: number;
+    };
+    expect(typeof result.purgedTasks).toBe('number');
+    expect(typeof result.purgedComments).toBe('number');
+    expect(typeof result.purgedApprovals).toBe('number');
+  });
+
+  it('does not purge recent completed tasks', () => {
+    const task = handle('task_create', { title: 'Complete me' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    handle('task_complete', { task_id: task.id, result: 'Done' });
+
+    const result = handle('task_cleanup', {}) as { purgedTasks: number };
+    expect(result.purgedTasks).toBe(0);
+  });
+});
+
+// =============================================================================
+// task_generate_rules
+// =============================================================================
+
+describe('task_generate_rules', () => {
+  it('generates mdc format rules', () => {
+    const result = handle('task_generate_rules', { format: 'mdc' }) as { rules: string };
+    expect(result.rules).toContain('Pipeline Workflow');
+    expect(result.rules).toContain('task_next');
+    expect(result.rules).toContain('alwaysApply');
+  });
+
+  it('generates claude_md format rules', () => {
+    const result = handle('task_generate_rules', { format: 'claude_md' }) as { rules: string };
+    expect(result.rules).toContain('Pipeline Tasks');
+    expect(result.rules).toContain('task_claim');
+  });
+
+  it('includes project name when provided', () => {
+    const result = handle('task_generate_rules', { format: 'claude_md', project: 'my-proj' }) as {
+      rules: string;
+    };
+    expect(result.rules).toContain('my-proj');
+  });
+
+  it('rejects invalid format', () => {
+    expect(() => handle('task_generate_rules', { format: 'invalid' })).toThrow(
+      'Format must be "mdc" or "claude_md"',
+    );
+  });
+});

@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import type { AppContext } from '../context.js';
 import { TasksError, ValidationError } from '../types.js';
 
-const MAX_BODY_SIZE = 65536;
+const MAX_BODY_SIZE = 131_072;
 
 // ---------------------------------------------------------------------------
 // Rate limiting
@@ -20,7 +20,16 @@ const MAX_BODY_SIZE = 65536;
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 100;
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = 5 * 60_000;
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+const rateLimitCleanup = setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimitMap) {
+    if (now >= entry.resetAt) rateLimitMap.delete(ip);
+  }
+}, RATE_LIMIT_CLEANUP_INTERVAL_MS);
+rateLimitCleanup.unref();
 
 function checkRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
   const ip = req.socket.remoteAddress ?? 'unknown';
@@ -69,7 +78,7 @@ function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
       size += chunk.length;
       if (size > MAX_BODY_SIZE) {
         req.destroy();
-        reject(new ValidationError('Request body too large (max 64KB).'));
+        reject(new ValidationError('Request body too large (max 128KB).'));
         return;
       }
       chunks.push(chunk);
@@ -155,7 +164,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
       status: 'ok',
       version: pkg.version,
       uptime: process.uptime(),
-      tasks: ctx.tasks.list().length,
+      tasks: ctx.tasks.count(),
     });
   });
 

@@ -260,6 +260,11 @@ export class TaskService {
     return this.db.queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [id]);
   }
 
+  count(): number {
+    const row = this.db.queryOne<{ cnt: number }>('SELECT COUNT(*) as cnt FROM tasks');
+    return row?.cnt ?? 0;
+  }
+
   // ---- Claiming ----
 
   claim(taskId: number, claimerName: string): Task {

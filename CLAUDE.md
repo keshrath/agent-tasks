@@ -95,7 +95,7 @@ Custom error hierarchy in `src/types.ts`:
 ## Database
 
 - SQLite with WAL mode, better-sqlite3
-- Schema versioning via `_meta` table (current: V2)
-- Migrations in `src/storage/database.ts`: `migrateV1()`, `migrateV2()`
+- Schema versioning via `_meta` table (current: V3)
+- Migrations in `src/storage/database.ts`: `migrateV1()`, `migrateV2()`, `migrateV3()`
 - All tables use FK constraints with `ON DELETE CASCADE`
 - FTS5 virtual table for full-text search with triggers for sync
