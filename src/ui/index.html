@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>agent-tasks</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='2' y='3' width='8' height='26' rx='2' fill='%235d8da8'/><rect x='12' y='3' width='8' height='26' rx='2' fill='%235d8da8' opacity='.6'/><rect x='22' y='3' width='8' height='26' rx='2' fill='%235d8da8' opacity='.3'/></svg>"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <div class="header-left">
+        <span class="material-symbols-outlined brand-icon">view_kanban</span>
+        <h1>agent-tasks</h1>
+        <span class="version" id="version"></span>
+        <span id="connection-status" class="status-badge disconnected">Connecting</span>
+      </div>
+      <div class="header-right">
+        <div class="stats" id="stats"></div>
+        <button id="theme-toggle" class="icon-btn" title="Toggle theme">
+          <span class="material-symbols-outlined theme-icon">dark_mode</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="filter-bar" id="filter-bar">
+      <div class="filter-group">
+        <span class="material-symbols-outlined filter-icon">filter_list</span>
+        <input
+          type="text"
+          id="filter-search"
+          class="filter-input"
+          placeholder="Search tasks... (/)"
+          autocomplete="off"
+        />
+        <select id="filter-project" class="filter-select">
+          <option value="">All projects</option>
+        </select>
+        <select id="filter-assignee" class="filter-select">
+          <option value="">All assignees</option>
+        </select>
+        <select id="filter-priority" class="filter-select">
+          <option value="">Any priority</option>
+          <option value="1">P1+</option>
+          <option value="3">P3+</option>
+          <option value="5">P5+</option>
+          <option value="10">P10+</option>
+        </select>
+      </div>
+      <div class="filter-chips" id="filter-chips"></div>
+    </div>
+
+    <main id="board" class="kanban-board"></main>
+
+    <div id="task-modal" class="modal-overlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h2 id="modal-title"></h2>
+          <button class="icon-btn modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div id="modal-body" class="modal-body"></div>
+      </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

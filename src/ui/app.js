@@ -1,0 +1,648 @@
+// =============================================================================
+// agent-tasks — Pipeline dashboard client
+//
+// Kanban board with real-time WebSocket updates, drag-and-drop,
+// filters, comments, subtask progress, and keyboard navigation.
+// =============================================================================
+
+// ---- State ----
+
+const state = {
+  tasks: [],
+  dependencies: [],
+  artifactCounts: {},
+  commentCounts: {},
+  subtaskProgress: {},
+  stages: ['backlog', 'spec', 'plan', 'implement', 'test', 'review', 'done', 'cancelled'],
+};
+
+const filters = {
+  search: '',
+  project: '',
+  assignee: '',
+  minPriority: 0,
+};
+
+let ws = null;
+let reconnectTimer = null;
+let searchDebounce = null;
+let draggedTaskId = null;
+
+// ---- Theme ----
+
+function updateThemeIcon(theme) {
+  const icon = document.querySelector('.theme-icon');
+  if (icon) icon.textContent = theme === 'dark' ? 'light_mode' : 'dark_mode';
+}
+
+const savedTheme = localStorage.getItem('agent-tasks-theme');
+if (savedTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+updateThemeIcon(savedTheme || 'light');
+
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
+  if (isDark) {
+    document.documentElement.removeAttribute('data-theme');
+  } else {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  }
+  localStorage.setItem('agent-tasks-theme', next);
+  updateThemeIcon(next);
+});
+
+// ---- WebSocket ----
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}`);
+  setConnectionStatus('connecting');
+
+  ws.onopen = () => setConnectionStatus('connected');
+
+  ws.onmessage = (evt) => {
+    let data;
+    try {
+      data = JSON.parse(evt.data);
+    } catch {
+      return;
+    }
+
+    if (data.type === 'reload') {
+      location.reload();
+      return;
+    } else if (data.type === 'state') {
+      handleFullState(data);
+    } else if (data.type && data.data) {
+      handleEvent(data);
+    }
+  };
+
+  ws.onclose = () => {
+    setConnectionStatus('disconnected');
+    ws = null;
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => {};
+}
+
+function setConnectionStatus(status) {
+  const el = document.getElementById('connection-status');
+  el.textContent =
+    status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting' : 'Disconnected';
+  el.className = 'status-badge ' + status;
+}
+
+// ---- State handlers ----
+
+function handleFullState(data) {
+  state.tasks = data.tasks || [];
+  state.dependencies = data.dependencies || [];
+  state.artifactCounts = data.artifactCounts || {};
+  state.commentCounts = data.commentCounts || {};
+  state.subtaskProgress = data.subtaskProgress || {};
+  if (data.stages) state.stages = data.stages;
+  if (data.version) {
+    document.getElementById('version').textContent = 'v' + data.version;
+  }
+  updateFilterDropdowns();
+  render();
+}
+
+function handleEvent(event) {
+  const d = event.data || {};
+
+  switch (event.type) {
+    case 'task:created': {
+      if (d.task) state.tasks.unshift(d.task);
+      showToast('Task created', d.task?.title || '');
+      break;
+    }
+    case 'task:updated':
+    case 'task:claimed':
+    case 'task:advanced':
+    case 'task:regressed':
+    case 'task:completed':
+    case 'task:failed':
+    case 'task:cancelled': {
+      if (d.task) {
+        const idx = state.tasks.findIndex((t) => t.id === d.task.id);
+        if (idx >= 0) state.tasks[idx] = d.task;
+        else state.tasks.unshift(d.task);
+      }
+      break;
+    }
+    case 'task:deleted': {
+      if (d.task) {
+        state.tasks = state.tasks.filter((t) => t.id !== d.task.id);
+      }
+      break;
+    }
+    case 'artifact:created': {
+      if (d.artifact) {
+        const tid = d.artifact.task_id;
+        state.artifactCounts[tid] = (state.artifactCounts[tid] || 0) + 1;
+      }
+      break;
+    }
+    case 'comment:created': {
+      if (d.comment) {
+        const tid = d.comment.task_id;
+        state.commentCounts[tid] = (state.commentCounts[tid] || 0) + 1;
+      }
+      break;
+    }
+    case 'dependency:added': {
+      if (d.task_id !== undefined && d.depends_on !== undefined) {
+        state.dependencies.push({ task_id: d.task_id, depends_on: d.depends_on });
+      }
+      break;
+    }
+    case 'dependency:removed': {
+      state.dependencies = state.dependencies.filter(
+        (dep) => !(dep.task_id === d.task_id && dep.depends_on === d.depends_on),
+      );
+      break;
+    }
+    case 'pipeline:configured': {
+      if (d.stages) state.stages = d.stages;
+      break;
+    }
+  }
+
+  render();
+}
+
+// ---- Filters ----
+
+function getFilteredTasks() {
+  return state.tasks.filter((t) => {
+    if (filters.project && t.project !== filters.project) return false;
+    if (filters.assignee && t.assigned_to !== filters.assignee) return false;
+    if (filters.minPriority && t.priority < filters.minPriority) return false;
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      const inTitle = t.title.toLowerCase().includes(q);
+      const inDesc = (t.description || '').toLowerCase().includes(q);
+      const inId = `#${t.id}`.includes(q);
+      if (!inTitle && !inDesc && !inId) return false;
+    }
+    return true;
+  });
+}
+
+function updateFilterDropdowns() {
+  const projects = [...new Set(state.tasks.map((t) => t.project).filter(Boolean))].sort();
+  const assignees = [...new Set(state.tasks.map((t) => t.assigned_to).filter(Boolean))].sort();
+
+  const projectSelect = document.getElementById('filter-project');
+  const currentProject = projectSelect.value;
+  projectSelect.innerHTML =
+    '<option value="">All projects</option>' +
+    projects.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+  projectSelect.value = currentProject;
+
+  const assigneeSelect = document.getElementById('filter-assignee');
+  const currentAssignee = assigneeSelect.value;
+  assigneeSelect.innerHTML =
+    '<option value="">All assignees</option>' +
+    assignees.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+  assigneeSelect.value = currentAssignee;
+}
+
+document.getElementById('filter-search').addEventListener('input', (e) => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => {
+    filters.search = e.target.value;
+    render();
+  }, 200);
+});
+
+document.getElementById('filter-project').addEventListener('change', (e) => {
+  filters.project = e.target.value;
+  render();
+});
+
+document.getElementById('filter-assignee').addEventListener('change', (e) => {
+  filters.assignee = e.target.value;
+  render();
+});
+
+document.getElementById('filter-priority').addEventListener('change', (e) => {
+  filters.minPriority = parseInt(e.target.value) || 0;
+  render();
+});
+
+// ---- Blocked tasks ----
+
+function getBlockedTaskIds() {
+  const blocked = new Set();
+  const doneOrCancelled = new Set(
+    state.tasks.filter((t) => t.stage === 'done' || t.stage === 'cancelled').map((t) => t.id),
+  );
+  for (const dep of state.dependencies) {
+    if (!doneOrCancelled.has(dep.depends_on)) {
+      blocked.add(dep.task_id);
+    }
+  }
+  return blocked;
+}
+
+// ---- Rendering ----
+
+function render() {
+  renderBoard();
+  renderStats();
+}
+
+function renderStats() {
+  const total = state.tasks.length;
+  const active = state.tasks.filter((t) => t.status === 'in_progress').length;
+  const pending = state.tasks.filter((t) => t.status === 'pending').length;
+  const done = state.tasks.filter((t) => t.status === 'completed').length;
+
+  document.getElementById('stats').innerHTML =
+    `<span class="stat">Total <span class="stat-value">${total}</span></span>` +
+    `<span class="stat">Active <span class="stat-value">${active}</span></span>` +
+    `<span class="stat">Pending <span class="stat-value">${pending}</span></span>` +
+    `<span class="stat">Done <span class="stat-value">${done}</span></span>`;
+}
+
+function renderBoard() {
+  const board = document.getElementById('board');
+  const blocked = getBlockedTaskIds();
+  const filtered = getFilteredTasks();
+  const visibleStages = state.stages.filter((s) => s !== 'cancelled');
+
+  if (state.tasks.length === 0) {
+    board.innerHTML = `
+      <div class="board-empty">
+        <span class="material-symbols-outlined">assignment</span>
+        <h3>No tasks yet</h3>
+        <p>Create tasks via MCP tools (task_create) or the REST API (POST /api/tasks)</p>
+      </div>`;
+    return;
+  }
+
+  const byStage = {};
+  for (const s of state.stages) byStage[s] = [];
+  for (const t of filtered) {
+    if (byStage[t.stage]) byStage[t.stage].push(t);
+    else byStage[t.stage] = [t];
+  }
+
+  for (const s of Object.keys(byStage)) {
+    byStage[s].sort((a, b) => b.priority - a.priority);
+  }
+
+  const columnsToShow = [...visibleStages];
+  if (byStage['cancelled']?.length > 0 && !columnsToShow.includes('cancelled')) {
+    columnsToShow.push('cancelled');
+  }
+
+  board.innerHTML = columnsToShow
+    .map((stage) => {
+      const tasks = byStage[stage] || [];
+      return `
+      <div class="kanban-column" data-stage="${esc(stage)}"
+           ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+        <div class="column-header">
+          <h3>${esc(stage)}</h3>
+          <span class="column-count">${tasks.length}</span>
+        </div>
+        <div class="column-body">
+          ${tasks.map((t) => renderCard(t, blocked.has(t.id))).join('')}
+        </div>
+      </div>`;
+    })
+    .join('');
+}
+
+function renderCard(task, isBlocked) {
+  const tags = [];
+
+  if (task.project) {
+    tags.push(`<span class="task-tag tag-project">${esc(task.project)}</span>`);
+  }
+  if (task.assigned_to) {
+    tags.push(`<span class="task-tag tag-assignee">${esc(task.assigned_to)}</span>`);
+  }
+  if (task.priority > 0) {
+    tags.push(`<span class="task-tag tag-priority">P${task.priority}</span>`);
+  }
+  const artCount = state.artifactCounts[task.id];
+  if (artCount) {
+    tags.push(`<span class="task-tag tag-artifacts">${artCount} art.</span>`);
+  }
+  const cmtCount = state.commentCounts[task.id];
+  if (cmtCount) {
+    tags.push(`<span class="task-tag tag-comments">${cmtCount} cmt.</span>`);
+  }
+  if (isBlocked) {
+    tags.push(`<span class="task-tag tag-blocked">blocked</span>`);
+  }
+
+  const progress = state.subtaskProgress[task.id];
+  let progressBar = '';
+  if (progress && progress.total > 0) {
+    const pct = Math.round((progress.done / progress.total) * 100);
+    tags.push(`<span class="task-tag tag-subtasks">${progress.done}/${progress.total}</span>`);
+    progressBar = `<div class="subtask-progress"><div class="subtask-progress-fill" style="width:${pct}%"></div></div>`;
+  }
+
+  const priorityClass =
+    task.priority >= 5
+      ? ' priority-high'
+      : task.priority >= 3
+        ? ' priority-medium'
+        : task.priority >= 1
+          ? ' priority-low'
+          : '';
+
+  return `
+    <div class="task-card${priorityClass}" tabindex="0" draggable="true"
+         data-task-id="${task.id}"
+         onclick="openTask(${task.id})"
+         onkeydown="if(event.key==='Enter')openTask(${task.id})"
+         ondragstart="onDragStart(event, ${task.id})"
+         ondragend="onDragEnd(event)">
+      <div class="task-card-id">#${task.id}</div>
+      <div class="task-card-title">${esc(task.title)}</div>
+      ${tags.length ? `<div class="task-card-meta">${tags.join('')}</div>` : ''}
+      ${progressBar}
+    </div>`;
+}
+
+// ---- Drag and Drop ----
+
+function onDragStart(e, taskId) {
+  draggedTaskId = taskId;
+  e.dataTransfer.effectAllowed = 'move';
+  e.target.classList.add('dragging');
+}
+
+function onDragEnd(e) {
+  e.target.classList.remove('dragging');
+  draggedTaskId = null;
+  document
+    .querySelectorAll('.kanban-column.drag-over')
+    .forEach((c) => c.classList.remove('drag-over'));
+}
+
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const col = e.currentTarget;
+  if (!col.classList.contains('drag-over')) {
+    col.classList.add('drag-over');
+  }
+}
+
+function onDragLeave(e) {
+  const col = e.currentTarget;
+  if (!col.contains(e.relatedTarget)) {
+    col.classList.remove('drag-over');
+  }
+}
+
+function onDrop(e) {
+  e.preventDefault();
+  const col = e.currentTarget;
+  col.classList.remove('drag-over');
+
+  if (!draggedTaskId) return;
+  const targetStage = col.dataset.stage;
+  const task = state.tasks.find((t) => t.id === draggedTaskId);
+  if (!task || task.stage === targetStage) return;
+
+  fetch(`/api/tasks/${draggedTaskId}/stage`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stage: targetStage }),
+  })
+    .then((r) => r.json())
+    .then((result) => {
+      if (result.error) {
+        showToast('Move failed', result.error);
+      }
+    })
+    .catch(() => showToast('Move failed', 'Network error'));
+}
+
+// ---- Modal ----
+
+function openTask(id) {
+  const task = state.tasks.find((t) => t.id === id);
+  if (!task) return;
+
+  document.getElementById('modal-title').textContent = `#${task.id} — ${task.title}`;
+
+  const deps = state.dependencies.filter((d) => d.task_id === task.id);
+  const blocking = state.dependencies.filter((d) => d.depends_on === task.id);
+
+  let html = '<div class="detail-rows">';
+
+  const rows = [
+    ['Status', task.status],
+    ['Stage', task.stage],
+    ['Priority', task.priority],
+    ['Created by', task.created_by],
+    ['Assigned to', task.assigned_to || '\u2014'],
+    ['Project', task.project || '\u2014'],
+    ['Created', formatDate(task.created_at)],
+    ['Updated', formatDate(task.updated_at)],
+  ];
+
+  if (task.parent_id) {
+    const parent = state.tasks.find((t) => t.id === task.parent_id);
+    rows.push(['Parent', parent ? `#${parent.id} ${parent.title}` : `#${task.parent_id}`]);
+  }
+
+  if (task.tags) {
+    try {
+      const parsed = JSON.parse(task.tags);
+      if (Array.isArray(parsed) && parsed.length) {
+        rows.push(['Tags', parsed.join(', ')]);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (task.description) {
+    rows.push(['Description', task.description]);
+  }
+  if (task.result) {
+    rows.push(['Result', task.result]);
+  }
+
+  for (const [label, value] of rows) {
+    html += `<div class="detail-row"><span class="detail-label">${esc(label)}</span><span class="detail-value">${esc(String(value))}</span></div>`;
+  }
+
+  if (deps.length) {
+    const depNames = deps.map((d) => {
+      const t = state.tasks.find((x) => x.id === d.depends_on);
+      return t ? `#${t.id} ${t.title}` : `#${d.depends_on}`;
+    });
+    html += `<div class="detail-row"><span class="detail-label">Depends on</span><span class="detail-value">${depNames.map(esc).join('<br>')}</span></div>`;
+  }
+
+  if (blocking.length) {
+    const blockNames = blocking.map((d) => {
+      const t = state.tasks.find((x) => x.id === d.task_id);
+      return t ? `#${t.id} ${t.title}` : `#${d.task_id}`;
+    });
+    html += `<div class="detail-row"><span class="detail-label">Blocks</span><span class="detail-value">${blockNames.map(esc).join('<br>')}</span></div>`;
+  }
+
+  html += '</div>';
+
+  const modalBody = document.getElementById('modal-body');
+  modalBody.innerHTML = html;
+  document.getElementById('task-modal').hidden = false;
+
+  Promise.all([
+    fetch(`/api/tasks/${task.id}/artifacts`)
+      .then((r) => r.json())
+      .catch(() => []),
+    fetch(`/api/tasks/${task.id}/comments`)
+      .then((r) => r.json())
+      .catch(() => []),
+    fetch(`/api/tasks/${task.id}/subtasks`)
+      .then((r) => r.json())
+      .catch(() => []),
+  ]).then(([artifacts, comments, subtasks]) => {
+    let extra = '';
+
+    if (subtasks.length) {
+      extra +=
+        '<div class="artifact-list"><h3 style="margin-bottom:8px;font-size:13px;">Subtasks</h3>';
+      for (const s of subtasks) {
+        extra += `<div class="artifact-item" style="cursor:pointer" onclick="openTask(${s.id})">
+          <h4>#${s.id} ${esc(s.title)} <span style="color:var(--text-dim);font-weight:400">(${esc(s.stage)})</span></h4>
+        </div>`;
+      }
+      extra += '</div>';
+    }
+
+    if (artifacts.length) {
+      extra +=
+        '<div class="artifact-list"><h3 style="margin-bottom:8px;font-size:13px;">Artifacts</h3>';
+      for (const a of artifacts) {
+        const vLabel = a.version > 1 ? ` v${a.version}` : '';
+        extra += `<div class="artifact-item">
+          <h4>${esc(a.name)}${vLabel} <span style="color:var(--text-dim);font-weight:400">(${esc(a.stage)}, ${esc(a.created_by)})</span></h4>
+          <pre>${esc(a.content)}</pre>
+        </div>`;
+      }
+      extra += '</div>';
+    }
+
+    if (comments.length || true) {
+      extra += `<div class="comments-section">
+        <h3><span class="material-symbols-outlined" style="font-size:16px">chat</span> Comments (${comments.length})</h3>`;
+      for (const c of comments) {
+        const isReply = c.parent_comment_id ? ' reply' : '';
+        extra += `<div class="comment-item${isReply}">
+          <div class="comment-header">
+            <span class="comment-agent">${esc(c.agent_id)}</span>
+            <span class="comment-time">${formatDate(c.created_at)}</span>
+          </div>
+          <div class="comment-body">${esc(c.content)}</div>
+        </div>`;
+      }
+      extra += `<div class="comment-form">
+        <textarea id="comment-input" placeholder="Add a comment..." rows="1"></textarea>
+        <button onclick="submitComment(${task.id})">Send</button>
+      </div></div>`;
+    }
+
+    modalBody.innerHTML = html + extra;
+  });
+}
+
+function submitComment(taskId) {
+  const input = document.getElementById('comment-input');
+  const content = input?.value?.trim();
+  if (!content) return;
+
+  fetch(`/api/tasks/${taskId}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, agent_id: 'dashboard' }),
+  })
+    .then((r) => r.json())
+    .then(() => {
+      openTask(taskId);
+    })
+    .catch(() => showToast('Error', 'Failed to post comment'));
+}
+
+function closeModal() {
+  document.getElementById('task-modal').hidden = true;
+}
+
+document.getElementById('task-modal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+// ---- Keyboard Navigation ----
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeModal();
+    return;
+  }
+  if (e.key === '/' && !e.ctrlKey && !e.metaKey) {
+    const active = document.activeElement;
+    if (active?.tagName !== 'INPUT' && active?.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      document.getElementById('filter-search').focus();
+    }
+  }
+});
+
+// ---- Toast ----
+
+function showToast(title, body) {
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `<div class="toast-title">${esc(title)}</div><div class="toast-body">${esc(body)}</div>`;
+  container.appendChild(el);
+  setTimeout(() => {
+    el.remove();
+  }, 4000);
+}
+
+// ---- Helpers ----
+
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatDate(iso) {
+  if (!iso) return '\u2014';
+  try {
+    const d = new Date(iso + 'Z');
+    return d.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+// ---- Boot ----
+
+connect();
