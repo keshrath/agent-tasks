@@ -2,7 +2,8 @@
 // agent-tasks — WebSocket transport
 //
 // Real-time event streaming to connected UI clients.
-// Full state sent on connect; individual events streamed after.
+// Full state sent on connect. Uses DB polling (2s) to detect changes
+// from other MCP processes, since each has its own in-memory EventBus.
 // =============================================================================
 
 import { WebSocketServer, WebSocket } from 'ws';
@@ -31,7 +32,6 @@ export interface WebSocketHandle {
 
 interface ClientState {
   alive: boolean;
-  unsub: () => void;
   subscribedEvents: Set<EventType | '*'>;
 }
 
@@ -71,15 +71,6 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
     const state: ClientState = {
       alive: true,
       subscribedEvents: new Set(),
-      unsub: ctx.events.on('*', (event) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
-        if (state.subscribedEvents.size > 0) {
-          if (!state.subscribedEvents.has('*') && !state.subscribedEvents.has(event.type)) {
-            return;
-          }
-        }
-        ws.send(JSON.stringify(event));
-      }),
     };
     clients.set(ws, state);
 
@@ -146,19 +137,11 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
     });
 
     ws.on('error', () => {
-      const s = clients.get(ws);
-      if (s) {
-        s.unsub();
-        clients.delete(ws);
-      }
+      clients.delete(ws);
     });
 
     ws.on('close', () => {
-      const s = clients.get(ws);
-      if (s) {
-        s.unsub();
-        clients.delete(ws);
-      }
+      clients.delete(ws);
     });
   });
 
@@ -211,8 +194,7 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
     close() {
       clearInterval(pingInterval);
       clearInterval(dbPollInterval);
-      for (const [ws, state] of clients) {
-        state.unsub();
+      for (const [ws] of clients) {
         ws.close(1001, 'Server shutting down');
       }
       clients.clear();
