@@ -173,6 +173,101 @@ header {
 }
 
 /* --------------------------------------------------------------------------
+   Filter Bar
+   -------------------------------------------------------------------------- */
+
+.filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-icon {
+  font-size: 18px;
+  color: var(--text-dim);
+}
+
+.filter-input {
+  flex: 1;
+  max-width: 260px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  outline: none;
+}
+.filter-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+.filter-input::placeholder {
+  color: var(--text-dim);
+}
+
+.filter-select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+.filter-select:focus {
+  border-color: var(--accent);
+}
+
+.filter-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 0;
+}
+.filter-chips:empty {
+  display: none;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+}
+.filter-chip button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.7;
+}
+.filter-chip button:hover {
+  opacity: 1;
+}
+
+/* --------------------------------------------------------------------------
    Kanban Board
    -------------------------------------------------------------------------- */
 
@@ -310,6 +405,119 @@ header {
 .tag-blocked {
   background: rgba(220, 53, 69, 0.12);
   color: var(--red);
+}
+.tag-comments {
+  background: rgba(111, 66, 193, 0.08);
+  color: var(--purple);
+}
+.tag-subtasks {
+  background: rgba(40, 167, 69, 0.12);
+  color: var(--green);
+}
+
+/* ---- Priority border ---- */
+
+.task-card.priority-high {
+  border-left: 3px solid var(--red);
+}
+.task-card.priority-medium {
+  border-left: 3px solid var(--orange);
+}
+.task-card.priority-low {
+  border-left: 3px solid var(--blue);
+}
+
+/* ---- Subtask progress bar ---- */
+
+.subtask-progress {
+  margin-top: 4px;
+  height: 3px;
+  background: var(--border-light);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.subtask-progress-fill {
+  height: 100%;
+  background: var(--green);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* ---- Collaborator avatars ---- */
+
+.task-card-collabs {
+  display: flex;
+  gap: -4px;
+  margin-top: 4px;
+}
+.collab-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--bg-surface);
+  margin-left: -4px;
+}
+.collab-avatar:first-child {
+  margin-left: 0;
+}
+
+/* ---- Drag and Drop ---- */
+
+.task-card[draggable='true'] {
+  cursor: grab;
+}
+.task-card.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+.kanban-column.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.kanban-column.drag-over .column-body {
+  min-height: 60px;
+}
+
+/* ---- Focus (keyboard nav) ---- */
+
+.task-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- Empty board state ---- */
+
+.board-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 12px;
+  color: var(--text-dim);
+  padding: 60px 20px;
+}
+.board-empty .material-symbols-outlined {
+  font-size: 48px;
+  opacity: 0.5;
+}
+.board-empty h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.board-empty p {
+  font-size: 13px;
+  max-width: 360px;
+  text-align: center;
+  line-height: 1.5;
 }
 
 /* --------------------------------------------------------------------------
@@ -468,4 +676,130 @@ header {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-dim);
+}
+
+/* --------------------------------------------------------------------------
+   Comments Section (modal)
+   -------------------------------------------------------------------------- */
+
+.comments-section {
+  margin-top: 16px;
+  border-top: 1px solid var(--border-light);
+  padding-top: 12px;
+}
+.comments-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.comment-item {
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  border: 1px solid var(--border-light);
+}
+.comment-item.reply {
+  margin-left: 24px;
+}
+.comment-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.comment-agent {
+  font-weight: 600;
+  color: var(--accent);
+}
+.comment-time {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.comment-body {
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.comment-form {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.comment-form textarea {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  resize: vertical;
+  min-height: 32px;
+  max-height: 120px;
+  outline: none;
+}
+.comment-form textarea:focus {
+  border-color: var(--accent);
+}
+.comment-form button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  align-self: flex-end;
+}
+.comment-form button:hover {
+  opacity: 0.9;
+}
+
+/* --------------------------------------------------------------------------
+   Responsive
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 768px) {
+  .kanban-board {
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .kanban-column {
+    min-width: 0;
+    max-width: none;
+    max-height: none;
+  }
+  .filter-group {
+    flex-wrap: wrap;
+  }
+  .filter-input {
+    max-width: none;
+  }
+  .stats {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  header {
+    padding: 6px 12px;
+  }
+  .filter-bar {
+    padding: 6px 12px;
+  }
+  .kanban-board {
+    padding: 8px;
+  }
+  .modal {
+    width: 98%;
+  }
 }

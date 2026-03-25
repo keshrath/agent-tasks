@@ -36,6 +36,33 @@
       </div>
     </header>
 
+    <div class="filter-bar" id="filter-bar">
+      <div class="filter-group">
+        <span class="material-symbols-outlined filter-icon">filter_list</span>
+        <input
+          type="text"
+          id="filter-search"
+          class="filter-input"
+          placeholder="Search tasks... (/)"
+          autocomplete="off"
+        />
+        <select id="filter-project" class="filter-select">
+          <option value="">All projects</option>
+        </select>
+        <select id="filter-assignee" class="filter-select">
+          <option value="">All assignees</option>
+        </select>
+        <select id="filter-priority" class="filter-select">
+          <option value="">Any priority</option>
+          <option value="1">P1+</option>
+          <option value="3">P3+</option>
+          <option value="5">P5+</option>
+          <option value="10">P10+</option>
+        </select>
+      </div>
+      <div class="filter-chips" id="filter-chips"></div>
+    </div>
+
     <main id="board" class="kanban-board"></main>
 
     <div id="task-modal" class="modal-overlay" hidden>
