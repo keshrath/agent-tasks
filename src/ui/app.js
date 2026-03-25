@@ -112,7 +112,15 @@ function setConnectionStatus(status) {
 
 // ---- State handlers ----
 
+// Fingerprint cache: skip re-renders when data hasn't changed
+let _lastStateFingerprint = '';
+
 function handleFullState(data) {
+  // Build a fingerprint from the incoming data to detect actual changes
+  const fp = quickFingerprint(data);
+  if (fp === _lastStateFingerprint) return; // nothing changed — skip render
+  _lastStateFingerprint = fp;
+
   state.tasks = data.tasks || [];
   state.dependencies = data.dependencies || [];
   state.artifactCounts = data.artifactCounts || {};
@@ -126,6 +134,23 @@ function handleFullState(data) {
   applyRestoredFilters();
   render();
   dismissLoading();
+}
+
+/** Fast fingerprint: hash task count, IDs, stages, updated_at timestamps.
+ *  Avoids JSON.stringify of the full payload (which can be large). */
+function quickFingerprint(data) {
+  const tasks = data.tasks || [];
+  // Combine: task count + each task's id:stage:status:updated_at:priority + dependency count
+  let fp = tasks.length + ':';
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    fp += t.id + '.' + t.stage + '.' + t.status + '.' + (t.updated_at || '') + '.' + t.priority + ',';
+  }
+  fp += '|' + (data.dependencies || []).length;
+  fp += '|' + JSON.stringify(data.artifactCounts || {});
+  fp += '|' + JSON.stringify(data.commentCounts || {});
+  fp += '|' + JSON.stringify(data.subtaskProgress || {});
+  return fp;
 }
 
 function dismissLoading() {
