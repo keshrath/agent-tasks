@@ -13,6 +13,7 @@ import type {
   TaskCreateInput,
   TaskDependency,
   TaskListFilter,
+  TaskRelationshipType,
   TaskStatus,
   TaskUpdateInput,
   PipelineConfig,
@@ -472,7 +473,7 @@ export class TaskService {
     sql += ` AND NOT EXISTS (
       SELECT 1 FROM task_dependencies d
       JOIN tasks dep ON dep.id = d.depends_on
-      WHERE d.task_id = t.id AND dep.stage NOT IN ('done', 'cancelled')
+      WHERE d.task_id = t.id AND d.relationship = 'blocks' AND dep.stage NOT IN ('done', 'cancelled')
     )`;
 
     sql += ' ORDER BY t.priority DESC, t.created_at ASC LIMIT 1';
@@ -482,27 +483,38 @@ export class TaskService {
 
   // ---- Dependencies ----
 
-  addDependency(taskId: number, dependsOn: number): void {
+  addDependency(
+    taskId: number,
+    dependsOn: number,
+    relationship: TaskRelationshipType = 'blocks',
+  ): void {
     if (taskId === dependsOn) {
       throw new ValidationError('A task cannot depend on itself.');
+    }
+
+    const validRelationships: TaskRelationshipType[] = ['blocks', 'related', 'duplicate'];
+    if (!validRelationships.includes(relationship)) {
+      throw new ValidationError(
+        `Invalid relationship type: ${relationship}. Valid: ${validRelationships.join(', ')}`,
+      );
     }
 
     this.requireTask(taskId);
     this.requireTask(dependsOn);
 
-    if (this.wouldCreateCycle(taskId, dependsOn)) {
+    if (relationship === 'blocks' && this.wouldCreateCycle(taskId, dependsOn)) {
       throw new ConflictError(`Adding dependency ${taskId} → ${dependsOn} would create a cycle.`);
     }
 
     try {
-      this.db.run('INSERT INTO task_dependencies (task_id, depends_on) VALUES (?, ?)', [
-        taskId,
-        dependsOn,
-      ]);
+      this.db.run(
+        'INSERT INTO task_dependencies (task_id, depends_on, relationship) VALUES (?, ?, ?)',
+        [taskId, dependsOn, relationship],
+      );
     } catch {
       throw new ConflictError(`Dependency ${taskId} → ${dependsOn} already exists.`);
     }
-    this.events.emit('dependency:added', { task_id: taskId, depends_on: dependsOn });
+    this.events.emit('dependency:added', { task_id: taskId, depends_on: dependsOn, relationship });
   }
 
   removeDependency(taskId: number, dependsOn: number): void {
@@ -786,7 +798,7 @@ export class TaskService {
   private checkDependencies(taskId: number): void {
     const blockers = this.db.queryAll<Task>(
       `SELECT t.* FROM tasks t JOIN task_dependencies d ON t.id = d.depends_on
-       WHERE d.task_id = ? AND t.stage NOT IN ('done', 'cancelled')`,
+       WHERE d.task_id = ? AND d.relationship = 'blocks' AND t.stage NOT IN ('done', 'cancelled')`,
       [taskId],
     );
     if (blockers.length > 0) {

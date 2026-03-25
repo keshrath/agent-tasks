@@ -121,9 +121,12 @@ export interface TaskApproval {
 // Dependencies
 // ---------------------------------------------------------------------------
 
+export type TaskRelationshipType = 'blocks' | 'related' | 'duplicate';
+
 export interface TaskDependency {
   readonly task_id: number;
   readonly depends_on: number;
+  readonly relationship: TaskRelationshipType;
 }
 
 // ---------------------------------------------------------------------------

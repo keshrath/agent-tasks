@@ -1273,3 +1273,64 @@ describe('session-aware behavior', () => {
     expect(comment.agent_id).toBe('second-agent');
   });
 });
+
+// =============================================================================
+// task_expand
+// =============================================================================
+
+describe('task_expand', () => {
+  it('expands a task into 3 subtasks', () => {
+    const parent = handle('task_create', { title: 'Parent', priority: 5 }) as { id: number };
+    const result = handle('task_expand', {
+      task_id: parent.id,
+      subtasks: [{ title: 'Sub 1' }, { title: 'Sub 2' }, { title: 'Sub 3' }],
+    }) as Array<{ id: number; title: string; parent_id: number }>;
+
+    expect(result).toHaveLength(3);
+    expect(result[0].title).toBe('Sub 1');
+    expect(result[1].title).toBe('Sub 2');
+    expect(result[2].title).toBe('Sub 3');
+    for (const sub of result) {
+      expect(sub.parent_id).toBe(parent.id);
+    }
+  });
+
+  it('subtasks inherit parent project', () => {
+    const parent = handle('task_create', {
+      title: 'Parent',
+      project: 'my-project',
+      priority: 10,
+    }) as { id: number };
+    const result = handle('task_expand', {
+      task_id: parent.id,
+      subtasks: [{ title: 'Child A' }, { title: 'Child B' }],
+    }) as Array<{ project: string; priority: number }>;
+
+    expect(result).toHaveLength(2);
+    for (const sub of result) {
+      expect(sub.project).toBe('my-project');
+      expect(sub.priority).toBe(10);
+    }
+  });
+
+  it('allows custom priority on subtasks', () => {
+    const parent = handle('task_create', { title: 'Parent', priority: 5 }) as { id: number };
+    const result = handle('task_expand', {
+      task_id: parent.id,
+      subtasks: [{ title: 'Normal' }, { title: 'Urgent', priority: 99 }],
+    }) as Array<{ title: string; priority: number }>;
+
+    expect(result).toHaveLength(2);
+    expect(result[0].priority).toBe(5);
+    expect(result[1].priority).toBe(99);
+  });
+
+  it('fails when expanding a nonexistent task', () => {
+    expect(() =>
+      handle('task_expand', {
+        task_id: 99999,
+        subtasks: [{ title: 'Orphan' }],
+      }),
+    ).toThrow('Task 99999 not found');
+  });
+});

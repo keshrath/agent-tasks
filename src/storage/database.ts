@@ -24,7 +24,7 @@ export interface Db {
   close(): void;
 }
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export function createDb(options: DbOptions = {}): Db {
   const dbPath = resolveDbPath(options.path);
@@ -97,6 +97,7 @@ function applySchema(db: Database.Database): void {
 
   if (currentVersion < 1) migrateV1(db);
   if (currentVersion < 2) migrateV2(db);
+  if (currentVersion < 3) migrateV3(db);
 
   db.prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`).run(
     String(SCHEMA_VERSION),
@@ -257,5 +258,13 @@ function migrateV2(db: Database.Database): void {
   );
   for (const t of existing) {
     ftsInsert.run(t.id, t.title, t.description ?? '');
+  }
+}
+
+function migrateV3(db: Database.Database): void {
+  // -- Relationship types on dependencies
+  const depCols = db.prepare(`PRAGMA table_info(task_dependencies)`).all() as { name: string }[];
+  if (!depCols.some((c) => c.name === 'relationship')) {
+    db.exec(`ALTER TABLE task_dependencies ADD COLUMN relationship TEXT NOT NULL DEFAULT 'blocks'`);
   }
 }

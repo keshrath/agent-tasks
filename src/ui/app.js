@@ -679,8 +679,11 @@ document.getElementById('task-modal').addEventListener('click', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    closeModal();
-    return;
+    const modal = document.getElementById('task-modal');
+    if (!modal.hidden) {
+      closeModal();
+      return;
+    }
   }
   const isInput =
     document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
@@ -695,14 +698,27 @@ document.addEventListener('keydown', (e) => {
 
 // ---- Toast ----
 
-function showToast(title, body) {
+function showToast(title, body, type) {
   const container = document.getElementById('toast-container');
   const el = document.createElement('div');
   el.className = 'toast';
-  el.innerHTML = `<div class="toast-title">${esc(title)}</div><div class="toast-body">${esc(body)}</div>`;
+
+  const isError =
+    type === 'error' ||
+    title.toLowerCase().includes('fail') ||
+    title.toLowerCase().includes('error');
+  const iconName = isError ? 'error' : 'check_circle';
+  const iconClass = isError ? 'toast-icon-error' : 'toast-icon-success';
+
+  el.innerHTML =
+    `<span class="material-symbols-outlined toast-icon ${iconClass}" aria-hidden="true">${iconName}</span>` +
+    `<div class="toast-content"><div class="toast-title">${esc(title)}</div><div class="toast-body">${esc(body)}</div></div>`;
   container.appendChild(el);
+
   setTimeout(() => {
-    el.remove();
+    el.classList.add('fade-out');
+    el.addEventListener('animationend', () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 400);
   }, 4000);
 }
 

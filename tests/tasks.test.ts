@@ -251,6 +251,39 @@ describe('dependencies', () => {
     ctx.tasks.delete(b.id);
     expect(ctx.tasks.getDependencies(a.id).blockers).toHaveLength(0);
   });
+
+  it('related relationship does not block advancement', () => {
+    const related = ctx.tasks.create({ title: 'Related' }, 'agent-1');
+    const task = ctx.tasks.create({ title: 'Main' }, 'agent-1');
+    ctx.tasks.addDependency(task.id, related.id, 'related');
+
+    ctx.tasks.claim(task.id, 'agent-1');
+    const advanced = ctx.tasks.advance(task.id);
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('duplicate relationship does not block advancement', () => {
+    const dup = ctx.tasks.create({ title: 'Duplicate' }, 'agent-1');
+    const task = ctx.tasks.create({ title: 'Original' }, 'agent-1');
+    ctx.tasks.addDependency(task.id, dup.id, 'duplicate');
+
+    ctx.tasks.claim(task.id, 'agent-1');
+    const advanced = ctx.tasks.advance(task.id);
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('defaults to blocks relationship for backward compatibility', () => {
+    const dep = ctx.tasks.create({ title: 'Dependency' }, 'agent-1');
+    const task = ctx.tasks.create({ title: 'Blocked' }, 'agent-1');
+    ctx.tasks.addDependency(task.id, dep.id);
+
+    ctx.tasks.claim(task.id, 'agent-1');
+    expect(() => ctx.tasks.advance(task.id)).toThrow('Blocked by incomplete dependencies');
+
+    const deps = ctx.tasks.getAllDependencies();
+    const found = deps.find((d) => d.task_id === task.id && d.depends_on === dep.id);
+    expect(found?.relationship).toBe('blocks');
+  });
 });
 
 describe('next task', () => {
