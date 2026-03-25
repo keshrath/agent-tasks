@@ -834,7 +834,8 @@ function syncStatusForStage(
   stages: string[],
 ): 'pending' | 'in_progress' | 'completed' | 'cancelled' {
   if (stage === 'cancelled') return 'cancelled';
-  if (stage === 'done') return 'completed';
+  const activeStages = stages.filter((s) => s !== 'cancelled');
+  if (stage === activeStages[activeStages.length - 1]) return 'completed';
   if (stage === stages[0]) return 'pending';
   return 'in_progress';
 }

@@ -4,6 +4,8 @@
 // Shared limits and patterns for domain-layer validation.
 // =============================================================================
 
+import { ValidationError } from '../types.js';
+
 export const MAX_TITLE_LENGTH = 500;
 export const MAX_DESCRIPTION_LENGTH = 50_000;
 export const MAX_RESULT_LENGTH = 50_000;
@@ -21,12 +23,12 @@ const CONTROL_CHAR_PATTERN = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 
 export function rejectControlChars(value: string, field: string): void {
   if (CONTROL_CHAR_PATTERN.test(value)) {
-    throw new Error(`"${field}" must not contain control characters.`);
+    throw new ValidationError(`"${field}" must not contain control characters.`);
   }
 }
 
 export function rejectNullBytes(value: string, field: string): void {
   if (value.includes('\0')) {
-    throw new Error(`"${field}" must not contain null bytes.`);
+    throw new ValidationError(`"${field}" must not contain null bytes.`);
   }
 }
