@@ -338,9 +338,11 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
     }
   });
 
-  route('POST', '/api/cleanup', (_req, res) => {
+  route('POST', '/api/cleanup', async (req, res) => {
     try {
-      json(res, ctx.cleanup.run());
+      const body = await parseBody(req);
+      const result = body.force ? ctx.cleanup.purgeAll() : ctx.cleanup.run();
+      json(res, result);
     } catch (err) {
       if (err instanceof TasksError) {
         json(res, { error: err.message }, err.statusCode);

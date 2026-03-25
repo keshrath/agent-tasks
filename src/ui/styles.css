@@ -864,6 +864,68 @@ header {
 }
 
 /* --------------------------------------------------------------------------
+   Cleanup Dialog
+   -------------------------------------------------------------------------- */
+
+.modal-overlay.hidden {
+  display: none;
+}
+
+.cleanup-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cleanup-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  transition: border-color 0.15s;
+}
+.cleanup-option:hover {
+  border-color: var(--accent);
+}
+.cleanup-option .material-symbols-outlined {
+  font-size: 24px;
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.cleanup-option div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cleanup-option strong {
+  font-size: 14px;
+}
+.cleanup-option span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.cleanup-option-danger {
+  border-color: rgba(220, 53, 69, 0.3);
+}
+.cleanup-option-danger:hover {
+  border-color: var(--red);
+  background: rgba(220, 53, 69, 0.05);
+}
+.cleanup-option-danger .material-symbols-outlined {
+  color: var(--red);
+}
+
+/* --------------------------------------------------------------------------
    Reduced Motion
    -------------------------------------------------------------------------- */
 

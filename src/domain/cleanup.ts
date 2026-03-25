@@ -52,4 +52,17 @@ export class CleanupService {
       purgedApprovals: approvals.changes,
     };
   }
+
+  purgeAll(): { purgedTasks: number; purgedComments: number; purgedApprovals: number } {
+    const tasks = this.db.run(`DELETE FROM tasks WHERE status IN ('completed', 'cancelled')`);
+    const comments = this.db.run(
+      `DELETE FROM task_comments WHERE task_id NOT IN (SELECT id FROM tasks)`,
+    );
+    const approvals = this.db.run(`DELETE FROM task_approvals WHERE status != 'pending'`);
+    return {
+      purgedTasks: tasks.changes,
+      purgedComments: comments.changes,
+      purgedApprovals: approvals.changes,
+    };
+  }
 }

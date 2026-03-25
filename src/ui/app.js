@@ -354,7 +354,6 @@ function renderBoard() {
       const tasks = byStage[stage] || [];
       return `
       <div class="kanban-column" data-stage="${esc(stage)}"
-           ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
         <div class="column-header" role="tablist">
           <h3>${esc(stage)}</h3>
           <span class="column-count" aria-label="${tasks.length} tasks">${tasks.length}</span>
@@ -412,11 +411,7 @@ function renderCard(task, isBlocked) {
     <div class="task-card${priorityClass}" tabindex="0" draggable="true"
          data-task-id="${task.id}"
          role="button"
-         aria-label="Task #${task.id}: ${esc(task.title)}"
-         onclick="openTask(${task.id})"
-         onkeydown="if(event.key==='Enter')openTask(${task.id})"
-         ondragstart="onDragStart(event, ${task.id})"
-         ondragend="onDragEnd(event)">
+         aria-label="Task #${task.id}: ${esc(task.title)}">
       <div class="task-card-id">#${task.id}</div>
       <div class="task-card-title">${esc(task.title)}</div>
       ${tags.length ? `<div class="task-card-meta">${tags.join('')}</div>` : ''}
@@ -424,42 +419,95 @@ function renderCard(task, isBlocked) {
     </div>`;
 }
 
+// ---- Event Delegation (replaces inline handlers) ----
+
+document.getElementById('board').addEventListener('click', (e) => {
+  const card = e.target.closest('.task-card[data-task-id]');
+  if (card) {
+    openTask(parseInt(card.dataset.taskId, 10));
+  }
+});
+
+document.getElementById('board').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const card = e.target.closest('.task-card[data-task-id]');
+    if (card) openTask(parseInt(card.dataset.taskId, 10));
+  }
+});
+
+document.getElementById('board').addEventListener('dragstart', (e) => {
+  const card = e.target.closest('.task-card[data-task-id]');
+  if (card) onDragStart(e, parseInt(card.dataset.taskId, 10));
+});
+
+document.getElementById('board').addEventListener('dragend', (e) => {
+  onDragEnd(e);
+});
+
+document.getElementById('board').addEventListener('dragover', (e) => {
+  const col = e.target.closest('.kanban-column');
+  if (col) onDragOver(e, col);
+});
+
+document.getElementById('board').addEventListener('dragleave', (e) => {
+  const col = e.target.closest('.kanban-column');
+  if (col && !col.contains(e.relatedTarget)) col.classList.remove('drag-over');
+});
+
+document.getElementById('board').addEventListener('drop', (e) => {
+  const col = e.target.closest('.kanban-column');
+  if (col) onDrop(e, col);
+});
+
+// Delegation for modal subtask links and comment button
+document.getElementById('modal-body')?.addEventListener('click', (e) => {
+  const subtask = e.target.closest('[data-subtask-id]');
+  if (subtask) {
+    openTask(parseInt(subtask.dataset.subtaskId, 10));
+    return;
+  }
+  const sendBtn = e.target.closest('#comment-send-btn');
+  if (sendBtn) {
+    submitComment(parseInt(sendBtn.dataset.taskId, 10));
+  }
+});
+
 // ---- Drag and Drop ----
 
 function onDragStart(e, taskId) {
   draggedTaskId = taskId;
   e.dataTransfer.effectAllowed = 'move';
-  e.target.classList.add('dragging');
+  const card = e.target.closest('.task-card');
+  if (card) card.classList.add('dragging');
 }
 
 function onDragEnd(e) {
-  e.target.classList.remove('dragging');
+  const card = e.target.closest('.task-card');
+  if (card) card.classList.remove('dragging');
   draggedTaskId = null;
   document
     .querySelectorAll('.kanban-column.drag-over')
     .forEach((c) => c.classList.remove('drag-over'));
 }
 
-function onDragOver(e) {
+function onDragOver(e, col) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
-  const col = e.currentTarget;
-  if (!col.classList.contains('drag-over')) {
+  if (col && !col.classList.contains('drag-over')) {
     col.classList.add('drag-over');
   }
 }
 
 function onDragLeave(e) {
-  const col = e.currentTarget;
-  if (!col.contains(e.relatedTarget)) {
+  const col = e.target.closest('.kanban-column');
+  if (col && !col.contains(e.relatedTarget)) {
     col.classList.remove('drag-over');
   }
 }
 
-function onDrop(e) {
+function onDrop(e, col) {
   e.preventDefault();
-  const col = e.currentTarget;
-  col.classList.remove('drag-over');
+  if (col) col.classList.remove('drag-over');
 
   if (!draggedTaskId) return;
   const targetStage = col.dataset.stage;
@@ -573,7 +621,7 @@ function openTask(id) {
       extra +=
         '<div class="artifact-list"><h3 style="margin-bottom:8px;font-size:13px;">Subtasks</h3>';
       for (const s of subtasks) {
-        extra += `<div class="artifact-item" style="cursor:pointer" onclick="openTask(${s.id})">
+        extra += `<div class="artifact-item subtask-link" style="cursor:pointer" data-subtask-id="${s.id}">
           <h4>#${s.id} ${esc(s.title)} <span style="color:var(--text-dim);font-weight:400">(${esc(s.stage)})</span></h4>
         </div>`;
       }
@@ -608,7 +656,7 @@ function openTask(id) {
       }
       extra += `<div class="comment-form">
         <textarea id="comment-input" placeholder="Add a comment..." rows="1" aria-label="Add a comment"></textarea>
-        <button onclick="submitComment(${task.id})" aria-label="Send comment">Send</button>
+        <button id="comment-send-btn" data-task-id="${task.id}" aria-label="Send comment">Send</button>
       </div></div>`;
     }
 
@@ -747,6 +795,55 @@ function formatDate(iso) {
     return iso;
   }
 }
+
+// ---- Cleanup Dialog ----
+
+document.getElementById('cleanup-btn')?.addEventListener('click', () => {
+  document.getElementById('cleanup-modal').classList.remove('hidden');
+});
+
+document.getElementById('cleanup-close-btn')?.addEventListener('click', () => {
+  document.getElementById('cleanup-modal').classList.add('hidden');
+});
+
+document.getElementById('cleanup-modal')?.addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) {
+    document.getElementById('cleanup-modal').classList.add('hidden');
+  }
+});
+
+document.getElementById('cleanup-completed')?.addEventListener('click', () => {
+  document.getElementById('cleanup-modal').classList.add('hidden');
+  fetch('/api/cleanup', { method: 'POST' })
+    .then((r) => r.json())
+    .then((result) => {
+      showToast(
+        'Cleanup complete',
+        `Purged ${result.purgedTasks} tasks, ${result.purgedComments} comments, ${result.purgedApprovals} approvals`,
+        'success',
+      );
+    })
+    .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
+});
+
+document.getElementById('cleanup-all')?.addEventListener('click', () => {
+  if (!confirm('This will remove ALL completed and cancelled tasks. Continue?')) return;
+  document.getElementById('cleanup-modal').classList.add('hidden');
+  fetch('/api/cleanup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ force: true }),
+  })
+    .then((r) => r.json())
+    .then((result) => {
+      showToast(
+        'Full cleanup complete',
+        `Purged ${result.purgedTasks} tasks, ${result.purgedComments} comments, ${result.purgedApprovals} approvals`,
+        'success',
+      );
+    })
+    .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
+});
 
 // ---- Boot ----
 

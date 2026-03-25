@@ -36,6 +36,9 @@
       </div>
       <div class="header-right">
         <div class="stats" id="stats" aria-live="polite" aria-atomic="true"></div>
+        <button id="cleanup-btn" class="icon-btn" title="Clean up" aria-label="Clean up old tasks">
+          <span class="material-symbols-outlined">mop</span>
+        </button>
         <button id="theme-toggle" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
           <span class="material-symbols-outlined theme-icon">dark_mode</span>
         </button>
@@ -93,6 +96,44 @@
           </button>
         </div>
         <div id="modal-body" class="modal-body"></div>
+      </div>
+    </div>
+
+    <div id="cleanup-modal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+      <div class="modal" style="max-width: 420px">
+        <div class="modal-header">
+          <h2>
+            <span
+              class="material-symbols-outlined"
+              style="font-size: 20px; vertical-align: middle; margin-right: 6px"
+              >mop</span
+            >Clean Up
+          </h2>
+          <button class="icon-btn modal-close" id="cleanup-close-btn" aria-label="Close">
+            &times;
+          </button>
+        </div>
+        <div class="modal-body">
+          <p style="color: var(--text-muted); margin-bottom: 12px">
+            Remove old tasks and stale data:
+          </p>
+          <div class="cleanup-options">
+            <button id="cleanup-completed" class="cleanup-option">
+              <span class="material-symbols-outlined">auto_delete</span>
+              <div>
+                <strong>Archive completed</strong>
+                <span>Remove completed and cancelled tasks older than retention period</span>
+              </div>
+            </button>
+            <button id="cleanup-all" class="cleanup-option cleanup-option-danger">
+              <span class="material-symbols-outlined">delete_forever</span>
+              <div>
+                <strong>Purge all done</strong>
+                <span>Remove ALL completed and cancelled tasks immediately</span>
+              </div>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
