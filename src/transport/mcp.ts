@@ -11,6 +11,7 @@ import { homedir } from 'os';
 import type { AppContext } from '../context.js';
 import type { CollaboratorRole, TaskStatus, ToolDefinition } from '../types.js';
 import { ValidationError } from '../types.js';
+import { generateRules } from '../domain/rules.js';
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -420,6 +421,23 @@ export const tools: ToolDefinition[] = [
       required: ['task_id', 'action'],
     },
   },
+  {
+    name: 'task_generate_rules',
+    description:
+      'Generate IDE-specific rule files that instruct agents to use the pipeline. Supports Cursor (.mdc) and Claude Code (CLAUDE.md) formats.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        format: {
+          type: 'string',
+          enum: ['mdc', 'claude_md'],
+          description: 'Output format: mdc (Cursor) or claude_md (Claude Code)',
+        },
+        project: { type: 'string', description: 'Project name for project-specific rules' },
+      },
+      required: ['format'],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -688,6 +706,16 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
         } else {
           throw new ValidationError(`Invalid action: ${action}. Use "approve" or "reject".`);
         }
+      }
+
+      case 'task_generate_rules': {
+        const format = requireString(args, 'format') as 'mdc' | 'claude_md';
+        if (format !== 'mdc' && format !== 'claude_md') {
+          throw new ValidationError('Format must be "mdc" or "claude_md".');
+        }
+        const project = optString(args, 'project');
+        const stages = ctx.tasks.getPipelineStages(project);
+        return { rules: generateRules(format, stages, project) };
       }
 
       default:
