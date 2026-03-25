@@ -18,6 +18,7 @@ const __dirname_ws = dirname(fileURLToPath(import.meta.url));
 const MAX_WS_MESSAGE_SIZE = 4096;
 const MAX_WS_CONNECTIONS = 50;
 const PING_INTERVAL_MS = 30_000;
+const DB_POLL_INTERVAL_MS = 2_000;
 
 export interface WebSocketHandle {
   wss: WebSocketServer;
@@ -171,6 +172,30 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
   }, PING_INTERVAL_MS);
   pingInterval.unref();
 
+  // Poll DB for changes from other processes (MCP stdio servers write directly).
+  // Computes a lightweight fingerprint of tasks and pushes full state on change.
+  let lastFingerprint = '';
+  const dbPollInterval = setInterval(() => {
+    if (clients.size === 0) return;
+    try {
+      const row = ctx.db.queryOne<{ fp: string }>(
+        `SELECT group_concat(id || ':' || stage || ':' || status || ':' || COALESCE(assigned_to,'') || ':' || updated_at, '|') as fp FROM (SELECT * FROM tasks ORDER BY id)`,
+      );
+      const fp = row?.fp ?? '';
+      if (fp !== lastFingerprint) {
+        lastFingerprint = fp;
+        for (const [ws] of clients) {
+          if (ws.readyState === WebSocket.OPEN) {
+            sendFullState(ws, ctx);
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, DB_POLL_INTERVAL_MS);
+  dbPollInterval.unref();
+
   return {
     wss,
     broadcast(message: string): void {
@@ -182,6 +207,7 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
     },
     close() {
       clearInterval(pingInterval);
+      clearInterval(dbPollInterval);
       for (const [ws, state] of clients) {
         state.unsub();
         ws.close(1001, 'Server shutting down');

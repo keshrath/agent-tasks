@@ -282,6 +282,15 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
     }
   });
 
+  route('GET', '/api/agents', async (_req, res) => {
+    try {
+      const agents = await ctx.agentBridge.fetchAgents();
+      json(res, agents);
+    } catch {
+      json(res, []);
+    }
+  });
+
   route('GET', '/api/search', (req, res) => {
     const url = new URL(req.url!, `http://${req.headers.host}`);
     const query = url.searchParams.get('q') ?? '';

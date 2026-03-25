@@ -11,6 +11,7 @@ import { TaskService } from './domain/tasks.js';
 import { CommentService } from './domain/comments.js';
 import { CollaboratorService } from './domain/collaborators.js';
 import { ApprovalService } from './domain/approvals.js';
+import { AgentBridge } from './domain/agent-bridge.js';
 
 export interface AppContext {
   readonly db: Db;
@@ -19,6 +20,7 @@ export interface AppContext {
   readonly comments: CommentService;
   readonly collaborators: CollaboratorService;
   readonly approvals: ApprovalService;
+  readonly agentBridge: AgentBridge;
   close(): void;
 }
 
@@ -31,6 +33,9 @@ export function createContext(dbOptions?: DbOptions): AppContext {
   const comments = new CommentService(db, events);
   const collaborators = new CollaboratorService(db, events);
   const approvals = new ApprovalService(db, events);
+  const agentBridge = new AgentBridge(events);
+
+  agentBridge.start();
 
   return {
     db,
@@ -39,9 +44,11 @@ export function createContext(dbOptions?: DbOptions): AppContext {
     comments,
     collaborators,
     approvals,
+    agentBridge,
     close() {
       if (closed) return;
       closed = true;
+      agentBridge.stop();
       events.removeAll();
       db.close();
     },

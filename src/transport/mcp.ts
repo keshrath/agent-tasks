@@ -5,9 +5,13 @@
 // in the domain layer, not here.
 // =============================================================================
 
+import { writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 import type { AppContext } from '../context.js';
 import type { CollaboratorRole, TaskStatus, ToolDefinition } from '../types.js';
 import { ValidationError } from '../types.js';
+import { generateRules } from '../domain/rules.js';
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -395,6 +399,45 @@ export const tools: ToolDefinition[] = [
       },
     },
   },
+  {
+    name: 'task_review_cycle',
+    description:
+      'Review a task: approve (advance to next stage) or reject (regress with reason). Convenience wrapper for the maker-checker pattern.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'Task ID to review' },
+        action: {
+          type: 'string',
+          enum: ['approve', 'reject'],
+          description: 'Approve or reject',
+        },
+        reason: { type: 'string', description: 'Rejection reason (required for reject)' },
+        regress_to: {
+          type: 'string',
+          description: 'Stage to regress to on rejection (default: implement)',
+        },
+      },
+      required: ['task_id', 'action'],
+    },
+  },
+  {
+    name: 'task_generate_rules',
+    description:
+      'Generate IDE-specific rule files that instruct agents to use the pipeline. Supports Cursor (.mdc) and Claude Code (CLAUDE.md) formats.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        format: {
+          type: 'string',
+          enum: ['mdc', 'claude_md'],
+          description: 'Output format: mdc (Cursor) or claude_md (Claude Code)',
+        },
+        project: { type: 'string', description: 'Project name for project-specific rules' },
+      },
+      required: ['format'],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -464,9 +507,10 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
     switch (name) {
       case 'task_set_session': {
         const id = requireString(args, 'id');
-        const sessionName = requireString(args, 'name');
-        currentSession = { id, name: sessionName };
-        return { success: true, id, name: sessionName };
+        const sName = requireString(args, 'name');
+        currentSession = { id, name: sName };
+        writeSessionFile(id, sName);
+        return { success: true, id, name: sName };
       }
 
       case 'task_create': {
@@ -645,8 +689,51 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
       case 'task_pending_approvals':
         return ctx.approvals.getPending(optString(args, 'reviewer'));
 
+      case 'task_review_cycle': {
+        const taskId = requireNumber(args, 'task_id');
+        const action = requireString(args, 'action');
+        const task = ctx.tasks.getById(taskId);
+        if (!task) throw new ValidationError(`Task ${taskId} not found.`);
+
+        if (action === 'approve') {
+          ctx.tasks.advance(taskId);
+          return { success: true, action: 'approved', task: ctx.tasks.getById(taskId) };
+        } else if (action === 'reject') {
+          const reason = requireString(args, 'reason');
+          const regressTo = optString(args, 'regress_to') ?? 'implement';
+          ctx.tasks.regress(taskId, regressTo, reason);
+          return { success: true, action: 'rejected', task: ctx.tasks.getById(taskId) };
+        } else {
+          throw new ValidationError(`Invalid action: ${action}. Use "approve" or "reject".`);
+        }
+      }
+
+      case 'task_generate_rules': {
+        const format = requireString(args, 'format') as 'mdc' | 'claude_md';
+        if (format !== 'mdc' && format !== 'claude_md') {
+          throw new ValidationError('Format must be "mdc" or "claude_md".');
+        }
+        const project = optString(args, 'project');
+        const stages = ctx.tasks.getPipelineStages(project);
+        return { rules: generateRules(format, stages, project) };
+      }
+
       default:
         throw new ValidationError(`Unknown tool: ${name}`);
     }
   };
+}
+
+function writeSessionFile(id: string, name: string): void {
+  try {
+    const claudeDir = join(homedir(), '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    const filePath = join(claudeDir, `hub-session.${id}.json`);
+    writeFileSync(
+      filePath,
+      JSON.stringify({ pid: process.pid, name, id, timestamp: new Date().toISOString() }),
+    );
+  } catch {
+    /* non-critical */
+  }
 }
