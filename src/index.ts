@@ -10,7 +10,10 @@
 import { createInterface } from 'readline';
 import { createContext } from './context.js';
 import { tools, createToolHandler } from './transport/mcp.js';
+import { startDashboard, type DashboardServer } from './server.js';
 import type { JsonRpcRequest, JsonRpcResponse } from './types.js';
+
+const DASHBOARD_PORT = parseInt(process.env.AGENT_TASKS_PORT ?? '3422', 10);
 
 const SERVER_INFO = { name: 'agent-tasks', version: '1.0.0' };
 const CAPABILITIES = { tools: {} };
@@ -22,12 +25,27 @@ function send(response: JsonRpcResponse): void {
 function main() {
   const ctx = createContext();
   const handleTool = createToolHandler(ctx);
+  let dashboard: DashboardServer | null = null;
+  let dashboardStarted = false;
+
+  function tryStartDashboard(): void {
+    if (dashboardStarted) return;
+    dashboardStarted = true;
+    startDashboard(ctx, DASHBOARD_PORT)
+      .then((d) => {
+        dashboard = d;
+      })
+      .catch(() => {
+        /* port in use — another instance is serving the dashboard */
+      });
+  }
 
   function handleRequest(request: JsonRpcRequest): JsonRpcResponse | null {
     const { method, params, id } = request;
 
     switch (method) {
       case 'initialize':
+        tryStartDashboard();
         return {
           jsonrpc: '2.0',
           id,
@@ -98,6 +116,7 @@ function main() {
 
   // --- Graceful shutdown ---
   function cleanup() {
+    if (dashboard) dashboard.close();
     ctx.close();
   }
   process.on('SIGINT', () => {

@@ -1,0 +1,76 @@
+#!/usr/bin/env node
+
+// =============================================================================
+// agent-tasks — HTTP + WebSocket server entry point
+//
+// Standalone web server for the pipeline dashboard and REST API.
+// Can be started manually: node dist/server.js [--port 3422]
+// Or auto-started from the MCP server via leader election.
+// =============================================================================
+
+import { createServer, type Server } from 'http';
+import { createContext, type AppContext } from './context.js';
+import { createRouter } from './transport/rest.js';
+import { setupWebSocket, type WebSocketHandle } from './transport/ws.js';
+import type { DbOptions } from './storage/database.js';
+
+export interface DashboardServer {
+  httpServer: Server;
+  port: number;
+  close(): void;
+}
+
+export function startDashboard(ctx: AppContext, port = 3422): Promise<DashboardServer> {
+  return new Promise((resolve, reject) => {
+    const router = createRouter(ctx);
+    const httpServer = createServer(router);
+
+    let wsHandle: WebSocketHandle | null = null;
+
+    httpServer.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        reject(new Error(`Port ${port} in use`));
+      } else {
+        reject(err);
+      }
+    });
+
+    httpServer.listen(port, () => {
+      wsHandle = setupWebSocket(httpServer, ctx);
+      process.stderr.write(`agent-tasks dashboard: http://localhost:${port}\n`);
+      resolve({
+        httpServer,
+        port,
+        close() {
+          if (wsHandle) wsHandle.close();
+          httpServer.close();
+        },
+      });
+    });
+  });
+}
+
+if (process.argv[1]?.endsWith('server.js') || process.argv[1]?.endsWith('server.ts')) {
+  const port = parseInt(process.argv.find((_a, i, arr) => arr[i - 1] === '--port') ?? '3422', 10);
+  const dbPath = process.argv.find((_a, i, arr) => arr[i - 1] === '--db') ?? undefined;
+  const dbOptions: DbOptions = dbPath ? { path: dbPath } : {};
+
+  const ctx = createContext(dbOptions);
+  startDashboard(ctx, port)
+    .then((dashboard) => {
+      process.on('SIGINT', () => {
+        dashboard.close();
+        ctx.close();
+        process.exit(0);
+      });
+      process.on('SIGTERM', () => {
+        dashboard.close();
+        ctx.close();
+        process.exit(0);
+      });
+    })
+    .catch((err) => {
+      process.stderr.write(`Failed to start dashboard: ${err.message}\n`);
+      process.exit(1);
+    });
+}

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>agent-tasks</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <div class="header-left">
+        <h1>agent-tasks</h1>
+        <span id="connection-status" class="status-badge disconnected">Connecting</span>
+      </div>
+      <div class="header-right">
+        <div class="stats" id="stats"></div>
+        <button id="theme-toggle" class="icon-btn" title="Toggle theme">
+          <span class="icon-light">☀</span><span class="icon-dark">☾</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="board" class="kanban-board"></main>
+
+    <div id="task-modal" class="modal-overlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h2 id="modal-title"></h2>
+          <button class="icon-btn modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div id="modal-body" class="modal-body"></div>
+      </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
