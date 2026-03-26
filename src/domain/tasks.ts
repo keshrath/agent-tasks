@@ -708,7 +708,7 @@ export class TaskService {
     return cleaned
       .split(/\s+/)
       .filter((w) => w.length > 0)
-      .map((w) => `"${w}"`)
+      .map((w) => '"' + w.replace(/"/g, '""') + '"')
       .join(' ');
   }
 
