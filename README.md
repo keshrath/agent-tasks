@@ -3,8 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
 [![Tests](https://img.shields.io/badge/tests-337%20passing-brightgreen)]()
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-33-purple)]()
-[![REST Endpoints](https://img.shields.io/badge/REST-18%20endpoints-orange)]()
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-31-purple)]()
+[![REST Endpoints](https://img.shields.io/badge/REST-19%20endpoints-orange)]()
 
 **Pipeline-driven task management for AI coding agents.** An [MCP](https://modelcontextprotocol.io/) server with stage-gated pipelines, multi-agent collaboration, and a real-time kanban dashboard. Tasks flow through configurable stages — `backlog`, `spec`, `plan`, `implement`, `test`, `review`, `done` — with dependency tracking, approval workflows, artifact versioning, and threaded comments.
 
@@ -37,6 +37,7 @@ When you run multiple AI agents on the same codebase, they need a shared task pi
 - **Real-time kanban dashboard** — drag-and-drop, side panel, inline creation, dark/light theme
 - **3 transport layers** — MCP (stdio), REST API (HTTP), WebSocket (real-time events)
 - **TodoWrite bridge** — intercepts Claude Code's built-in TodoWrite and syncs to the pipeline
+- **Task cleanup hooks** — auto-fails orphaned tasks on session stop and cleans up stale tasks on session start
 - **Agent bridge** — notifies connected agents on task events
 
 ---
@@ -98,7 +99,7 @@ Add agent-tasks as an MCP server in `~/.claude/settings.json`:
 }
 ```
 
-Once configured, Claude Code can use all 33 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
+Once configured, Claude Code can use all 31 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
 
 ---
 
@@ -114,11 +115,11 @@ Once configured, Claude Code can use all 33 MCP tools directly — creating task
 | **Approvals** (5)       | `task_request_approval`, `task_approve`, `task_reject`, `task_pending_approvals`, `task_review_cycle`       |
 | **Config & utils** (4)  | `task_pipeline_config`, `task_set_session`, `task_cleanup`, `task_generate_rules`                           |
 
-See [full API reference](docs/api.md) for detailed descriptions of every tool and endpoint.
+See [full API reference](docs/API.md) for detailed descriptions of every tool and endpoint.
 
-## REST API (18 endpoints)
+## REST API (19 endpoints)
 
-All endpoints return JSON. CORS enabled. See [full API reference](docs/api.md#rest-api-18-endpoints) for details.
+All endpoints return JSON. CORS enabled. See [full API reference](docs/API.md#rest-api-18-endpoints) for details.
 
 ```
 GET  /health                          Health check with version + uptime
@@ -167,11 +168,10 @@ npm run check         # Full CI: typecheck + lint + format + test
 
 ## Documentation
 
-- [API Reference](docs/api.md) — all 33 MCP tools, 18 REST endpoints, WebSocket protocol
-- [Architecture](docs/architecture.md) — source structure, design principles, database schema
-- [Dashboard](docs/dashboard.md) — kanban board features, keyboard shortcuts, screenshots
-- [Hooks](docs/hooks.md) — TodoWrite bridge hook for Claude Code
-- [Setup Guide](docs/SETUP.md) — detailed installation, integration, and configuration
+- [API Reference](docs/API.md) — all 31 MCP tools, 19 REST endpoints, WebSocket protocol
+- [Architecture](docs/ARCHITECTURE.md) — source structure, design principles, database schema
+- [Dashboard](docs/DASHBOARD.md) — kanban board features, keyboard shortcuts, screenshots
+- [Setup Guide](docs/SETUP.md) — installation, client setup (Claude Code, OpenCode, Cursor, Windsurf), hooks
 - [Changelog](CHANGELOG.md)
 
 ---

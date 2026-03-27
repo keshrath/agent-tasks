@@ -1,13 +1,21 @@
 # Setup Guide
 
-Detailed instructions for installing, configuring, and integrating agent-tasks.
+Detailed instructions for installing, configuring, and integrating agent-tasks with any MCP client.
 
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
-- [Claude Code Integration](#claude-code-integration)
-- [Hooks Setup (TodoWrite Bridge)](#hooks-setup-todowrite-bridge)
+- [Client Setup](#client-setup)
+  - [Claude Code](#claude-code)
+  - [OpenCode](#opencode)
+  - [Cursor](#cursor)
+  - [Windsurf](#windsurf)
+  - [REST API](#rest-api)
+- [Hooks](#hooks)
+  - [Claude Code Hooks](#claude-code-hooks)
+  - [OpenCode Plugins](#opencode-plugins)
+  - [Cursor and Windsurf](#cursor-and-windsurf)
 - [Running as Standalone Server](#running-as-standalone-server)
 - [Configuration Options](#configuration-options)
 - [Database](#database)
@@ -20,16 +28,20 @@ Detailed instructions for installing, configuring, and integrating agent-tasks.
 - **Node.js** >= 20.11 (for native ES module support and `node:` built-in imports)
 - **npm** >= 10
 
-Verify your versions:
-
 ```bash
-node --version   # Should be v20.11.0 or later
-npm --version    # Should be v10 or later
+node --version   # v20.11.0 or later
+npm --version    # v10 or later
 ```
 
 ---
 
 ## Installation
+
+### From npm
+
+```bash
+npm install -g agent-tasks
+```
 
 ### From source
 
@@ -42,157 +54,332 @@ npm run build
 
 This compiles TypeScript to `dist/` and copies UI files to `dist/ui/`.
 
-### Verify installation
+### Verify
 
 ```bash
 node dist/server.js
 ```
 
-Open **http://localhost:3422** in your browser. You should see the kanban dashboard with empty columns for each pipeline stage.
+Open **http://localhost:3422** — you should see the kanban dashboard with empty columns for each pipeline stage.
 
 ---
 
-## Claude Code Integration
+## Client Setup
 
-agent-tasks works as an MCP server that Claude Code communicates with over stdio.
+agent-tasks works with any MCP client (stdio) or HTTP client (REST API). Pick your client below.
 
-### Step 1: Add the MCP server
+### Claude Code
 
-Edit `~/.claude/settings.json` (create it if it doesn't exist):
+#### Step 1: Add the MCP server
+
+Edit `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-tasks": {
+      "command": "npx",
+      "args": ["agent-tasks"]
+    }
+  },
+  "permissions": {
+    "allow": ["mcp__agent-tasks__*"]
+  }
+}
+```
+
+#### Step 2: Verify
+
+Start a new Claude Code session. Try:
+
+> Create a task called "Test task" with priority 5
+
+Claude should call `task_create` and confirm the task was created.
+
+#### Step 3: Open the dashboard
+
+The dashboard auto-starts at **http://localhost:3422**.
+
+### OpenCode
+
+`opencode.json` (project root) or `~/.config/opencode/opencode.json` (global):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "agent-tasks": {
+      "type": "local",
+      "command": ["node", "/absolute/path/to/agent-tasks/dist/index.js"],
+      "environment": {
+        "AGENT_TASKS_PORT": "3422"
+      }
+    }
+  }
+}
+```
+
+### Cursor
+
+`.cursor/mcp.json` in your project root:
 
 ```json
 {
   "mcpServers": {
     "agent-tasks": {
       "command": "node",
-      "args": ["/absolute/path/to/agent-tasks/dist/index.js"]
+      "args": ["/absolute/path/to/agent-tasks/dist/index.js"],
+      "env": {
+        "AGENT_TASKS_PORT": "3422"
+      }
     }
   }
 }
 ```
 
-Replace `/absolute/path/to/agent-tasks` with the actual path where you cloned the repo.
+### Windsurf
 
-### Step 2: Verify
+`~/.codeium/windsurf/mcp_config.json`:
 
-Start a new Claude Code session. You should see agent-tasks listed as an available MCP server. Try:
+```json
+{
+  "mcpServers": {
+    "agent-tasks": {
+      "command": "node",
+      "args": ["/absolute/path/to/agent-tasks/dist/index.js"],
+      "env": {
+        "AGENT_TASKS_PORT": "3422"
+      }
+    }
+  }
+}
+```
 
-> Create a task called "Test task" with priority 5
+### REST API
 
-Claude should call `task_create` and confirm the task was created.
+If your tool doesn't support MCP, use the REST API:
 
-### Step 3: Open the dashboard
+```bash
+# Create a task
+curl -X POST http://localhost:3422/api/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"title": "Fix login bug", "priority": 5, "project": "backend"}'
 
-The dashboard auto-starts when the MCP server launches. Open **http://localhost:3422** to see your tasks on the kanban board.
+# List tasks
+curl http://localhost:3422/api/tasks
+
+# Advance a task
+curl -X POST http://localhost:3422/api/tasks/1/advance
+```
+
+See [API.md](API.md) for the full REST reference.
 
 ---
 
-## Hooks Setup (TodoWrite Bridge)
+## Hooks
 
-The TodoWrite bridge intercepts Claude Code's built-in `TodoWrite` tool and syncs todos to agent-tasks. This means Claude's internal todo tracking automatically populates your pipeline.
+Hooks automate pipeline workflows — dashboard announcements, TodoWrite bridging, and task cleanup. Support varies by client.
 
-### Step 1: Create the hook script
+### Claude Code Hooks
 
-Create a file at a stable location (e.g., `~/.claude/hooks/todowrite-bridge.js`):
-
-```javascript
-#!/usr/bin/env node
-
-// TodoWrite Bridge — syncs Claude Code todos to agent-tasks
-
-import http from 'http';
-
-const AGENT_TASKS_URL = process.env.AGENT_TASKS_URL || 'http://localhost:3422';
-
-function postTask(task) {
-  return new Promise((resolve) => {
-    const data = JSON.stringify(task);
-    const url = new URL('/api/tasks', AGENT_TASKS_URL);
-    const req = http.request(
-      {
-        hostname: url.hostname,
-        port: url.port,
-        path: url.pathname,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(data),
-        },
-        timeout: 3000,
-      },
-      (res) => {
-        let body = '';
-        res.on('data', (c) => (body += c));
-        res.on('end', () => resolve(body));
-      },
-    );
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => {
-      req.destroy();
-      resolve(null);
-    });
-    req.write(data);
-    req.end();
-  });
-}
-
-async function main() {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
-
-  try {
-    const event = JSON.parse(input);
-    if (event.tool_name === 'TodoWrite' && event.tool_input) {
-      const todos = event.tool_input.todos || [];
-      for (const todo of todos) {
-        if (todo.status === 'in_progress' || todo.status === 'pending') {
-          await postTask({
-            title: todo.content,
-            priority: todo.priority === 'high' ? 10 : todo.priority === 'medium' ? 5 : 1,
-            project: 'claude-todos',
-          });
-        }
-      }
-    }
-  } catch {
-    /* ignore parse errors */
-  }
-
-  // Return empty object to let the original tool proceed
-  console.log(JSON.stringify({}));
-}
-
-main();
-```
-
-### Step 2: Configure the hook
-
-Add to `~/.claude/settings.json`:
+agent-tasks ships with 4 hook scripts. Add all of them to `~/.claude/settings.json`:
 
 ```json
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/path/to/agent-tasks/scripts/hooks/session-start.js\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"/path/to/agent-tasks/scripts/hooks/task-cleanup-start.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
-        "matcher": "TodoWrite",
-        "command": "node /absolute/path/to/hooks/todowrite-bridge.js"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.claude/hooks/todowrite-bridge.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/path/to/agent-tasks/scripts/hooks/task-cleanup-stop.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/path/to/agent-tasks/scripts/hooks/task-cleanup-stop.js\"",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }
 }
 ```
 
-### Step 3: Verify
+Replace `/path/to/agent-tasks` with the actual path (or use `npx` paths if installed globally).
 
-Start a Claude Code session and ask it to create some todos. They should appear on the agent-tasks dashboard in the `backlog` column.
+| Hook                    | Event               | Purpose                                     |
+| ----------------------- | ------------------- | ------------------------------------------- |
+| `session-start.js`      | SessionStart        | Announces dashboard URL                     |
+| `task-cleanup-start.js` | SessionStart        | Auto-fails tasks from dead sessions         |
+| `todowrite-bridge.js`   | PreToolUse          | Syncs TodoWrite to pipeline                 |
+| `task-cleanup-stop.js`  | Stop + SubagentStop | Blocks stop, then auto-fails orphaned tasks |
+
+#### Task Cleanup — Stop (`scripts/hooks/task-cleanup-stop.js`)
+
+Prevents sessions from ending with incomplete tasks. Runs on both `Stop` (main session) and `SubagentStop` (spawned agents).
+
+1. **First stop attempt**: Blocks and lists all incomplete tasks assigned to the session. Tells Claude to call `task_complete` or `task_fail` for each.
+2. **Second stop attempt**: Auto-fails all remaining tasks with reason `"Session ended without completing this task (auto-cleanup)"` and allows stop.
+
+```mermaid
+sequenceDiagram
+    participant CC as Claude Code
+    participant Hook as task-cleanup-stop.js
+    participant DB as agent-tasks DB
+
+    CC->>Hook: Stop event (stdin JSON)
+    Hook->>DB: SELECT incomplete tasks for session
+    alt Has incomplete tasks (1st attempt)
+        Hook->>CC: {decision: "block", reason: "Complete your tasks"}
+    else Has incomplete tasks (2nd attempt)
+        Hook->>DB: UPDATE tasks SET status='failed'
+        Hook->>CC: {decision: "allow", reason: "Auto-failed N tasks"}
+    else No incomplete tasks
+        Hook->>CC: {} (allow stop)
+    end
+```
+
+The block counter is stored in `~/.claude/task-cleanup-counter.json`. To change the number of blocks before auto-cleanup, edit `MAX_BLOCKS` in the script (default: 1).
+
+#### Task Cleanup — Session Start (`scripts/hooks/task-cleanup-start.js`)
+
+Catches tasks orphaned by sessions that crashed, were killed, or otherwise ended without the Stop hook firing.
+
+On every session start:
+
+1. Finds all tasks assigned to sessions that no longer have a `hub-session.*.json` file
+2. Auto-fails them with reason `"Session no longer running (stale task cleanup on session start)"`
+3. Logs the cleanup to stderr
+
+This is the safety net — even if the Stop hook never fires, the next session to start will clean up.
+
+#### TodoWrite Bridge (`~/.claude/hooks/todowrite-bridge.js`)
+
+Intercepts Claude Code's built-in `TodoWrite` tool and syncs todos to agent-tasks. Every todo Claude creates automatically appears on the kanban board.
+
+When Claude Code calls `TodoWrite`, the hook:
+
+1. Reads the tool input from stdin
+2. Extracts todos with `in_progress` or `pending` status
+3. POSTs each as a new task to `http://localhost:3422/api/tasks`
+4. Maps priority: `high` -> 10, `medium` -> 5, `low` -> 1
+5. Tags all synced tasks with project `claude-todos`
+6. Returns an empty JSON object to let the original tool proceed
+
+```mermaid
+sequenceDiagram
+    participant CC as Claude Code
+    participant Hook as todowrite-bridge.js
+    participant AT as agent-tasks
+
+    CC->>Hook: PreToolUse (TodoWrite, stdin JSON)
+    Hook->>Hook: Parse todos from tool_input
+    loop Each pending/in_progress todo
+        Hook->>AT: POST /api/tasks {title, priority, project}
+        AT-->>Hook: 201 Created
+    end
+    Hook->>CC: {} (let original tool proceed)
+```
+
+| Variable          | Default                 | Description                   |
+| ----------------- | ----------------------- | ----------------------------- |
+| `AGENT_TASKS_URL` | `http://localhost:3422` | agent-tasks REST API base URL |
+
+The hook has a 3-second timeout per request. If agent-tasks is not running, it silently fails and lets `TodoWrite` proceed.
+
+### OpenCode Plugins
+
+OpenCode supports lifecycle hooks via JavaScript/TypeScript plugins. Create a plugin in `.opencode/plugins/` or `~/.config/opencode/plugins/`:
+
+```typescript
+// .opencode/plugins/agent-tasks.ts
+import type { Plugin } from '@opencode-ai/plugin';
+
+export const AgentTasksPlugin: Plugin = async ({ client }) => {
+  return {
+    event: async (event) => {
+      if (event.type === 'session.created') {
+        // Equivalent to SessionStart — agent sees pipeline instructions via AGENTS.md
+      }
+      if (event.type === 'tool.execute.before') {
+        // Equivalent to PreToolUse — could intercept todo creation
+      }
+    },
+  };
+};
+```
+
+Available events: `session.created`, `session.idle`, `tool.execute.before`, `tool.execute.after`, `message.updated`, `file.edited`.
+
+Combine with `AGENTS.md` instructions (see below).
+
+### Cursor and Windsurf
+
+Cursor and Windsurf don't support lifecycle hooks. Use the client's system prompt / instructions file:
+
+| Client   | Instructions file |
+| -------- | ----------------- |
+| Cursor   | `.cursorrules`    |
+| Windsurf | `.windsurfrules`  |
+
+Add these instructions:
+
+```
+You have access to agent-tasks MCP tools for tracking work through a pipeline.
+
+Pipeline stages: backlog > spec > plan > implement > test > review > done
+
+When given work:
+1. Create a task with task_create
+2. Claim it with task_claim
+3. Advance through stages with task_advance as you progress
+4. Attach artifacts at each stage with task_add_artifact
+5. Complete with task_complete when done
+
+Always check task_list first to see what's in flight.
+Dashboard: http://localhost:3422
+```
+
+The TodoWrite bridge is Claude Code-specific. Other clients should use `task_create` directly.
 
 ---
 
 ## Running as Standalone Server
-
-You can run agent-tasks as a standalone HTTP + WebSocket server without MCP:
 
 ```bash
 # Default port (3422)
@@ -205,11 +392,7 @@ npm run start:server -- --port 8080
 node dist/server.js --port 8080
 ```
 
-This is useful for:
-
-- Viewing the dashboard while MCP servers run in separate terminals
-- Integrating via REST API from scripts or other tools
-- Running alongside agent-comm for multi-agent setups
+Useful for viewing the dashboard while MCP servers run in separate terminals, or integrating via REST API.
 
 ---
 
@@ -254,15 +437,11 @@ By default, the database is stored at `~/.agent-tasks/agent-tasks.db`. Override 
 
 ### Backup
 
-The database is a single SQLite file. To back up:
-
 ```bash
 cp ~/.agent-tasks/agent-tasks.db ~/.agent-tasks/agent-tasks.db.bak
 ```
 
 ### Reset
-
-To start fresh, delete the database file:
 
 ```bash
 rm ~/.agent-tasks/agent-tasks.db
@@ -272,7 +451,7 @@ A new database will be created automatically on the next start.
 
 ### Schema
 
-The database uses schema versioning (currently V3) with automatic migrations. Migrations are idempotent — the server handles upgrades automatically.
+The database uses schema versioning (currently V3) with automatic migrations. Migrations are idempotent.
 
 ---
 
@@ -284,11 +463,11 @@ The database uses schema versioning (currently V3) with automatic migrations. Mi
 - Check the port isn't in use: `lsof -i :3422` (macOS/Linux) or `netstat -ano | findstr 3422` (Windows)
 - Try a different port: `AGENT_TASKS_PORT=8080 npm run start:server`
 
-### MCP tools not appearing in Claude Code
+### MCP tools not appearing
 
-- Verify the path in `settings.json` is absolute and points to `dist/index.js`
+- Verify the path in your config is absolute and points to `dist/index.js`
 - Ensure you ran `npm run build` after cloning
-- Restart Claude Code after changing `settings.json`
+- Restart your client after changing config
 
 ### Tasks not syncing between terminals
 
@@ -300,3 +479,20 @@ The database uses schema versioning (currently V3) with automatic migrations. Mi
 - Verify the hook script path is absolute in `settings.json`
 - Check that the agent-tasks server is running (the bridge POSTs to the REST API)
 - Check stderr for errors: the bridge logs to stderr with `[todowrite-bridge]` prefix
+
+### Task cleanup hooks not working
+
+- Both cleanup hooks require `better-sqlite3` (included in agent-tasks dependencies — run `npm install` in the agent-tasks directory)
+- The stop hook identifies sessions via `hub-session.*.json` files written by `task_set_session` — ensure your session calls this tool on startup
+- Check stderr for `[task-cleanup-start]` messages on session start
+- The counter file at `~/.claude/task-cleanup-counter.json` can be deleted to reset block state
+
+## Client Comparison
+
+| Feature             | Claude Code | OpenCode      | Cursor       | Windsurf       |
+| ------------------- | ----------- | ------------- | ------------ | -------------- |
+| MCP stdio transport | Yes         | Yes           | Yes          | Yes            |
+| Lifecycle hooks     | Yes (JSON)  | Yes (plugins) | No           | No             |
+| TodoWrite bridge    | Yes         | No            | No           | No             |
+| System prompt file  | CLAUDE.md   | AGENTS.md     | .cursorrules | .windsurfrules |
+| REST API fallback   | Yes         | Yes           | Yes          | Yes            |
