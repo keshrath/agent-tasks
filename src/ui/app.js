@@ -14,11 +14,15 @@ function morph(el, newInnerHTML) {
     childrenOnly: true,
     getNodeKey(node) {
       if (node.id) return node.id;
-      if (node.dataset) {
-        if (node.dataset.taskId) return 'task-' + node.dataset.taskId;
-        if (node.dataset.stage && node.classList && node.classList.contains('kanban-column'))
-          return 'col-' + node.dataset.stage;
-      }
+      // Only key columns, NOT task cards. Keying cards causes morphdom to
+      // duplicate them when they move between keyed column parents.
+      if (
+        node.dataset &&
+        node.dataset.stage &&
+        node.classList &&
+        node.classList.contains('kanban-column')
+      )
+        return 'col-' + node.dataset.stage;
       return null;
     },
     onBeforeElUpdated(fromEl, toEl) {
