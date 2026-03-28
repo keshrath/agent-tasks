@@ -350,32 +350,74 @@ Combine with `AGENTS.md` instructions (see below).
 
 ### Cursor and Windsurf
 
-Cursor and Windsurf don't support lifecycle hooks. Use the client's system prompt / instructions file:
-
-| Client   | Instructions file |
-| -------- | ----------------- |
-| Cursor   | `.cursorrules`    |
-| Windsurf | `.windsurfrules`  |
-
-Add these instructions:
-
-```
-You have access to agent-tasks MCP tools for tracking work through a pipeline.
-
-Pipeline stages: backlog > spec > plan > implement > test > review > done
-
-When given work:
-1. Create a task with task_create
-2. Claim it with task_claim
-3. Advance through stages with task_advance as you progress
-4. Attach artifacts at each stage with task_add_artifact
-5. Complete with task_complete when done
-
-Always check task_list first to see what's in flight.
-Dashboard: http://localhost:3422
-```
+Cursor and Windsurf don't support lifecycle hooks. Use the client's system prompt / instructions file (see [Agent Rules](#agent-rules) below).
 
 The TodoWrite bridge is Claude Code-specific. Other clients should use `task_create` directly.
+
+---
+
+## Agent Rules
+
+Hooks enforce task cleanup and TodoWrite bridging, but every platform needs **written instructions** telling the agent how to use the pipeline. Without rules, agents create tasks but skip stages or forget to advance.
+
+Add the appropriate block to your platform's instructions file:
+
+| Platform    | File                                                |
+| ----------- | --------------------------------------------------- |
+| Claude Code | `CLAUDE.md` (project root or `~/.claude/CLAUDE.md`) |
+| OpenCode    | `AGENTS.md` (project root)                          |
+| Cursor      | `.cursorrules` (project root)                       |
+| Windsurf    | `.windsurfrules` (project root)                     |
+
+### Recommended instructions (copy-paste)
+
+```markdown
+## Dev Pipeline
+
+All work flows through a shared pipeline. Dashboard: http://localhost:3422
+
+Pipeline stages: **backlog → spec → plan → implement → test → review → done**
+
+### How to use
+
+1. **Check for work first** — call `task_list` to see what's in flight
+2. **Create tasks** — `task_create` with title, description, priority, project
+3. **Claim it** — `task_claim` assigns it to your session
+4. **Do the work** — advance through stages with `task_advance`
+5. **Attach artifacts** — at each stage, use `task_add_artifact` (specs, plans, code summaries, test results)
+6. **Complete** — `task_complete` when done, `task_fail` if abandoned
+
+### Rules
+
+- **Never work without a task** — if there isn't one, create it
+- **Never skip stages** — move through spec → plan → implement → test → review
+- **Attach artifacts at each stage** — the pipeline is only useful if it shows what was decided/built/tested
+- **Always complete or fail your tasks before stopping**
+- Break large work into sub-tasks with `task_expand` or dependencies via `task_add_dependency`
+
+### Communicate around tasks (requires agent-comm)
+
+If agent-comm is available, coordinate task work with other agents:
+
+- **Claiming a task** — post to "general": "Claiming task #42: implement auth module"
+- **Advancing a stage** — post to "general": "Task #42 moved to test — all unit tests passing"
+- **Blocked on a dependency** — post to "general": "Blocked on task #38, need the DB schema first"
+- **Editing shared files** — use `comm_state_set("locks", "path/to/file", "my-name")` before editing, `comm_state_delete` when done
+- **Finishing work** — post a summary to "general" before stopping
+
+See the [agent-comm SETUP guide](https://github.com/keshrath/agent-comm/blob/main/docs/SETUP.md) for full communication instructions.
+```
+
+### Why this matters
+
+Without these rules, agents typically:
+
+- Create a task and jump straight to "done" (skipping stages)
+- Never attach artifacts (the pipeline shows nothing useful)
+- Forget to complete/fail tasks when stopping (leaves orphans)
+- Work on the same files as other agents without coordinating (merge conflicts)
+
+Hooks help enforce cleanup in Claude Code, but the written rules drive the actual workflow discipline.
 
 ---
 
