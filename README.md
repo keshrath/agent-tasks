@@ -4,7 +4,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
 [![Tests](https://img.shields.io/badge/tests-337%20passing-brightgreen)]()
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-31-purple)]()
-[![REST Endpoints](https://img.shields.io/badge/REST-19%20endpoints-orange)]()
+[![REST Endpoints](https://img.shields.io/badge/REST-18%20endpoints-orange)]()
 
 **Pipeline-driven task management for AI coding agents.** An [MCP](https://modelcontextprotocol.io/) server with stage-gated pipelines, multi-agent collaboration, and a real-time kanban dashboard. Tasks flow through configurable stages — `backlog`, `spec`, `plan`, `implement`, `test`, `review`, `done` — with dependency tracking, approval workflows, artifact versioning, and threaded comments.
 
@@ -105,7 +105,7 @@ Once configured, Claude Code can use all 31 MCP tools directly — creating task
 
 ---
 
-## MCP Tools (33)
+## MCP Tools (31)
 
 | Category                | Tools                                                                                                       |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -119,7 +119,7 @@ Once configured, Claude Code can use all 31 MCP tools directly — creating task
 
 See [full API reference](docs/API.md) for detailed descriptions of every tool and endpoint.
 
-## REST API (19 endpoints)
+## REST API (18 endpoints)
 
 All endpoints return JSON. CORS enabled. See [full API reference](docs/API.md#rest-api-18-endpoints) for details.
 
@@ -178,7 +178,7 @@ npm run check         # Full CI: typecheck + lint + format + test
 
 ## Documentation
 
-- [API Reference](docs/API.md) — all 31 MCP tools, 19 REST endpoints, WebSocket protocol
+- [API Reference](docs/API.md) — all 31 MCP tools, 18 REST endpoints, WebSocket protocol
 - [Architecture](docs/ARCHITECTURE.md) — source structure, design principles, database schema
 - [Dashboard](docs/DASHBOARD.md) — kanban board features, keyboard shortcuts, screenshots
 - [Setup Guide](docs/SETUP.md) — installation, client setup (Claude Code, OpenCode, Cursor, Windsurf), hooks
