@@ -55,6 +55,31 @@ function main() {
       });
   }
 
+  function makeToolResponse(id: number | string, result: unknown): JsonRpcResponse {
+    const text = JSON.stringify(result, null, 2) + INSTRUCTIONS;
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: { content: [{ type: 'text', text }] },
+    };
+  }
+
+  function makeToolError(id: number | string, err: unknown): JsonRpcResponse {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      },
+    };
+  }
+
   function handleRequest(request: JsonRpcRequest): JsonRpcResponse | null {
     const { method, params, id } = request;
 
@@ -82,26 +107,15 @@ function main() {
         const toolArgs = (params as { arguments?: Record<string, unknown> }).arguments || {};
         try {
           const result = handleTool(toolName, toolArgs);
-          const text = JSON.stringify(result, null, 2) + INSTRUCTIONS;
-          return {
-            jsonrpc: '2.0',
-            id,
-            result: { content: [{ type: 'text', text }] },
-          };
+          if (result && typeof result === 'object' && 'then' in result) {
+            (result as Promise<unknown>)
+              .then((resolved) => send(makeToolResponse(id, resolved)))
+              .catch((err) => send(makeToolError(id, err)));
+            return null;
+          }
+          return makeToolResponse(id, result);
         } catch (err) {
-          return {
-            jsonrpc: '2.0',
-            id,
-            result: {
-              content: [
-                {
-                  type: 'text',
-                  text: `Error: ${err instanceof Error ? err.message : String(err)}`,
-                },
-              ],
-              isError: true,
-            },
-          };
+          return makeToolError(id, err);
         }
       }
 

@@ -137,7 +137,14 @@ export interface PipelineConfig {
   readonly stages: string;
   readonly approval_config: string | null;
   readonly assignment_config: string | null;
+  readonly gate_config: string | null;
   readonly updated_at: string;
+}
+
+export interface GateConfig {
+  require_comment?: boolean;
+  require_artifact?: boolean;
+  exempt_stages?: string[];
 }
 
 // ---------------------------------------------------------------------------

@@ -514,6 +514,83 @@ describe('input validation', () => {
   });
 });
 
+describe('stage gates', () => {
+  it('allows advance when no gate config', () => {
+    const task = ctx.tasks.create({ title: 'No gate', project: 'ungated' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    const advanced = ctx.tasks.advance(task.id);
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('blocks advance when require_comment is true and no comment exists', () => {
+    ctx.tasks.setPipelineConfig('gated', ['backlog', 'spec', 'plan', 'done']);
+    ctx.tasks.setGateConfig('gated', { require_comment: true });
+    const task = ctx.tasks.create({ title: 'Gated', project: 'gated' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    expect(() => ctx.tasks.advance(task.id)).toThrow('Stage gate: at least one comment required');
+  });
+
+  it('allows advance when require_comment is true and comment exists', () => {
+    ctx.tasks.setPipelineConfig('gated2', ['backlog', 'spec', 'plan', 'done']);
+    ctx.tasks.setGateConfig('gated2', { require_comment: true });
+    const task = ctx.tasks.create({ title: 'Gated2', project: 'gated2' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    ctx.comments.add(task.id, 'agent-1', 'Some work done');
+    const advanced = ctx.tasks.advance(task.id);
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('allows advance when inline comment is passed', () => {
+    ctx.tasks.setPipelineConfig('gated3', ['backlog', 'spec', 'plan', 'done']);
+    ctx.tasks.setGateConfig('gated3', { require_comment: true });
+    const task = ctx.tasks.create({ title: 'Gated3', project: 'gated3' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    const advanced = ctx.tasks.advance(task.id, undefined, 'Inline comment');
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('exempts specified stages from gate check', () => {
+    ctx.tasks.setPipelineConfig('gated4', ['backlog', 'spec', 'plan', 'done']);
+    ctx.tasks.setGateConfig('gated4', {
+      require_comment: true,
+      exempt_stages: ['backlog', 'spec'],
+    });
+    const task = ctx.tasks.create({ title: 'Gated4', project: 'gated4' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    const advanced = ctx.tasks.advance(task.id);
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('blocks advance when require_artifact is true and no artifact at current stage', () => {
+    ctx.tasks.setPipelineConfig('art-gate', ['backlog', 'spec', 'plan', 'done']);
+    ctx.tasks.setGateConfig('art-gate', { require_artifact: true });
+    const task = ctx.tasks.create({ title: 'Art gate', project: 'art-gate' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    expect(() => ctx.tasks.advance(task.id)).toThrow('Stage gate: at least one artifact required');
+  });
+
+  it('allows advance when require_artifact is true and artifact exists', () => {
+    ctx.tasks.setPipelineConfig('art-gate2', ['backlog', 'spec', 'plan', 'done']);
+    ctx.tasks.setGateConfig('art-gate2', { require_artifact: true });
+    const task = ctx.tasks.create({ title: 'Art gate2', project: 'art-gate2' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    ctx.tasks.addArtifact(task.id, 'spec-doc', 'The spec', 'agent-1', 'spec');
+    const advanced = ctx.tasks.advance(task.id);
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('returns null gate config for unconfigured project', () => {
+    expect(ctx.tasks.getGateConfig('nonexistent')).toBeNull();
+  });
+
+  it('stores and retrieves gate config', () => {
+    ctx.tasks.setPipelineConfig('gc-test', ['backlog', 'done']);
+    ctx.tasks.setGateConfig('gc-test', { require_comment: true, exempt_stages: ['backlog'] });
+    const gate = ctx.tasks.getGateConfig('gc-test');
+    expect(gate).toEqual({ require_comment: true, exempt_stages: ['backlog'] });
+  });
+});
+
 describe('error types', () => {
   it('throws NotFoundError for missing task', () => {
     expect(() => ctx.tasks.advance(999)).toThrow('not found');

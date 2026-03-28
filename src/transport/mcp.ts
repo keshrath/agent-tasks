@@ -115,12 +115,17 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_advance',
     description:
-      'Advance a task to the next pipeline stage (or a specific stage). Validates dependencies.',
+      'Advance a task to the next pipeline stage (or a specific stage). Validates dependencies and stage gates. Optionally attach a comment in the same call.',
     inputSchema: {
       type: 'object',
       properties: {
         task_id: { type: 'number', description: 'Task ID' },
         stage: { type: 'string', description: 'Target stage (omit to advance to next stage)' },
+        comment: {
+          type: 'string',
+          description:
+            'Optional comment to attach (also satisfies stage-gate require_comment check)',
+        },
       },
       required: ['task_id'],
     },
@@ -245,7 +250,7 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_pipeline_config',
     description:
-      'Get or set pipeline stages for a project. Call without stages to get current config.',
+      'Get or set pipeline stages and gate config for a project. Call without stages/gate_config to get current config.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -257,6 +262,27 @@ export const tools: ToolDefinition[] = [
           type: 'array',
           items: { type: 'string' },
           description: 'Stage names in order (set mode)',
+        },
+        gate_config: {
+          type: 'object',
+          description:
+            'Stage-gate enforcement config. Example: { "require_comment": true, "require_artifact": false, "exempt_stages": ["backlog"] }',
+          properties: {
+            require_comment: {
+              type: 'boolean',
+              description: 'Require at least one comment before advancing (default: false)',
+            },
+            require_artifact: {
+              type: 'boolean',
+              description:
+                'Require at least one artifact at current stage before advancing (default: false)',
+            },
+            exempt_stages: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Stages exempt from gate checks (e.g. ["backlog"])',
+            },
+          },
         },
       },
     },
@@ -464,10 +490,21 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_cleanup',
     description:
-      'Run data cleanup manually — purges completed/cancelled tasks and stale data older than the retention period.',
+      'Run data cleanup. Modes: "retention" (default) purges old completed/cancelled tasks, "stale_agents" checks agent heartbeats and fails tasks from dead agents, "all" runs both.',
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['retention', 'stale_agents', 'all'],
+          description: 'Cleanup mode (default: retention)',
+        },
+        timeout_minutes: {
+          type: 'number',
+          description:
+            'Heartbeat timeout in minutes for stale agent detection (default: 30, only used with stale_agents mode)',
+        },
+      },
     },
   },
   {
@@ -543,7 +580,10 @@ function optStringArray(args: Record<string, unknown>, key: string): string[] | 
 // Tool dispatch
 // ---------------------------------------------------------------------------
 
-export type ToolHandler = (name: string, args: Record<string, unknown>) => unknown;
+export type ToolHandler = (
+  name: string,
+  args: Record<string, unknown>,
+) => unknown | Promise<unknown>;
 
 export function createToolHandler(ctx: AppContext): ToolHandler {
   let currentSession: { id: string; name: string } | null = null;
@@ -552,7 +592,10 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
     return currentSession?.name ?? 'system';
   }
 
-  return function handleTool(name: string, args: Record<string, unknown>): unknown {
+  return function handleTool(
+    name: string,
+    args: Record<string, unknown>,
+  ): unknown | Promise<unknown> {
     switch (name) {
       case 'task_set_session': {
         const id = requireString(args, 'id');
@@ -606,8 +649,15 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
       case 'task_cancel':
         return ctx.tasks.cancel(requireNumber(args, 'task_id'), requireString(args, 'reason'));
 
-      case 'task_advance':
-        return ctx.tasks.advance(requireNumber(args, 'task_id'), optString(args, 'stage'));
+      case 'task_advance': {
+        const advanceTaskId = requireNumber(args, 'task_id');
+        const advanceComment = optString(args, 'comment');
+        const advanced = ctx.tasks.advance(advanceTaskId, optString(args, 'stage'), advanceComment);
+        if (advanceComment) {
+          ctx.comments.add(advanceTaskId, sessionName(), advanceComment);
+        }
+        return advanced;
+      }
 
       case 'task_regress':
         return ctx.tasks.regress(
@@ -667,10 +717,33 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
 
       case 'task_pipeline_config': {
         const stages = optStringArray(args, 'stages');
+        const gateConfig = args.gate_config as Record<string, unknown> | undefined;
+        const project = optString(args, 'project') || 'default';
         if (stages) {
-          return ctx.tasks.setPipelineConfig(optString(args, 'project') || 'default', stages);
+          ctx.tasks.setPipelineConfig(project, stages);
         }
-        return { stages: ctx.tasks.getPipelineStages(optString(args, 'project')) };
+        if (gateConfig && typeof gateConfig === 'object') {
+          ctx.tasks.setGateConfig(project, {
+            require_comment: gateConfig.require_comment === true,
+            require_artifact: gateConfig.require_artifact === true,
+            exempt_stages: Array.isArray(gateConfig.exempt_stages)
+              ? (gateConfig.exempt_stages as string[])
+              : undefined,
+          });
+        }
+        if (stages || gateConfig) {
+          const config = ctx.tasks.getGateConfig(project);
+          return {
+            stages: ctx.tasks.getPipelineStages(project),
+            gate_config: config ?? { require_comment: false },
+          };
+        }
+        return {
+          stages: ctx.tasks.getPipelineStages(optString(args, 'project')),
+          gate_config: ctx.tasks.getGateConfig(optString(args, 'project')) ?? {
+            require_comment: false,
+          },
+        };
       }
 
       case 'task_delete': {
@@ -796,8 +869,23 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
         return created;
       }
 
-      case 'task_cleanup':
+      case 'task_cleanup': {
+        const cleanupMode = (optString(args, 'mode') ?? 'retention') as string;
+        const timeoutMinutes = optNumber(args, 'timeout_minutes');
+        if (cleanupMode === 'stale_agents') {
+          return ctx.cleanup.failStaleAgentTasks(timeoutMinutes).then((stale) => ({
+            stale_agents: stale,
+          }));
+        }
+        if (cleanupMode === 'all') {
+          const retention = ctx.cleanup.run();
+          return ctx.cleanup.failStaleAgentTasks(timeoutMinutes).then((stale) => ({
+            retention,
+            stale_agents: stale,
+          }));
+        }
         return ctx.cleanup.run();
+      }
 
       case 'task_generate_rules': {
         const format = requireString(args, 'format') as 'mdc' | 'claude_md';

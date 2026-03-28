@@ -442,12 +442,27 @@ Useful for viewing the dashboard while MCP servers run in separate terminals, or
 
 ### Environment variables
 
-| Variable                   | Default                         | Description                                                       |
-| -------------------------- | ------------------------------- | ----------------------------------------------------------------- |
-| `AGENT_TASKS_DB`           | `~/.agent-tasks/agent-tasks.db` | Path to the SQLite database file                                  |
-| `AGENT_TASKS_PORT`         | `3422`                          | HTTP/WebSocket port for the dashboard                             |
-| `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable embedded instructions in MCP tool responses |
-| `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST API URL (for bridge notifications)                |
+| Variable                   | Default                         | Description                                                              |
+| -------------------------- | ------------------------------- | ------------------------------------------------------------------------ |
+| `AGENT_TASKS_DB`           | `~/.agent-tasks/agent-tasks.db` | Path to the SQLite database file                                         |
+| `AGENT_TASKS_PORT`         | `3422`                          | HTTP/WebSocket port for the dashboard                                    |
+| `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable embedded instructions in MCP tool responses        |
+| `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST API URL (for bridge notifications and heartbeat cleanup) |
+
+### Agent-comm integration
+
+agent-tasks integrates with [agent-comm](https://github.com/keshrath/agent-comm) for two features:
+
+1. **Bridge notifications** — when tasks are claimed, advanced, or commented on, agent-tasks sends messages to affected agents via agent-comm
+2. **Heartbeat-based cleanup** — agent-tasks queries agent-comm's `GET /api/agents` endpoint to check agent liveness, and auto-fails tasks assigned to dead agents
+
+To enable:
+
+1. Install and start agent-comm (default port: 3421)
+2. Set `AGENT_COMM_URL` if using a non-default URL
+3. agent-tasks checks heartbeats on startup (10s delay) and when `task_cleanup` is called with `mode: "stale_agents"` or `mode: "all"`
+
+If agent-comm is not running, both features degrade gracefully — notifications are silently dropped and stale agent detection is skipped.
 
 ### Custom pipeline stages
 
@@ -493,7 +508,7 @@ A new database will be created automatically on the next start.
 
 ### Schema
 
-The database uses schema versioning (currently V3) with automatic migrations. Migrations are idempotent.
+The database uses schema versioning (currently V4) with automatic migrations. Migrations are idempotent.
 
 ---
 

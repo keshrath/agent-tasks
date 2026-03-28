@@ -283,6 +283,39 @@ describe('task_advance', () => {
   it('rejects missing task_id', () => {
     expect(() => handle('task_advance', {})).toThrow('"task_id" is required');
   });
+
+  it('advances with inline comment', () => {
+    const task = handle('task_create', { title: 'Comment advance' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    const advanced = handle('task_advance', {
+      task_id: task.id,
+      comment: 'Spec work completed',
+    }) as { stage: string };
+    expect(advanced.stage).toBe('plan');
+    const comments = handle('task_get_comments', { task_id: task.id }) as Array<{
+      content: string;
+    }>;
+    expect(comments).toHaveLength(1);
+    expect(comments[0].content).toBe('Spec work completed');
+  });
+
+  it('enforces stage gate require_comment via pipeline_config', () => {
+    handle('task_pipeline_config', {
+      project: 'gated-mcp',
+      stages: ['backlog', 'spec', 'plan', 'done'],
+      gate_config: { require_comment: true, exempt_stages: ['backlog'] },
+    });
+    const task = handle('task_create', { title: 'Gated MCP', project: 'gated-mcp' }) as {
+      id: number;
+    };
+    handle('task_claim', { task_id: task.id });
+    expect(() => handle('task_advance', { task_id: task.id })).toThrow('Stage gate');
+    const advanced = handle('task_advance', {
+      task_id: task.id,
+      comment: 'Satisfies gate',
+    }) as { stage: string };
+    expect(advanced.stage).toBe('plan');
+  });
 });
 
 // =============================================================================
@@ -581,13 +614,34 @@ describe('task_pipeline_config', () => {
     const result = handle('task_pipeline_config', {
       project: 'custom-proj',
       stages: customStages,
-    }) as { stages: string };
+    }) as { stages: string[] };
     expect(result).toBeDefined();
 
     const readBack = handle('task_pipeline_config', { project: 'custom-proj' }) as {
       stages: string[];
     };
     expect(readBack.stages).toEqual(customStages);
+  });
+
+  it('sets and reads gate_config', () => {
+    handle('task_pipeline_config', {
+      project: 'gate-proj',
+      stages: ['backlog', 'spec', 'done'],
+      gate_config: { require_comment: true, exempt_stages: ['backlog'] },
+    });
+    const config = handle('task_pipeline_config', { project: 'gate-proj' }) as {
+      stages: string[];
+      gate_config: { require_comment: boolean; exempt_stages: string[] };
+    };
+    expect(config.gate_config.require_comment).toBe(true);
+    expect(config.gate_config.exempt_stages).toEqual(['backlog']);
+  });
+
+  it('returns default gate_config when none set', () => {
+    const config = handle('task_pipeline_config', {}) as {
+      gate_config: { require_comment: boolean };
+    };
+    expect(config.gate_config.require_comment).toBe(false);
   });
 });
 

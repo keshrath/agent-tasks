@@ -104,6 +104,19 @@ describe('cleanup service', () => {
   });
 });
 
+describe('stale agent cleanup', () => {
+  it('returns empty when no agent bridge', async () => {
+    const result = await ctx.cleanup.failStaleAgentTasks();
+    expect(result.failed).toHaveLength(0);
+    expect(result.checked).toBe(0);
+  });
+
+  it('returns empty when no in-progress tasks', async () => {
+    const result = await ctx.cleanup.failStaleAgentTasks();
+    expect(result.failed).toHaveLength(0);
+  });
+});
+
 describe('task count', () => {
   it('returns 0 for empty database', () => {
     expect(ctx.tasks.count()).toBe(0);

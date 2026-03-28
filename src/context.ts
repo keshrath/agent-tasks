@@ -37,7 +37,7 @@ export function createContext(dbOptions?: DbOptions): AppContext {
   const approvals = new ApprovalService(db, events);
   const agentBridge = new AgentBridge(events);
   const retentionDays = parseInt(process.env.AGENT_TASKS_RETENTION_DAYS ?? '30', 10);
-  const cleanup = new CleanupService(db, retentionDays);
+  const cleanup = new CleanupService(db, retentionDays, agentBridge);
 
   agentBridge.start();
   cleanup.start();

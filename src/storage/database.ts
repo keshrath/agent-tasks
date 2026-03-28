@@ -24,7 +24,7 @@ export interface Db {
   close(): void;
 }
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export function createDb(options: DbOptions = {}): Db {
   const dbPath = resolveDbPath(options.path);
@@ -98,6 +98,7 @@ function applySchema(db: Database.Database): void {
   if (currentVersion < 1) migrateV1(db);
   if (currentVersion < 2) migrateV2(db);
   if (currentVersion < 3) migrateV3(db);
+  if (currentVersion < 4) migrateV4(db);
 
   db.prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`).run(
     String(SCHEMA_VERSION),
@@ -266,5 +267,13 @@ function migrateV3(db: Database.Database): void {
   const depCols = db.prepare(`PRAGMA table_info(task_dependencies)`).all() as { name: string }[];
   if (!depCols.some((c) => c.name === 'relationship')) {
     db.exec(`ALTER TABLE task_dependencies ADD COLUMN relationship TEXT NOT NULL DEFAULT 'blocks'`);
+  }
+}
+
+function migrateV4(db: Database.Database): void {
+  // -- Stage-gate configuration per project
+  const pcCols = db.prepare(`PRAGMA table_info(pipeline_config)`).all() as { name: string }[];
+  if (!pcCols.some((c) => c.name === 'gate_config')) {
+    db.exec(`ALTER TABLE pipeline_config ADD COLUMN gate_config TEXT`);
   }
 }

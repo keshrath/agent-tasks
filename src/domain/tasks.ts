@@ -17,6 +17,7 @@ import type {
   TaskStatus,
   TaskUpdateInput,
   PipelineConfig,
+  GateConfig,
   SearchResult,
 } from '../types.js';
 import { NotFoundError, ConflictError, ValidationError } from '../types.js';
@@ -78,6 +79,33 @@ export class TaskService {
       }
     }
     return [...DEFAULT_STAGES];
+  }
+
+  getGateConfig(project?: string): GateConfig | null {
+    if (!project) return null;
+    const config = this.db.queryOne<PipelineConfig>(
+      'SELECT * FROM pipeline_config WHERE project = ?',
+      [project],
+    );
+    if (!config?.gate_config) return null;
+    try {
+      return JSON.parse(config.gate_config) as GateConfig;
+    } catch {
+      return null;
+    }
+  }
+
+  setGateConfig(project: string, gateConfig: GateConfig): PipelineConfig {
+    this.validateProjectName(project);
+    const json = JSON.stringify(gateConfig);
+    this.db.run(
+      `INSERT INTO pipeline_config (project, stages, gate_config, updated_at) VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(project) DO UPDATE SET gate_config = ?, updated_at = datetime('now')`,
+      [project, JSON.stringify(this.getPipelineStages(project)), json, json],
+    );
+    return this.db.queryOne<PipelineConfig>('SELECT * FROM pipeline_config WHERE project = ?', [
+      project,
+    ])!;
   }
 
   setPipelineConfig(project: string, stages: string[]): PipelineConfig {
@@ -374,7 +402,7 @@ export class TaskService {
 
   // ---- Pipeline Advancement ----
 
-  advance(taskId: number, toStage?: string): Task {
+  advance(taskId: number, toStage?: string, comment?: string): Task {
     return this.db.transaction(() => {
       const task = this.requireTask(taskId);
       if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
@@ -412,6 +440,7 @@ export class TaskService {
       }
 
       this.checkDependencies(taskId);
+      this.checkStageGate(task, comment);
 
       const newStage = activeStages[targetIdx];
       const newStatus = syncStatusForStage(newStage, activeStages);
@@ -818,6 +847,40 @@ export class TaskService {
       throw new ValidationError(
         `Artifact content too long (max ${MAX_ARTIFACT_CONTENT_LENGTH} chars).`,
       );
+    }
+  }
+
+  private checkStageGate(task: Task, inlineComment?: string): void {
+    const gate = this.getGateConfig(task.project ?? undefined);
+    if (!gate) return;
+
+    const exemptStages = gate.exempt_stages ?? [];
+    if (exemptStages.includes(task.stage)) return;
+
+    if (gate.require_comment) {
+      if (!inlineComment) {
+        const commentCount = this.db.queryOne<{ cnt: number }>(
+          `SELECT COUNT(*) as cnt FROM task_comments WHERE task_id = ?`,
+          [task.id],
+        );
+        if (!commentCount || commentCount.cnt === 0) {
+          throw new ValidationError(
+            `Stage gate: at least one comment required before advancing from '${task.stage}'. Use task_comment or pass comment param to task_advance.`,
+          );
+        }
+      }
+    }
+
+    if (gate.require_artifact) {
+      const artifactCount = this.db.queryOne<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM task_artifacts WHERE task_id = ? AND stage = ?`,
+        [task.id, task.stage],
+      );
+      if (!artifactCount || artifactCount.cnt === 0) {
+        throw new ValidationError(
+          `Stage gate: at least one artifact required at stage '${task.stage}' before advancing. Use task_add_artifact.`,
+        );
+      }
     }
   }
 

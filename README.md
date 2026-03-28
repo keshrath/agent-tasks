@@ -37,6 +37,8 @@ When you run multiple AI agents on the same codebase, they need a shared task pi
 - **Real-time kanban dashboard** — drag-and-drop, side panel, inline creation, dark/light theme
 - **3 transport layers** — MCP (stdio), REST API (HTTP), WebSocket (real-time events)
 - **TodoWrite bridge** — intercepts Claude Code's built-in TodoWrite and syncs to the pipeline
+- **Stage gates** — configurable per-project gates that require comments or artifacts before advancing
+- **Heartbeat-based cleanup** — auto-fails tasks from dead agents using agent-comm heartbeat data
 - **Task cleanup hooks** — auto-fails orphaned tasks on session stop and cleans up stale tasks on session start
 - **Agent bridge** — notifies connected agents on task events
 
@@ -163,6 +165,14 @@ npm run check         # Full CI: typecheck + lint + format + test
 | `AGENT_TASKS_PORT`         | `3422`                          | Dashboard HTTP/WebSocket port                        |
 | `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable response-embedded instructions |
 | `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications         |
+
+---
+
+## Dependencies
+
+**Required**: Node.js >= 20.11, better-sqlite3 (bundled)
+
+**Optional**: [agent-comm](https://github.com/keshrath/agent-comm) — Heartbeat-based task cleanup requires agent-comm running at `AGENT_COMM_URL` (default: `http://localhost:3421`). Without agent-comm, stale agent detection is skipped gracefully. Flow: agent-comm tracks heartbeats → agent-tasks checks heartbeats → auto-fails tasks from dead agents.
 
 ---
 
