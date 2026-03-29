@@ -116,23 +116,3 @@ describe('stale agent cleanup', () => {
     expect(result.failed).toHaveLength(0);
   });
 });
-
-describe('task count', () => {
-  it('returns 0 for empty database', () => {
-    expect(ctx.tasks.count()).toBe(0);
-  });
-
-  it('returns correct count after creating tasks', () => {
-    ctx.tasks.create({ title: 'A' }, 'agent-1');
-    ctx.tasks.create({ title: 'B' }, 'agent-1');
-    ctx.tasks.create({ title: 'C' }, 'agent-1');
-    expect(ctx.tasks.count()).toBe(3);
-  });
-
-  it('decrements after delete', () => {
-    const t = ctx.tasks.create({ title: 'Delete me' }, 'agent-1');
-    ctx.tasks.create({ title: 'Keep me' }, 'agent-1');
-    ctx.tasks.delete(t.id);
-    expect(ctx.tasks.count()).toBe(1);
-  });
-});

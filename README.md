@@ -2,8 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-337%20passing-brightgreen)]()
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-32-purple)]()
+[![Tests](https://img.shields.io/badge/tests-396%20passing-brightgreen)]()
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-16-purple)]()
 [![REST Endpoints](https://img.shields.io/badge/REST-18%20endpoints-orange)]()
 
 **Pipeline-driven task management for AI coding agents.** An [MCP](https://modelcontextprotocol.io/) server with stage-gated pipelines, multi-agent collaboration, and a real-time kanban dashboard. Tasks flow through configurable stages — `backlog`, `spec`, `plan`, `implement`, `test`, `review`, `done` — with dependency tracking, approval workflows, artifact versioning, and threaded comments.
@@ -38,7 +38,9 @@ When you run multiple AI agents on the same codebase, they need a shared task pi
 - **3 transport layers** — MCP (stdio), REST API (HTTP), WebSocket (real-time events)
 - **TodoWrite bridge** — intercepts Claude Code's built-in TodoWrite and syncs to the pipeline
 - **Stage gates** — configurable per-project gates with per-stage rules: require named artifacts, minimum artifact counts, comments, or approvals before advancing
-- **Decisions log** — structured decision artifacts (chose X over Y because Z) via `task_decision` tool
+- **Decisions log** — structured decision artifacts (chose X over Y because Z) via `task_artifact(type: "decision")`
+- **Learnings propagation** — `task_artifact(type: "learning")` captures insights (technique, pitfall, decision, pattern); auto-propagated to parent and sibling tasks on completion
+- **Agent affinity** — `task_next` prefers routing tasks to agents with related history (parent, dependency, project) as a tie-breaker
 - **Heartbeat-based cleanup** — auto-fails tasks from dead agents using agent-comm heartbeat data
 - **Task cleanup hooks** — auto-fails orphaned tasks on session stop and cleans up stale tasks on session start
 - **Agent bridge** — notifies connected agents on task events
@@ -106,17 +108,17 @@ Once configured, Claude Code can use all 32 MCP tools directly — creating task
 
 ---
 
-## MCP Tools (32)
+## MCP Tools (16)
 
-| Category                | Tools                                                                                                       |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
-| **Task lifecycle** (12) | `task_create`, `task_list`, `task_next`, `task_claim`, `task_advance`, `task_regress`, `task_complete`, ... |
-| **Subtasks & deps** (4) | `task_expand`, `task_get_subtasks`, `task_add_dependency`, `task_remove_dependency`                         |
-| **Artifacts** (3)       | `task_add_artifact`, `task_get_artifacts`, `task_decision`                                                  |
-| **Comments** (2)        | `task_comment`, `task_get_comments`                                                                         |
-| **Collaboration** (2)   | `task_add_collaborator`, `task_remove_collaborator`                                                         |
-| **Approvals** (5)       | `task_request_approval`, `task_approve`, `task_reject`, `task_pending_approvals`, `task_review_cycle`       |
-| **Config & utils** (4)  | `task_pipeline_config`, `task_set_session`, `task_cleanup`, `task_generate_rules`                           |
+| Category                    | Tools                                                                                              |
+| --------------------------- | -------------------------------------------------------------------------------------------------- |
+| **Task CRUD** (7)           | `task_create`, `task_list`, `task_next`, `task_claim`, `task_update`, `task_delete`, `task_search` |
+| **Lifecycle** (1)           | `task_stage` (advance, regress, complete, fail, cancel)                                            |
+| **Subtasks & deps** (2)     | `task_expand`, `task_dependency`                                                                   |
+| **Artifacts & queries** (2) | `task_artifact` (general, decision, learning), `task_query` (subtasks, artifacts, comments)        |
+| **Comments & collab** (2)   | `task_comment`, `task_collaborator`                                                                |
+| **Approvals** (1)           | `task_approval`                                                                                    |
+| **Config & utils** (1)      | `task_config` (pipeline, session, cleanup, rules)                                                  |
 
 See [full API reference](docs/API.md) for detailed descriptions of every tool and endpoint.
 

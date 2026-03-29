@@ -182,8 +182,10 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
           }
         }
       }
-    } catch {
-      /* ignore */
+    } catch (err) {
+      process.stderr.write(
+        '[agent-tasks] DB poll error: ' + (err instanceof Error ? err.message : String(err)) + '\n',
+      );
     }
   }, DB_POLL_INTERVAL_MS);
   dbPollInterval.unref();
@@ -225,7 +227,11 @@ function sendFullState(ws: WebSocket, ctx: AppContext): void {
         collaborators: ctx.collaborators.listAllByTask(),
       }),
     );
-  } catch {
-    /* ignore send errors on closed sockets */
+  } catch (err) {
+    process.stderr.write(
+      '[agent-tasks] sendFullState error: ' +
+        (err instanceof Error ? err.message : String(err)) +
+        '\n',
+    );
   }
 }

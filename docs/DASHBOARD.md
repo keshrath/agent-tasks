@@ -52,6 +52,16 @@ Decisions appear in their own "Decisions" section (with a gavel icon) above the 
 
 ![Decision card](assets/decisions.png)
 
+## Learnings
+
+The side panel displays learning artifacts in a dedicated "Learnings" section (with a lightbulb icon) above Decisions and regular Artifacts. Learnings are created via `task_learn` and are rendered as structured cards showing:
+
+- **Category** — technique, pitfall, decision, or pattern (each with a distinct icon)
+- **Source** — when propagated from a subtask or sibling, shows the originating task ID
+- **Content** — the learning text, rendered as Markdown
+
+Learnings are auto-propagated when a subtask completes: they are copied to the parent task (attributed as "Learning from subtask #N") and to all in-progress sibling subtasks ("Learning from sibling #N").
+
 ## Inline creation
 
 Each column has an "Add task" button at the bottom. Click it to reveal an inline form — enter a title (and optionally a description) and press Enter. The task is created directly in that stage.
@@ -99,6 +109,7 @@ Columns with no tasks display a helpful empty state with an icon and hint text.
 - Syntax highlighting in code blocks via highlight.js
 - Expandable/collapsible artifacts with version diffs
 - Decision cards with structured Chose/Over/Because rendering
+- Learning cards with category icons, source attribution, and Markdown content
 - Stage gate indicators on column headers (lock icon + requirement pills)
 - Threaded comments with Markdown rendering
 - Drag-and-drop between stage columns with auto-scroll

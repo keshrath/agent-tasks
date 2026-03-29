@@ -81,7 +81,7 @@ describe('EventBus', () => {
     bus.emit('task:created');
 
     expect(event).not.toBeNull();
-    expect(event!.timestamp).toBeDefined();
+    expect(event!.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(new Date(event!.timestamp).getTime()).not.toBeNaN();
   });
 
@@ -97,17 +97,5 @@ describe('EventBus', () => {
     bus.emit('task:created');
 
     expect(received).toEqual(['second']);
-  });
-
-  it('multiple listeners on same event all fire', () => {
-    const bus = new EventBus();
-    const calls: number[] = [];
-    bus.on('task:created', () => calls.push(1));
-    bus.on('task:created', () => calls.push(2));
-    bus.on('task:created', () => calls.push(3));
-
-    bus.emit('task:created');
-
-    expect(calls).toEqual([1, 2, 3]);
   });
 });

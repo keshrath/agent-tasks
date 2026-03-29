@@ -79,7 +79,12 @@ export class AgentBridge {
           res.on('end', () => {
             try {
               resolve(JSON.parse(body));
-            } catch {
+            } catch (err) {
+              process.stderr.write(
+                '[agent-tasks] fetchAgents JSON parse: ' +
+                  (err instanceof Error ? err.message : String(err)) +
+                  '\n',
+              );
               resolve([]);
             }
           });

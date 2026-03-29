@@ -11,17 +11,10 @@ describe('generateRules', () => {
       expect(result).toContain('# Pipeline Workflow');
     });
 
-    it('includes pipeline stage flow', () => {
-      const result = generateRules('mdc', DEFAULT_STAGES);
-      expect(result).toContain('backlog');
-      expect(result).toContain('spec');
-      expect(result).toContain('done');
-    });
-
     it('excludes cancelled from stage flow', () => {
       const result = generateRules('mdc', DEFAULT_STAGES);
       const flowLine = result.split('\n').find((l) => l.includes('backlog') && l.includes('done'));
-      expect(flowLine).toBeDefined();
+      expect(flowLine).toMatch(/backlog.*done/);
       expect(flowLine).not.toContain('cancelled');
     });
 
@@ -39,8 +32,8 @@ describe('generateRules', () => {
       const result = generateRules('mdc', DEFAULT_STAGES);
       expect(result).toContain('task_create');
       expect(result).toContain('task_claim');
-      expect(result).toContain('task_advance');
-      expect(result).toContain('task_complete');
+      expect(result).toContain('task_stage');
+      expect(result).toContain('task_artifact');
       expect(result).toContain('task_comment');
     });
   });
@@ -51,22 +44,9 @@ describe('generateRules', () => {
       expect(result).toContain('## Pipeline Tasks');
     });
 
-    it('includes stage flow', () => {
-      const result = generateRules('claude_md', DEFAULT_STAGES);
-      expect(result).toContain('backlog');
-      expect(result).toContain('done');
-    });
-
     it('includes project name when provided', () => {
       const result = generateRules('claude_md', DEFAULT_STAGES, 'test-proj');
       expect(result).toContain('test-proj');
-    });
-
-    it('lists key tools', () => {
-      const result = generateRules('claude_md', DEFAULT_STAGES);
-      expect(result).toContain('task_create');
-      expect(result).toContain('task_claim');
-      expect(result).toContain('task_complete');
     });
   });
 

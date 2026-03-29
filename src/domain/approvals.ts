@@ -92,7 +92,12 @@ export class ApprovalService {
         { required?: boolean }
       >;
       return !!approvalConfig[stage]?.required;
-    } catch {
+    } catch (err) {
+      process.stderr.write(
+        '[agent-tasks] isApprovalRequired JSON parse: ' +
+          (err instanceof Error ? err.message : String(err)) +
+          '\n',
+      );
       return false;
     }
   }

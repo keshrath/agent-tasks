@@ -45,9 +45,9 @@ describe('GET /health', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe('ok');
-    expect(body.version).toBeDefined();
-    expect(typeof body.uptime).toBe('number');
-    expect(typeof body.tasks).toBe('number');
+    expect(body.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(body.uptime).toBeGreaterThanOrEqual(0);
+    expect(body.tasks).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -100,7 +100,7 @@ describe('POST /api/tasks', () => {
     );
     expect(res.status).toBe(201);
     const task = await res.json();
-    expect(task.id).toBeDefined();
+    expect(task.id).toBeGreaterThan(0);
     expect(task.title).toBe('Test task');
     expect(task.description).toBe('A task for testing');
     expect(task.priority).toBe(5);
@@ -108,8 +108,8 @@ describe('POST /api/tasks', () => {
     expect(task.status).toBe('pending');
     expect(task.stage).toBe('backlog');
     expect(task.created_by).toBe('api');
-    expect(task.created_at).toBeDefined();
-    expect(task.updated_at).toBeDefined();
+    expect(task.created_at).toMatch(/^\d{4}-/);
+    expect(task.updated_at).toMatch(/^\d{4}-/);
   });
 
   it('creates a task with custom created_by', async () => {
@@ -148,7 +148,7 @@ describe('POST /api/tasks', () => {
     );
     expect(res.status).toBeGreaterThanOrEqual(400);
     const body = await res.json();
-    expect(body.error).toBeDefined();
+    expect(body.error).toEqual(expect.any(String));
   });
 
   it('rejects empty title', async () => {
@@ -354,7 +354,7 @@ describe('PUT /api/tasks/:id/stage', () => {
     });
     expect(res.status).toBeGreaterThanOrEqual(400);
     const body = await res.json();
-    expect(body.error).toBeDefined();
+    expect(body.error).toMatch(/stage/i);
   });
 
   it('returns 404 for non-existent task', async () => {
@@ -408,7 +408,7 @@ describe('GET /api/tasks/:id/subtasks', () => {
     const res = await api('/api/tasks/99999/subtasks');
     expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body.error).toBeDefined();
+    expect(body.error).toMatch(/not found/i);
   });
 });
 
@@ -456,7 +456,7 @@ describe('GET /api/tasks/:id/artifacts', () => {
     const res = await api('/api/tasks/99999/artifacts');
     expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body.error).toBeDefined();
+    expect(body.error).toMatch(/not found/i);
   });
 });
 
@@ -485,7 +485,7 @@ describe('POST /api/tasks/:id/comments', () => {
     );
     expect(res.status).toBe(201);
     const comment = await res.json();
-    expect(comment.id).toBeDefined();
+    expect(comment.id).toBeGreaterThan(0);
     expect(comment.content).toBe('This is a test comment');
     expect(comment.agent_id).toBe('reviewer-1');
     expect(comment.task_id).toBe(1);
@@ -519,7 +519,7 @@ describe('POST /api/tasks/:id/comments', () => {
     );
     expect(res.status).toBeGreaterThanOrEqual(400);
     const body = await res.json();
-    expect(body.error).toBeDefined();
+    expect(body.error).toMatch(/not found/i);
   });
 });
 
@@ -561,7 +561,7 @@ describe('GET /api/tasks/:id/dependencies', () => {
     const res = await api('/api/tasks/99999/dependencies');
     expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body.error).toBeDefined();
+    expect(body.error).toMatch(/not found/i);
   });
 });
 
@@ -574,8 +574,8 @@ describe('GET /api/pipeline', () => {
     const res = await api('/api/pipeline');
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.stages).toBeDefined();
     expect(Array.isArray(body.stages)).toBe(true);
+    expect(body.stages.length).toBeGreaterThan(0);
     expect(body.stages).toContain('backlog');
     expect(body.stages).toContain('spec');
     expect(body.stages).toContain('plan');
@@ -589,8 +589,8 @@ describe('GET /api/pipeline', () => {
     const res = await api('/api/pipeline?project=test-project');
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.stages).toBeDefined();
     expect(Array.isArray(body.stages)).toBe(true);
+    expect(body.stages.length).toBeGreaterThan(0);
   });
 });
 
@@ -609,14 +609,9 @@ describe('GET /api/overview', () => {
 
     expect(Array.isArray(body.dependencies)).toBe(true);
 
-    expect(body.artifactCounts).toBeDefined();
-    expect(typeof body.artifactCounts).toBe('object');
-
-    expect(body.commentCounts).toBeDefined();
-    expect(typeof body.commentCounts).toBe('object');
-
-    expect(body.subtaskProgress).toBeDefined();
-    expect(typeof body.subtaskProgress).toBe('object');
+    expect(body.artifactCounts).toEqual(expect.any(Object));
+    expect(body.commentCounts).toEqual(expect.any(Object));
+    expect(body.subtaskProgress).toEqual(expect.any(Object));
 
     expect(Array.isArray(body.stages)).toBe(true);
     expect(body.stages.length).toBeGreaterThanOrEqual(7);
@@ -716,6 +711,6 @@ describe('Error handling', () => {
     });
     expect(res.status).toBeGreaterThanOrEqual(400);
     const body = await res.json();
-    expect(body.error).toBeDefined();
+    expect(body.error).toMatch(/json/i);
   });
 });
