@@ -50,8 +50,12 @@ function main() {
       .then((d) => {
         dashboard = d;
       })
-      .catch(() => {
-        /* port in use — another instance is serving the dashboard */
+      .catch((err) => {
+        process.stderr.write(
+          '[agent-tasks] Dashboard start failed: ' +
+            (err instanceof Error ? err.message : String(err)) +
+            '\n',
+        );
       });
   }
 

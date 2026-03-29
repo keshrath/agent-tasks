@@ -235,19 +235,6 @@ describe('completion / failure / cancellation', () => {
   });
 });
 
-describe('count', () => {
-  it('returns 0 when empty', () => {
-    expect(ctx.tasks.count()).toBe(0);
-  });
-
-  it('counts all tasks', () => {
-    ctx.tasks.create({ title: 'A' }, 'agent-1');
-    ctx.tasks.create({ title: 'B' }, 'agent-1');
-    ctx.tasks.create({ title: 'C' }, 'agent-1');
-    expect(ctx.tasks.count()).toBe(3);
-  });
-});
-
 describe('dependencies', () => {
   it('blocks advancement when dependency is incomplete', () => {
     const dep = ctx.tasks.create({ title: 'Dependency' }, 'agent-1');
@@ -357,7 +344,7 @@ describe('next task', () => {
     ctx.tasks.create({ title: 'Med', priority: 5 }, 'agent-1');
 
     const next = ctx.tasks.next();
-    expect(next?.title).toBe('High');
+    expect(next?.task.title).toBe('High');
   });
 
   it('skips tasks with incomplete dependencies', () => {
@@ -366,7 +353,7 @@ describe('next task', () => {
     ctx.tasks.addDependency(blocked.id, dep.id);
 
     const next = ctx.tasks.next();
-    expect(next?.title).toBe('Dep');
+    expect(next?.task.title).toBe('Dep');
   });
 
   it('filters by project', () => {
@@ -374,11 +361,23 @@ describe('next task', () => {
     ctx.tasks.create({ title: 'B', priority: 5, project: 'beta' }, 'agent-1');
 
     const next = ctx.tasks.next('beta');
-    expect(next?.title).toBe('B');
+    expect(next?.task.title).toBe('B');
   });
 
   it('returns null when nothing available', () => {
     expect(ctx.tasks.next()).toBeNull();
+  });
+
+  it('prefers tasks with agent affinity (parent)', () => {
+    const parent = ctx.tasks.create({ title: 'Parent', priority: 1 }, 'agent-1');
+    ctx.tasks.claim(parent.id, 'agent-x');
+    ctx.tasks.create({ title: 'Child1', priority: 5, parent_id: parent.id }, 'agent-1');
+    ctx.tasks.create({ title: 'Child2', priority: 5 }, 'agent-1');
+
+    const next = ctx.tasks.next(undefined, undefined, 'agent-x');
+    expect(next?.task.title).toBe('Child1');
+    expect(next?.affinity_score).toBeGreaterThan(0);
+    expect(next?.affinity_reasons).toContain('worked on parent task');
   });
 });
 
@@ -588,6 +587,235 @@ describe('stage gates', () => {
     ctx.tasks.setGateConfig('gc-test', { require_comment: true, exempt_stages: ['backlog'] });
     const gate = ctx.tasks.getGateConfig('gc-test');
     expect(gate).toEqual({ require_comment: true, exempt_stages: ['backlog'] });
+  });
+});
+
+describe('propagateLearnings', () => {
+  it('copies learnings to parent and in-progress siblings on completion', () => {
+    const parent = ctx.tasks.create({ title: 'Parent task' }, 'agent-1');
+    ctx.tasks.claim(parent.id, 'agent-1');
+
+    ctx.tasks.create({ title: 'Subtask 1', parent_id: parent.id }, 'agent-1');
+    ctx.tasks.create({ title: 'Subtask 2', parent_id: parent.id }, 'agent-1');
+
+    ctx.tasks.claim(child1.id, 'agent-1');
+    ctx.tasks.claim(child2.id, 'agent-2');
+
+    ctx.tasks.learn(child1.id, 'Use batch inserts for performance', 'technique', 'agent-1');
+
+    ctx.tasks.complete(child1.id, 'Done');
+
+    const parentArtifacts = ctx.tasks.getArtifacts(parent.id).filter((a) => a.name === 'learning');
+    expect(parentArtifacts).toHaveLength(1);
+    expect(parentArtifacts[0].content).toContain('Learning from subtask');
+    expect(parentArtifacts[0].content).toContain('Use batch inserts for performance');
+
+    const siblingArtifacts = ctx.tasks.getArtifacts(child2.id).filter((a) => a.name === 'learning');
+    expect(siblingArtifacts).toHaveLength(1);
+    expect(siblingArtifacts[0].content).toContain('Learning from sibling');
+    expect(siblingArtifacts[0].content).toContain('Use batch inserts for performance');
+  });
+});
+
+describe('learnings edge cases', () => {
+  it('accepts all 4 categories: technique, pitfall, decision, pattern', () => {
+    const categories = ['technique', 'pitfall', 'decision', 'pattern'] as const;
+    for (const category of categories) {
+      const task = ctx.tasks.create({ title: `Learn ${category}` }, 'agent-1');
+      ctx.tasks.claim(task.id, 'agent-1');
+      const artifact = ctx.tasks.learn(task.id, `Insight about ${category}`, category, 'agent-1');
+      expect(artifact.content).toContain(`[${category}]`);
+      expect(artifact.name).toBe('learning');
+    }
+  });
+
+  it('rejects invalid category', () => {
+    const task = ctx.tasks.create({ title: 'Bad category' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    expect(() => ctx.tasks.learn(task.id, 'Some insight', 'invalid-cat', 'agent-1')).toThrow(
+      'Invalid learning category',
+    );
+  });
+
+  it('only propagates learnings to in-progress siblings, not completed or pending ones', () => {
+    const parent = ctx.tasks.create({ title: 'Parent' }, 'agent-1');
+    ctx.tasks.claim(parent.id, 'agent-1');
+
+    const completing = ctx.tasks.create(
+      { title: 'Completing child', parent_id: parent.id },
+      'agent-1',
+    );
+    const inProgress = ctx.tasks.create(
+      { title: 'In-progress child', parent_id: parent.id },
+      'agent-1',
+    );
+    const pending = ctx.tasks.create({ title: 'Pending child', parent_id: parent.id }, 'agent-1');
+    const completed = ctx.tasks.create(
+      { title: 'Completed child', parent_id: parent.id },
+      'agent-1',
+    );
+
+    ctx.tasks.claim(completing.id, 'agent-1');
+    ctx.tasks.claim(inProgress.id, 'agent-2');
+    ctx.tasks.claim(completed.id, 'agent-3');
+    ctx.tasks.complete(completed.id, 'Already done');
+
+    ctx.tasks.learn(completing.id, 'Use batch inserts', 'technique', 'agent-1');
+    ctx.tasks.complete(completing.id, 'Done');
+
+    const inProgressArtifacts = ctx.tasks
+      .getArtifacts(inProgress.id)
+      .filter((a) => a.name === 'learning');
+    expect(inProgressArtifacts.length).toBeGreaterThan(0);
+    expect(inProgressArtifacts[0].content).toContain('Learning from sibling');
+
+    const pendingArtifacts = ctx.tasks
+      .getArtifacts(pending.id)
+      .filter((a) => a.name === 'learning');
+    expect(pendingArtifacts).toHaveLength(0);
+
+    const completedArtifacts = ctx.tasks
+      .getArtifacts(completed.id)
+      .filter((a) => a.content.includes('Learning from sibling'));
+    expect(completedArtifacts).toHaveLength(0);
+  });
+
+  it('propagates multiple learnings from same task on completion', () => {
+    const parent = ctx.tasks.create({ title: 'Parent' }, 'agent-1');
+    ctx.tasks.claim(parent.id, 'agent-1');
+
+    ctx.tasks.create({ title: 'Child 1', parent_id: parent.id }, 'agent-1');
+    ctx.tasks.create({ title: 'Child 2', parent_id: parent.id }, 'agent-1');
+
+    ctx.tasks.claim(child1.id, 'agent-1');
+    ctx.tasks.claim(child2.id, 'agent-2');
+
+    ctx.tasks.learn(child1.id, 'First insight', 'technique', 'agent-1');
+    ctx.tasks.learn(child1.id, 'Second insight', 'pitfall', 'agent-1');
+
+    ctx.tasks.complete(child1.id, 'Done');
+
+    const parentLearnings = ctx.tasks.getArtifacts(parent.id).filter((a) => a.name === 'learning');
+    expect(parentLearnings).toHaveLength(2);
+    expect(parentLearnings[0].content).toContain('First insight');
+    expect(parentLearnings[1].content).toContain('Second insight');
+
+    const siblingLearnings = ctx.tasks.getArtifacts(child2.id).filter((a) => a.name === 'learning');
+    expect(siblingLearnings).toHaveLength(2);
+  });
+});
+
+describe('agent affinity edge cases', () => {
+  it('gives affinity_score=0 to agent with no history', () => {
+    ctx.tasks.create({ title: 'Orphan task', priority: 5 }, 'agent-1');
+
+    const next = ctx.tasks.next(undefined, undefined, 'brand-new-agent');
+    expect(next).not.toBeNull();
+    expect(next!.affinity_score).toBe(0);
+    expect(next!.affinity_reasons).toHaveLength(0);
+  });
+
+  it('ranks tasks by affinity when priority is equal', () => {
+    const parentA = ctx.tasks.create({ title: 'Parent A', priority: 1 }, 'agent-1');
+    ctx.tasks.claim(parentA.id, 'agent-x');
+    ctx.tasks.complete(parentA.id, 'done');
+
+    const parentB = ctx.tasks.create({ title: 'Parent B', priority: 1 }, 'agent-1');
+    ctx.tasks.claim(parentB.id, 'agent-y');
+    ctx.tasks.complete(parentB.id, 'done');
+
+    ctx.tasks.create({ title: 'Child A', priority: 10, parent_id: parentA.id }, 'agent-1');
+    ctx.tasks.create({ title: 'Child B', priority: 10 }, 'agent-1');
+    ctx.tasks.create({ title: 'Child C', priority: 10, parent_id: parentB.id }, 'agent-1');
+
+    const next = ctx.tasks.next(undefined, undefined, 'agent-x');
+    expect(next).not.toBeNull();
+    expect(next!.task.title).toBe('Child A');
+    expect(next!.affinity_score).toBeGreaterThan(0);
+  });
+
+  it('gives affinity boost for dependency task history', () => {
+    const dep = ctx.tasks.create({ title: 'Dependency', priority: 1 }, 'agent-1');
+    ctx.tasks.claim(dep.id, 'agent-x');
+    ctx.tasks.complete(dep.id, 'done');
+
+    const taskWithDep = ctx.tasks.create({ title: 'Has dep', priority: 10 }, 'agent-1');
+    ctx.tasks.create({ title: 'No dep', priority: 10 }, 'agent-1');
+    ctx.tasks.addDependency(taskWithDep.id, dep.id);
+
+    const next = ctx.tasks.next(undefined, undefined, 'agent-x');
+    expect(next).not.toBeNull();
+    expect(next!.task.title).toBe('Has dep');
+    expect(next!.affinity_score).toBeGreaterThan(0);
+    expect(next!.affinity_reasons).toEqual(
+      expect.arrayContaining([expect.stringContaining('dependency')]),
+    );
+  });
+});
+
+describe('stage gates combinations', () => {
+  it('enforces both require_comment AND require_artifacts per-stage gates', () => {
+    ctx.tasks.setPipelineConfig('combo-gate', ['backlog', 'spec', 'plan', 'done']);
+    ctx.tasks.setGateConfig('combo-gate', {
+      gates: {
+        spec: { require_comment: true, require_artifacts: ['spec-doc'] },
+      },
+    });
+    const task = ctx.tasks.create({ title: 'Combo gate', project: 'combo-gate' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+
+    expect(() => ctx.tasks.advance(task.id)).toThrow('comment required');
+
+    ctx.comments.add(task.id, 'agent-1', 'Here is a comment');
+    expect(() => ctx.tasks.advance(task.id)).toThrow('required artifacts missing');
+
+    ctx.tasks.addArtifact(task.id, 'spec-doc', 'The spec document', 'agent-1', 'spec');
+    const advanced = ctx.tasks.advance(task.id);
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('enforces require_min_artifacts with count > 1', () => {
+    ctx.tasks.setPipelineConfig('min-art-gate', ['backlog', 'spec', 'plan', 'done']);
+    ctx.tasks.setGateConfig('min-art-gate', {
+      gates: {
+        spec: { require_min_artifacts: 3 },
+      },
+    });
+    const task = ctx.tasks.create(
+      { title: 'Min artifacts gate', project: 'min-art-gate' },
+      'agent-1',
+    );
+    ctx.tasks.claim(task.id, 'agent-1');
+
+    expect(() => ctx.tasks.advance(task.id)).toThrow('at least 3 artifact(s) required');
+
+    ctx.tasks.addArtifact(task.id, 'art-1', 'Content 1', 'agent-1', 'spec');
+    ctx.tasks.addArtifact(task.id, 'art-2', 'Content 2', 'agent-1', 'spec');
+    expect(() => ctx.tasks.advance(task.id)).toThrow('at least 3 artifact(s) required');
+
+    ctx.tasks.addArtifact(task.id, 'art-3', 'Content 3', 'agent-1', 'spec');
+    const advanced = ctx.tasks.advance(task.id);
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('enforces require_approval gate and blocks without approval', () => {
+    ctx.tasks.setPipelineConfig('approval-gate', ['backlog', 'spec', 'plan', 'done']);
+    ctx.tasks.setGateConfig('approval-gate', {
+      gates: {
+        spec: { require_approval: true },
+      },
+    });
+    const task = ctx.tasks.create({ title: 'Approval gate', project: 'approval-gate' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+
+    expect(() => ctx.tasks.advance(task.id)).toThrow('approval required');
+
+    const approval = ctx.approvals.request(task.id, 'spec', 'reviewer-1');
+    expect(() => ctx.tasks.advance(task.id)).toThrow('approval required');
+
+    ctx.approvals.approve(approval.id, 'reviewer-1');
+    const advanced = ctx.tasks.advance(task.id);
+    expect(advanced.stage).toBe('plan');
   });
 });
 

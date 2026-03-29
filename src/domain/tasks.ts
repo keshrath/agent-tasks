@@ -22,20 +22,22 @@ import type {
 } from '../types.js';
 import { NotFoundError, ConflictError, ValidationError } from '../types.js';
 import {
-  MAX_TITLE_LENGTH,
-  MAX_DESCRIPTION_LENGTH,
-  MAX_RESULT_LENGTH,
-  MAX_ARTIFACT_CONTENT_LENGTH,
-  MAX_ARTIFACT_NAME_LENGTH,
-  MAX_PROJECT_NAME_LENGTH,
-  MAX_TAG_LENGTH,
-  MAX_TAGS_COUNT,
   MAX_STAGE_NAME_LENGTH,
   MAX_STAGES_COUNT,
   MAX_LIST_LIMIT,
   rejectNullBytes,
   rejectControlChars,
 } from './validate.js';
+import {
+  validateTitle,
+  validateDescription,
+  validateResult,
+  validateProjectName,
+  validateAssignee,
+  validateTags,
+  validateArtifactName,
+  validateArtifactContent,
+} from './task-validator.js';
 
 export const DEFAULT_STAGES = [
   'backlog',
@@ -73,8 +75,12 @@ export class TaskService {
       if (config) {
         try {
           return JSON.parse(config.stages);
-        } catch {
-          /* fall through */
+        } catch (err) {
+          process.stderr.write(
+            '[agent-tasks] getPipelineStages JSON parse: ' +
+              (err instanceof Error ? err.message : String(err)) +
+              '\n',
+          );
         }
       }
     }
@@ -89,8 +95,12 @@ export class TaskService {
     for (const c of configs) {
       try {
         result[c.project] = JSON.parse(c.gate_config!) as GateConfig;
-      } catch {
-        /* skip invalid */
+      } catch (err) {
+        process.stderr.write(
+          '[agent-tasks] getAllGateConfigs JSON parse: ' +
+            (err instanceof Error ? err.message : String(err)) +
+            '\n',
+        );
       }
     }
     return result;
@@ -105,13 +115,18 @@ export class TaskService {
     if (!config?.gate_config) return null;
     try {
       return JSON.parse(config.gate_config) as GateConfig;
-    } catch {
+    } catch (err) {
+      process.stderr.write(
+        '[agent-tasks] getGateConfig JSON parse: ' +
+          (err instanceof Error ? err.message : String(err)) +
+          '\n',
+      );
       return null;
     }
   }
 
   setGateConfig(project: string, gateConfig: GateConfig): PipelineConfig {
-    this.validateProjectName(project);
+    validateProjectName(project);
     const json = JSON.stringify(gateConfig);
     this.db.run(
       `INSERT INTO pipeline_config (project, stages, gate_config, updated_at) VALUES (?, ?, ?, datetime('now'))
@@ -124,7 +139,7 @@ export class TaskService {
   }
 
   setPipelineConfig(project: string, stages: string[]): PipelineConfig {
-    this.validateProjectName(project);
+    validateProjectName(project);
     if (!stages.length) throw new ValidationError('Stages array cannot be empty.');
     if (stages.length > MAX_STAGES_COUNT) {
       throw new ValidationError(`Too many stages (max ${MAX_STAGES_COUNT}).`);
@@ -156,11 +171,11 @@ export class TaskService {
   // ---- CRUD ----
 
   create(input: TaskCreateInput, createdBy: string): Task {
-    this.validateTitle(input.title);
-    if (input.description !== undefined) this.validateDescription(input.description);
-    if (input.project !== undefined) this.validateProjectName(input.project);
-    if (input.tags !== undefined) this.validateTags(input.tags);
-    if (input.assign_to !== undefined) this.validateAssignee(input.assign_to);
+    validateTitle(input.title);
+    if (input.description !== undefined) validateDescription(input.description);
+    if (input.project !== undefined) validateProjectName(input.project);
+    if (input.tags !== undefined) validateTags(input.tags);
+    if (input.assign_to !== undefined) validateAssignee(input.assign_to);
     if (input.parent_id !== undefined) this.requireTask(input.parent_id);
 
     const stages = this.getPipelineStages(input.project);
@@ -194,12 +209,12 @@ export class TaskService {
   update(taskId: number, updates: TaskUpdateInput): Task {
     const task = this.requireTask(taskId);
 
-    if (updates.title !== undefined) this.validateTitle(updates.title);
-    if (updates.description !== undefined) this.validateDescription(updates.description);
-    if (updates.project !== undefined) this.validateProjectName(updates.project);
-    if (updates.tags !== undefined) this.validateTags(updates.tags);
+    if (updates.title !== undefined) validateTitle(updates.title);
+    if (updates.description !== undefined) validateDescription(updates.description);
+    if (updates.project !== undefined) validateProjectName(updates.project);
+    if (updates.tags !== undefined) validateTags(updates.tags);
     if (updates.assigned_to !== undefined && updates.assigned_to !== '') {
-      this.validateAssignee(updates.assigned_to);
+      validateAssignee(updates.assigned_to);
     }
 
     const sets: string[] = [];
@@ -329,7 +344,7 @@ export class TaskService {
   // ---- Claiming ----
 
   claim(taskId: number, claimerName: string): Task {
-    this.validateAssignee(claimerName);
+    validateAssignee(claimerName);
 
     return this.db.transaction(() => {
       const task = this.requireTask(taskId);
@@ -353,10 +368,59 @@ export class TaskService {
     });
   }
 
+  // ---- Learnings ----
+
+  learn(
+    taskId: number,
+    content: string,
+    category: string = 'technique',
+    createdBy: string = 'system',
+  ): TaskArtifact {
+    const validCategories = ['technique', 'pitfall', 'decision', 'pattern'];
+    if (!validCategories.includes(category)) {
+      throw new ValidationError(
+        `Invalid learning category: ${category}. Valid: ${validCategories.join(', ')}`,
+      );
+    }
+    validateArtifactContent(content);
+
+    const task = this.requireTask(taskId);
+    const prefixedContent = `[${category}] ${content}`;
+    return this.addArtifact(taskId, 'learning', prefixedContent, createdBy, task.stage);
+  }
+
+  private propagateLearnings(task: Task): void {
+    if (!task.parent_id) return;
+
+    const learnings = this.db.queryAll<TaskArtifact>(
+      `SELECT * FROM task_artifacts WHERE task_id = ? AND name = 'learning' ORDER BY created_at ASC`,
+      [task.id],
+    );
+
+    if (learnings.length === 0) return;
+
+    for (const learning of learnings) {
+      const parentContent = `Learning from subtask #${task.id}: ${learning.content}`;
+      this.addArtifact(task.parent_id, 'learning', parentContent, 'system');
+    }
+
+    const siblings = this.db.queryAll<Task>(
+      `SELECT * FROM tasks WHERE parent_id = ? AND id != ? AND status = 'in_progress'`,
+      [task.parent_id, task.id],
+    );
+
+    for (const sibling of siblings) {
+      for (const learning of learnings) {
+        const siblingContent = `Learning from sibling #${task.id}: ${learning.content}`;
+        this.addArtifact(sibling.id, 'learning', siblingContent, 'system');
+      }
+    }
+  }
+
   // ---- Completion / Failure / Cancellation ----
 
   complete(taskId: number, result: string): Task {
-    this.validateResult(result);
+    validateResult(result);
 
     return this.db.transaction(() => {
       const task = this.requireTask(taskId);
@@ -371,6 +435,9 @@ export class TaskService {
         `UPDATE tasks SET status = 'completed', stage = ?, result = ?, updated_at = datetime('now') WHERE id = ?`,
         [doneStage, result, taskId],
       );
+
+      this.propagateLearnings(task);
+
       const completed = this.getById(taskId)!;
       this.events.emit('task:completed', { task: completed });
       return completed;
@@ -378,7 +445,7 @@ export class TaskService {
   }
 
   fail(taskId: number, result: string): Task {
-    this.validateResult(result);
+    validateResult(result);
 
     return this.db.transaction(() => {
       const task = this.requireTask(taskId);
@@ -397,7 +464,7 @@ export class TaskService {
   }
 
   cancel(taskId: number, reason: string): Task {
-    this.validateResult(reason);
+    validateResult(reason);
 
     return this.db.transaction(() => {
       const task = this.requireTask(taskId);
@@ -500,7 +567,7 @@ export class TaskService {
       );
 
       if (reason) {
-        this.validateResult(reason);
+        validateResult(reason);
         this.db.run(
           `INSERT INTO task_artifacts (task_id, stage, name, content, created_by) VALUES (?, ?, ?, ?, ?)`,
           [
@@ -526,7 +593,11 @@ export class TaskService {
 
   // ---- Next Task ----
 
-  next(project?: string, stage?: string): Task | null {
+  next(
+    project?: string,
+    stage?: string,
+    agent?: string,
+  ): { task: Task; affinity_score: number; affinity_reasons: string[] } | null {
     let sql = `SELECT t.* FROM tasks t WHERE t.status IN ('pending', 'in_progress') AND t.assigned_to IS NULL`;
     const params: unknown[] = [];
 
@@ -545,9 +616,75 @@ export class TaskService {
       WHERE d.task_id = t.id AND d.relationship = 'blocks' AND dep.status NOT IN ('completed', 'cancelled', 'failed')
     )`;
 
-    sql += ' ORDER BY t.priority DESC, t.created_at ASC LIMIT 1';
+    sql += ' ORDER BY t.priority DESC, t.created_at ASC LIMIT 50';
 
-    return this.db.queryOne<Task>(sql, params);
+    const candidates = this.db.queryAll<Task>(sql, params);
+    if (candidates.length === 0) return null;
+
+    if (!agent || candidates.length === 1) {
+      return { task: candidates[0], affinity_score: 0, affinity_reasons: [] };
+    }
+
+    const topPriority = candidates[0].priority;
+    const topCandidates = candidates.filter((t) => t.priority === topPriority);
+
+    if (topCandidates.length <= 1) {
+      return { task: candidates[0], affinity_score: 0, affinity_reasons: [] };
+    }
+
+    let bestTask = topCandidates[0];
+    let bestScore = 0;
+    let bestReasons: string[] = [];
+
+    for (const candidate of topCandidates) {
+      const { score, reasons } = this.computeAffinity(candidate, agent);
+      if (score > bestScore) {
+        bestScore = score;
+        bestReasons = reasons;
+        bestTask = candidate;
+      }
+    }
+
+    return { task: bestTask, affinity_score: bestScore, affinity_reasons: bestReasons };
+  }
+
+  private computeAffinity(task: Task, agent: string): { score: number; reasons: string[] } {
+    let score = 0;
+    const reasons: string[] = [];
+
+    if (task.parent_id) {
+      const parent = this.getById(task.parent_id);
+      if (parent?.assigned_to === agent) {
+        score += 3;
+        reasons.push('worked on parent task');
+      }
+    }
+
+    const deps = this.db.queryAll<TaskDependency>(
+      `SELECT d.depends_on FROM task_dependencies d WHERE d.task_id = ? AND d.relationship = 'blocks'`,
+      [task.id],
+    );
+    for (const dep of deps) {
+      const depTask = this.getById(dep.depends_on);
+      if (depTask?.assigned_to === agent) {
+        score += 2;
+        reasons.push('worked on dependency #' + dep.depends_on);
+        break;
+      }
+    }
+
+    if (task.project) {
+      const projectHistory = this.db.queryOne<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM tasks WHERE project = ? AND assigned_to = ? AND status IN ('completed', 'in_progress')`,
+        [task.project, agent],
+      );
+      if (projectHistory && projectHistory.cnt > 0) {
+        score += 1;
+        reasons.push('worked on project ' + task.project);
+      }
+    }
+
+    return { score, reasons };
   }
 
   // ---- Dependencies ----
@@ -626,8 +763,8 @@ export class TaskService {
   ): TaskArtifact {
     const task = this.requireTask(taskId);
 
-    this.validateArtifactName(name);
-    this.validateArtifactContent(content);
+    validateArtifactName(name);
+    validateArtifactContent(content);
 
     const effectiveStage = stage && stage !== '_current_' ? stage : task.stage;
 
@@ -791,77 +928,13 @@ export class TaskService {
         { auto_assign?: string }
       >;
       return assignmentConfig[stage]?.auto_assign ?? null;
-    } catch {
-      return null;
-    }
-  }
-
-  private validateTitle(title: string): void {
-    rejectNullBytes(title, 'title');
-    rejectControlChars(title, 'title');
-    const trimmed = title.trim();
-    if (!trimmed) throw new ValidationError('Title must not be empty.');
-    if (trimmed.length > MAX_TITLE_LENGTH) {
-      throw new ValidationError(`Title too long (max ${MAX_TITLE_LENGTH} chars).`);
-    }
-  }
-
-  private validateDescription(desc: string): void {
-    rejectNullBytes(desc, 'description');
-    if (desc.length > MAX_DESCRIPTION_LENGTH) {
-      throw new ValidationError(`Description too long (max ${MAX_DESCRIPTION_LENGTH} chars).`);
-    }
-  }
-
-  private validateResult(result: string): void {
-    rejectNullBytes(result, 'result');
-    if (result.length > MAX_RESULT_LENGTH) {
-      throw new ValidationError(`Result too long (max ${MAX_RESULT_LENGTH} chars).`);
-    }
-  }
-
-  private validateProjectName(project: string): void {
-    rejectNullBytes(project, 'project');
-    rejectControlChars(project, 'project');
-    if (project.length > MAX_PROJECT_NAME_LENGTH) {
-      throw new ValidationError(`Project name too long (max ${MAX_PROJECT_NAME_LENGTH} chars).`);
-    }
-  }
-
-  private validateAssignee(name: string): void {
-    rejectNullBytes(name, 'assign_to');
-    rejectControlChars(name, 'assign_to');
-    if (!name.trim()) throw new ValidationError('Assignee name must not be empty.');
-  }
-
-  private validateTags(tags: string[]): void {
-    if (tags.length > MAX_TAGS_COUNT) {
-      throw new ValidationError(`Too many tags (max ${MAX_TAGS_COUNT}).`);
-    }
-    for (const tag of tags) {
-      rejectNullBytes(tag, 'tag');
-      rejectControlChars(tag, 'tag');
-      if (tag.length > MAX_TAG_LENGTH) {
-        throw new ValidationError(`Tag too long: "${tag}" (max ${MAX_TAG_LENGTH} chars).`);
-      }
-    }
-  }
-
-  private validateArtifactName(name: string): void {
-    rejectNullBytes(name, 'artifact name');
-    rejectControlChars(name, 'artifact name');
-    if (!name.trim()) throw new ValidationError('Artifact name must not be empty.');
-    if (name.length > MAX_ARTIFACT_NAME_LENGTH) {
-      throw new ValidationError(`Artifact name too long (max ${MAX_ARTIFACT_NAME_LENGTH} chars).`);
-    }
-  }
-
-  private validateArtifactContent(content: string): void {
-    rejectNullBytes(content, 'artifact content');
-    if (content.length > MAX_ARTIFACT_CONTENT_LENGTH) {
-      throw new ValidationError(
-        `Artifact content too long (max ${MAX_ARTIFACT_CONTENT_LENGTH} chars).`,
+    } catch (err) {
+      process.stderr.write(
+        '[agent-tasks] getAutoAssignee JSON parse: ' +
+          (err instanceof Error ? err.message : String(err)) +
+          '\n',
       );
+      return null;
     }
   }
 
@@ -903,11 +976,11 @@ export class TaskService {
 
     if (stageGate.require_comment) {
       if (!inlineComment) {
-        const cnt = this.db.queryOne<{ cnt: number }>(
+        const commentCount = this.db.queryOne<{ cnt: number }>(
           `SELECT COUNT(*) as cnt FROM task_comments WHERE task_id = ?`,
           [task.id],
         );
-        if (!cnt || cnt.cnt === 0) {
+        if (!commentCount || commentCount.cnt === 0) {
           throw new ValidationError(
             `Stage gate [${task.stage}]: comment required before advancing. Use task_comment or pass comment param to task_advance.`,
           );
@@ -930,13 +1003,13 @@ export class TaskService {
     }
 
     if (stageGate.require_min_artifacts !== undefined && stageGate.require_min_artifacts > 0) {
-      const cnt2 = this.db.queryOne<{ cnt: number }>(
+      const artifactCount = this.db.queryOne<{ cnt: number }>(
         `SELECT COUNT(*) as cnt FROM task_artifacts WHERE task_id = ? AND stage = ?`,
         [task.id, task.stage],
       );
-      if (!cnt2 || cnt2.cnt < stageGate.require_min_artifacts) {
+      if (!artifactCount || artifactCount.cnt < stageGate.require_min_artifacts) {
         throw new ValidationError(
-          `Stage gate [${task.stage}]: at least ${stageGate.require_min_artifacts} artifact(s) required (found ${cnt2?.cnt ?? 0}). Use task_add_artifact.`,
+          `Stage gate [${task.stage}]: at least ${stageGate.require_min_artifacts} artifact(s) required (found ${artifactCount?.cnt ?? 0}). Use task_add_artifact.`,
         );
       }
     }
@@ -948,7 +1021,7 @@ export class TaskService {
       );
       if (!approved || approved.cnt === 0) {
         throw new ValidationError(
-          `Stage gate [${task.stage}]: approval required before advancing. Use task_request_approval + task_approve.`,
+          `Stage gate [${task.stage}]: approval required before advancing. Use task_approval(action: "request") + task_approval(action: "approve").`,
         );
       }
     }

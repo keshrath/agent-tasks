@@ -20,7 +20,7 @@ src/
 ├── storage/
 │   └── database.ts       # SQLite (WAL mode, schema versioning, FK cascades, FTS5)
 ├── transport/
-│   ├── mcp.ts            # 32 MCP tool definitions + dispatch
+│   ├── mcp.ts            # 27 MCP tool definitions + dispatch
 │   ├── rest.ts           # 19 REST endpoints + static file serving
 │   └── ws.ts             # WebSocket event streaming + livereload
 └── ui/
@@ -79,7 +79,7 @@ All tables use foreign key constraints with `ON DELETE CASCADE`.
 
 ### Automatic cleanup
 
-The `task_cleanup` tool and `POST /api/cleanup` endpoint remove completed/cancelled tasks older than a configurable retention period (default: 7 days). This cleans up tasks and all related data (artifacts, comments, collaborators, approvals, dependencies).
+The `task_config(action: "cleanup")` tool and `POST /api/cleanup` endpoint remove completed/cancelled tasks older than a configurable retention period (default: 7 days). This cleans up tasks and all related data (artifacts, comments, collaborators, approvals, dependencies).
 
 ## Status transitions
 
@@ -95,7 +95,7 @@ Tasks advance sequentially through the configured pipeline stages. Dependencies 
 
 Default pipeline: `backlog` > `spec` > `plan` > `implement` > `test` > `review` > `done`
 
-Configurable per project via `task_pipeline_config`.
+Configurable per project via `task_config(action: "pipeline")`.
 
 ## Cross-process sync
 
@@ -114,16 +114,16 @@ npm run check        # Full CI: typecheck + lint + format + test
 
 ## Test suites
 
-| Suite                 | Tests | What it covers                                               |
-| --------------------- | ----- | ------------------------------------------------------------ |
-| Domain: Tasks         | ~80   | CRUD, stages, dependencies, subtasks, search, claiming       |
-| Domain: Comments      | ~20   | Threading, agent tracking, task linking                      |
-| Domain: Collaborators | ~20   | Roles, assignment, removal, validation                       |
-| Domain: Approvals     | ~30   | Request, approve, reject, review cycles, stage gating        |
-| Domain: Artifacts     | ~25   | Versioning, per-stage, previous_id linking                   |
-| Domain: Events        | ~10   | Pub/sub, event types, error isolation                        |
-| Domain: Edge cases    | ~40   | Boundary values, validation, concurrency, data integrity     |
-| Transport: MCP        | ~35   | All 31 tools, input validation, error formatting             |
-| Transport: REST       | ~30   | All 19 endpoints, query params, error codes                  |
-| Integration           | ~25   | Multi-agent workflows, pipeline traversal, dependency chains |
-| E2E                   | ~22   | Server startup, WebSocket state, REST + WS interaction       |
+| Suite                 | Tests | What it covers                                                             |
+| --------------------- | ----- | -------------------------------------------------------------------------- |
+| Domain: Tasks         | ~80   | CRUD, stages, dependencies, subtasks, search, claiming                     |
+| Domain: Comments      | ~20   | Threading, agent tracking, task linking                                    |
+| Domain: Collaborators | ~20   | Roles, assignment, removal, validation                                     |
+| Domain: Approvals     | ~30   | Request, approve, reject, review cycles, stage gating                      |
+| Domain: Artifacts     | ~25   | Versioning, per-stage, previous_id linking                                 |
+| Domain: Events        | ~10   | Pub/sub, event types, error isolation                                      |
+| Domain: Edge cases    | ~40   | Boundary values, validation, concurrency, data integrity                   |
+| Transport: MCP        | ~35   | All 16 tools + backward-compat aliases, input validation, error formatting |
+| Transport: REST       | ~30   | All 19 endpoints, query params, error codes                                |
+| Integration           | ~25   | Multi-agent workflows, pipeline traversal, dependency chains               |
+| E2E                   | ~22   | Server startup, WebSocket state, REST + WS interaction                     |

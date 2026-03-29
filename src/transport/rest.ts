@@ -435,7 +435,12 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
     try {
       const agents = await ctx.agentBridge.fetchAgents();
       json(res, agents);
-    } catch {
+    } catch (err) {
+      process.stderr.write(
+        '[agent-tasks] fetchAgents error: ' +
+          (err instanceof Error ? err.message : String(err)) +
+          '\n',
+      );
       json(res, []);
     }
   });

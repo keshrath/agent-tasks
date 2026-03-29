@@ -23,7 +23,7 @@ afterEach(() => {
 
 describe('tool definitions', () => {
   it('exports all defined tools', () => {
-    expect(tools.length).toBeGreaterThanOrEqual(29);
+    expect(tools.length).toBe(16);
   });
 
   it('has unique tool names', () => {
@@ -34,7 +34,7 @@ describe('tool definitions', () => {
   it('all tools have required inputSchema', () => {
     for (const tool of tools) {
       expect(tool.inputSchema.type).toBe('object');
-      expect(tool.inputSchema.properties).toBeDefined();
+      expect(Object.keys(tool.inputSchema.properties).length).toBeGreaterThan(0);
     }
   });
 
@@ -486,14 +486,18 @@ describe('task_delete', () => {
 });
 
 // =============================================================================
-// task_add_dependency / task_remove_dependency
+// task_dependency
 // =============================================================================
 
-describe('task_add_dependency', () => {
+describe('task_dependency', () => {
   it('adds a dependency between tasks', () => {
     const a = handle('task_create', { title: 'A' }) as { id: number };
     const b = handle('task_create', { title: 'B' }) as { id: number };
-    const result = handle('task_add_dependency', { task_id: b.id, depends_on: a.id }) as {
+    const result = handle('task_dependency', {
+      action: 'add',
+      task_id: b.id,
+      depends_on: a.id,
+    }) as {
       success: boolean;
       task_id: number;
       depends_on: number;
@@ -505,21 +509,29 @@ describe('task_add_dependency', () => {
 
   it('rejects missing depends_on', () => {
     const a = handle('task_create', { title: 'A' }) as { id: number };
-    expect(() => handle('task_add_dependency', { task_id: a.id })).toThrow(
+    expect(() => handle('task_dependency', { action: 'add', task_id: a.id })).toThrow(
       '"depends_on" is required',
     );
   });
-});
 
-describe('task_remove_dependency', () => {
   it('removes a dependency', () => {
     const a = handle('task_create', { title: 'A' }) as { id: number };
     const b = handle('task_create', { title: 'B' }) as { id: number };
-    handle('task_add_dependency', { task_id: b.id, depends_on: a.id });
-    const result = handle('task_remove_dependency', { task_id: b.id, depends_on: a.id }) as {
+    handle('task_dependency', { action: 'add', task_id: b.id, depends_on: a.id });
+    const result = handle('task_dependency', {
+      action: 'remove',
+      task_id: b.id,
+      depends_on: a.id,
+    }) as {
       success: boolean;
     };
     expect(result.success).toBe(true);
+  });
+
+  it('rejects missing action', () => {
+    expect(() => handle('task_dependency', { task_id: 1, depends_on: 2 })).toThrow(
+      'action is required',
+    );
   });
 });
 
@@ -615,7 +627,8 @@ describe('task_pipeline_config', () => {
       project: 'custom-proj',
       stages: customStages,
     }) as { stages: string[] };
-    expect(result).toBeDefined();
+    expect(result).toHaveProperty('stages');
+    expect(Array.isArray((result as { stages: string[] }).stages)).toBe(true);
 
     const readBack = handle('task_pipeline_config', { project: 'custom-proj' }) as {
       stages: string[];
@@ -713,13 +726,14 @@ describe('task_get_comments', () => {
 });
 
 // =============================================================================
-// task_add_collaborator / task_remove_collaborator
+// task_collaborator
 // =============================================================================
 
-describe('task_add_collaborator', () => {
+describe('task_collaborator', () => {
   it('adds a collaborator with default role', () => {
     const task = handle('task_create', { title: 'Collab task' }) as { id: number };
-    const collab = handle('task_add_collaborator', {
+    const collab = handle('task_collaborator', {
+      action: 'add',
       task_id: task.id,
       agent_id: 'agent-2',
     }) as { agent_id: string; role: string };
@@ -729,7 +743,8 @@ describe('task_add_collaborator', () => {
 
   it('adds a reviewer', () => {
     const task = handle('task_create', { title: 'Review task' }) as { id: number };
-    const collab = handle('task_add_collaborator', {
+    const collab = handle('task_collaborator', {
+      action: 'add',
       task_id: task.id,
       agent_id: 'reviewer-1',
       role: 'reviewer',
@@ -739,7 +754,8 @@ describe('task_add_collaborator', () => {
 
   it('adds a watcher', () => {
     const task = handle('task_create', { title: 'Watch task' }) as { id: number };
-    const collab = handle('task_add_collaborator', {
+    const collab = handle('task_collaborator', {
+      action: 'add',
       task_id: task.id,
       agent_id: 'watcher-1',
       role: 'watcher',
@@ -749,27 +765,33 @@ describe('task_add_collaborator', () => {
 
   it('rejects missing agent_id', () => {
     const task = handle('task_create', { title: 'T' }) as { id: number };
-    expect(() => handle('task_add_collaborator', { task_id: task.id })).toThrow(
+    expect(() => handle('task_collaborator', { action: 'add', task_id: task.id })).toThrow(
       '"agent_id" must be a non-empty',
     );
   });
-});
 
-describe('task_remove_collaborator', () => {
   it('removes a collaborator', () => {
     const task = handle('task_create', { title: 'Collab task' }) as { id: number };
-    handle('task_add_collaborator', { task_id: task.id, agent_id: 'agent-2' });
-    const result = handle('task_remove_collaborator', {
+    handle('task_collaborator', { action: 'add', task_id: task.id, agent_id: 'agent-2' });
+    const result = handle('task_collaborator', {
+      action: 'remove',
       task_id: task.id,
       agent_id: 'agent-2',
     }) as { success: boolean };
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing agent_id', () => {
+  it('rejects missing agent_id on remove', () => {
     const task = handle('task_create', { title: 'T' }) as { id: number };
-    expect(() => handle('task_remove_collaborator', { task_id: task.id })).toThrow(
+    expect(() => handle('task_collaborator', { action: 'remove', task_id: task.id })).toThrow(
       '"agent_id" must be a non-empty',
+    );
+  });
+
+  it('rejects missing action', () => {
+    const task = handle('task_create', { title: 'T' }) as { id: number };
+    expect(() => handle('task_collaborator', { task_id: task.id, agent_id: 'a' })).toThrow(
+      'action is required',
     );
   });
 });
@@ -842,14 +864,14 @@ describe('task_get_subtasks', () => {
 });
 
 // =============================================================================
-// Approvals: task_request_approval / task_approve / task_reject / task_pending_approvals
+// task_approval
 // =============================================================================
 
-describe('task_request_approval', () => {
+describe('task_approval', () => {
   it('creates an approval request', () => {
     const task = handle('task_create', { title: 'Approve me' }) as { id: number };
     handle('task_claim', { task_id: task.id });
-    const approval = handle('task_request_approval', { task_id: task.id }) as {
+    const approval = handle('task_approval', { action: 'request', task_id: task.id }) as {
       id: number;
       task_id: number;
       status: string;
@@ -862,7 +884,8 @@ describe('task_request_approval', () => {
   it('creates approval for specific stage', () => {
     const task = handle('task_create', { title: 'Stage approval' }) as { id: number };
     handle('task_claim', { task_id: task.id });
-    const approval = handle('task_request_approval', {
+    const approval = handle('task_approval', {
+      action: 'request',
       task_id: task.id,
       stage: 'review',
     }) as { stage: string };
@@ -872,24 +895,26 @@ describe('task_request_approval', () => {
   it('assigns specific reviewer', () => {
     const task = handle('task_create', { title: 'Review assign' }) as { id: number };
     handle('task_claim', { task_id: task.id });
-    const approval = handle('task_request_approval', {
+    const approval = handle('task_approval', {
+      action: 'request',
       task_id: task.id,
       reviewer: 'senior-dev',
     }) as { reviewer: string };
     expect(approval.reviewer).toBe('senior-dev');
   });
 
-  it('rejects nonexistent task', () => {
-    expect(() => handle('task_request_approval', { task_id: 9999 })).toThrow();
+  it('rejects nonexistent task for request', () => {
+    expect(() => handle('task_approval', { action: 'request', task_id: 9999 })).toThrow();
   });
-});
 
-describe('task_approve', () => {
   it('approves a pending approval', () => {
     const task = handle('task_create', { title: 'Approve' }) as { id: number };
     handle('task_claim', { task_id: task.id });
-    const approval = handle('task_request_approval', { task_id: task.id }) as { id: number };
-    const result = handle('task_approve', {
+    const approval = handle('task_approval', { action: 'request', task_id: task.id }) as {
+      id: number;
+    };
+    const result = handle('task_approval', {
+      action: 'approve',
       approval_id: approval.id,
       comment: 'Looks good!',
     }) as { status: string };
@@ -899,22 +924,29 @@ describe('task_approve', () => {
   it('approves without comment', () => {
     const task = handle('task_create', { title: 'Approve' }) as { id: number };
     handle('task_claim', { task_id: task.id });
-    const approval = handle('task_request_approval', { task_id: task.id }) as { id: number };
-    const result = handle('task_approve', { approval_id: approval.id }) as { status: string };
+    const approval = handle('task_approval', { action: 'request', task_id: task.id }) as {
+      id: number;
+    };
+    const result = handle('task_approval', { action: 'approve', approval_id: approval.id }) as {
+      status: string;
+    };
     expect(result.status).toBe('approved');
   });
 
-  it('rejects missing approval_id', () => {
-    expect(() => handle('task_approve', {})).toThrow('"approval_id" is required');
+  it('rejects missing approval_id on approve', () => {
+    expect(() => handle('task_approval', { action: 'approve' })).toThrow(
+      '"approval_id" is required',
+    );
   });
-});
 
-describe('task_reject', () => {
   it('rejects a pending approval', () => {
     const task = handle('task_create', { title: 'Reject' }) as { id: number };
     handle('task_claim', { task_id: task.id });
-    const approval = handle('task_request_approval', { task_id: task.id }) as { id: number };
-    const result = handle('task_reject', {
+    const approval = handle('task_approval', { action: 'request', task_id: task.id }) as {
+      id: number;
+    };
+    const result = handle('task_approval', {
+      action: 'reject',
       approval_id: approval.id,
       comment: 'Needs work',
     }) as { status: string };
@@ -925,77 +957,77 @@ describe('task_reject', () => {
     const task = handle('task_create', { title: 'Reject+Regress' }) as { id: number };
     handle('task_claim', { task_id: task.id });
     handle('task_advance', { task_id: task.id, stage: 'review' });
-    const approval = handle('task_request_approval', { task_id: task.id }) as { id: number };
-    handle('task_reject', {
+    const approval = handle('task_approval', { action: 'request', task_id: task.id }) as {
+      id: number;
+    };
+    handle('task_approval', {
+      action: 'reject',
       approval_id: approval.id,
       comment: 'Rework needed',
       regress_to: 'implement',
     });
     const list = handle('task_list', { stage: 'implement' }) as { id: number }[];
     const found = list.find((t) => t.id === task.id);
-    expect(found).toBeDefined();
+    expect(found).not.toBeUndefined();
+    expect(found!.id).toBe(task.id);
   });
 
-  it('rejects missing comment', () => {
+  it('rejects missing comment on reject', () => {
     const task = handle('task_create', { title: 'T' }) as { id: number };
     handle('task_claim', { task_id: task.id });
-    const approval = handle('task_request_approval', { task_id: task.id }) as { id: number };
-    expect(() => handle('task_reject', { approval_id: approval.id })).toThrow(
+    const approval = handle('task_approval', { action: 'request', task_id: task.id }) as {
+      id: number;
+    };
+    expect(() => handle('task_approval', { action: 'reject', approval_id: approval.id })).toThrow(
       '"comment" must be a non-empty',
     );
   });
-});
 
-describe('task_pending_approvals', () => {
   it('lists pending approvals', () => {
     const task = handle('task_create', { title: 'Pending' }) as { id: number };
     handle('task_claim', { task_id: task.id });
-    handle('task_request_approval', { task_id: task.id });
-    const pending = handle('task_pending_approvals', {}) as unknown[];
+    handle('task_approval', { action: 'request', task_id: task.id });
+    const pending = handle('task_approval', { action: 'list' }) as unknown[];
     expect(pending.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('filters by reviewer', () => {
+  it('filters pending by reviewer', () => {
     const task = handle('task_create', { title: 'Reviewer filter' }) as { id: number };
     handle('task_claim', { task_id: task.id });
-    handle('task_request_approval', { task_id: task.id, reviewer: 'rev-agent' });
-    const pending = handle('task_pending_approvals', { reviewer: 'rev-agent' }) as {
+    handle('task_approval', { action: 'request', task_id: task.id, reviewer: 'rev-agent' });
+    const pending = handle('task_approval', { action: 'list', reviewer: 'rev-agent' }) as {
       reviewer: string;
     }[];
     expect(pending.length).toBeGreaterThanOrEqual(1);
   });
 
   it('returns empty when no pending approvals', () => {
-    const pending = handle('task_pending_approvals', {}) as unknown[];
+    const pending = handle('task_approval', { action: 'list' }) as unknown[];
     expect(pending).toHaveLength(0);
   });
-});
 
-// =============================================================================
-// task_review_cycle
-// =============================================================================
-
-describe('task_review_cycle', () => {
-  it('approves and advances task', () => {
+  it('review approves and advances task', () => {
     const task = handle('task_create', { title: 'Review cycle' }) as { id: number };
     handle('task_claim', { task_id: task.id });
     handle('task_advance', { task_id: task.id, stage: 'review' });
-    const result = handle('task_review_cycle', {
+    const result = handle('task_approval', {
+      action: 'review',
       task_id: task.id,
-      action: 'approve',
+      decision: 'approve',
     }) as { success: boolean; action: string; task: { stage: string } };
     expect(result.success).toBe(true);
     expect(result.action).toBe('approved');
     expect(result.task.stage).toBe('done');
   });
 
-  it('rejects and regresses task to implement', () => {
+  it('review rejects and regresses task to implement', () => {
     const task = handle('task_create', { title: 'Review reject' }) as { id: number };
     handle('task_claim', { task_id: task.id });
     handle('task_advance', { task_id: task.id, stage: 'review' });
-    const result = handle('task_review_cycle', {
+    const result = handle('task_approval', {
+      action: 'review',
       task_id: task.id,
-      action: 'reject',
+      decision: 'reject',
       reason: 'Tests are failing',
     }) as { success: boolean; action: string; task: { stage: string } };
     expect(result.success).toBe(true);
@@ -1003,44 +1035,47 @@ describe('task_review_cycle', () => {
     expect(result.task.stage).toBe('implement');
   });
 
-  it('rejects to custom stage', () => {
+  it('review rejects to custom stage', () => {
     const task = handle('task_create', { title: 'Review custom regress' }) as { id: number };
     handle('task_claim', { task_id: task.id });
     handle('task_advance', { task_id: task.id, stage: 'review' });
-    const result = handle('task_review_cycle', {
+    const result = handle('task_approval', {
+      action: 'review',
       task_id: task.id,
-      action: 'reject',
+      decision: 'reject',
       reason: 'Spec was wrong',
       regress_to: 'spec',
     }) as { task: { stage: string } };
     expect(result.task.stage).toBe('spec');
   });
 
-  it('rejects reject without reason', () => {
+  it('review rejects reject without reason', () => {
     const task = handle('task_create', { title: 'No reason' }) as { id: number };
     handle('task_claim', { task_id: task.id });
     handle('task_advance', { task_id: task.id, stage: 'review' });
-    expect(() => handle('task_review_cycle', { task_id: task.id, action: 'reject' })).toThrow(
-      '"reason" must be a non-empty',
-    );
+    expect(() =>
+      handle('task_approval', { action: 'review', task_id: task.id, decision: 'reject' }),
+    ).toThrow('"reason" must be a non-empty');
   });
 
-  it('rejects invalid action', () => {
+  it('review rejects invalid decision', () => {
     const task = handle('task_create', { title: 'Bad action' }) as { id: number };
     handle('task_claim', { task_id: task.id });
-    expect(() => handle('task_review_cycle', { task_id: task.id, action: 'maybe' })).toThrow(
-      'Invalid action',
-    );
+    expect(() =>
+      handle('task_approval', { action: 'review', task_id: task.id, decision: 'maybe' }),
+    ).toThrow('Invalid decision');
   });
 
-  it('rejects nonexistent task', () => {
-    expect(() => handle('task_review_cycle', { task_id: 9999, action: 'approve' })).toThrow();
+  it('review rejects nonexistent task', () => {
+    expect(() =>
+      handle('task_approval', { action: 'review', task_id: 9999, decision: 'approve' }),
+    ).toThrow();
   });
 
-  it('rejects missing action', () => {
+  it('review rejects missing decision', () => {
     const task = handle('task_create', { title: 'T' }) as { id: number };
-    expect(() => handle('task_review_cycle', { task_id: task.id })).toThrow(
-      '"action" must be a non-empty',
+    expect(() => handle('task_approval', { action: 'review', task_id: task.id })).toThrow(
+      '"decision" must be a non-empty',
     );
   });
 });
@@ -1062,7 +1097,7 @@ describe('task_generate_rules', () => {
     const result = handle('task_generate_rules', { format: 'claude_md' }) as { rules: string };
     expect(result.rules).toContain('## Pipeline Tasks');
     expect(result.rules).toContain('task_claim');
-    expect(result.rules).toContain('task_advance');
+    expect(result.rules).toContain('task_stage');
   });
 
   it('includes project name in mdc rules', () => {
@@ -1174,7 +1209,7 @@ describe('integration: full pipeline flow', () => {
   it('create with dependencies -> unblock -> advance', () => {
     const dep = handle('task_create', { title: 'Dependency' }) as { id: number };
     const task = handle('task_create', { title: 'Blocked task' }) as { id: number };
-    handle('task_add_dependency', { task_id: task.id, depends_on: dep.id });
+    handle('task_dependency', { action: 'add', task_id: task.id, depends_on: dep.id });
 
     handle('task_claim', { task_id: dep.id });
     handle('task_complete', { task_id: dep.id, result: 'Dep done' });
@@ -1187,17 +1222,24 @@ describe('integration: full pipeline flow', () => {
   it('multi-agent collaboration flow', () => {
     const task = handle('task_create', { title: 'Collab flow' }) as { id: number };
 
-    handle('task_add_collaborator', {
+    handle('task_collaborator', {
+      action: 'add',
       task_id: task.id,
       agent_id: 'dev-agent',
       role: 'collaborator',
     });
-    handle('task_add_collaborator', {
+    handle('task_collaborator', {
+      action: 'add',
       task_id: task.id,
       agent_id: 'review-agent',
       role: 'reviewer',
     });
-    handle('task_add_collaborator', { task_id: task.id, agent_id: 'pm-agent', role: 'watcher' });
+    handle('task_collaborator', {
+      action: 'add',
+      task_id: task.id,
+      agent_id: 'pm-agent',
+      role: 'watcher',
+    });
 
     handle('task_claim', { task_id: task.id, claimer: 'dev-agent' });
 
@@ -1207,9 +1249,10 @@ describe('integration: full pipeline flow', () => {
     handle('task_advance', { task_id: task.id, stage: 'review' });
 
     handle('task_set_session', { id: 'reviewer', name: 'review-agent' });
-    const reviewed = handle('task_review_cycle', {
+    const reviewed = handle('task_approval', {
+      action: 'review',
       task_id: task.id,
-      action: 'approve',
+      decision: 'approve',
     }) as { success: boolean; task: { stage: string } };
     expect(reviewed.success).toBe(true);
     expect(reviewed.task.stage).toBe('done');
@@ -1223,9 +1266,10 @@ describe('integration: full pipeline flow', () => {
     handle('task_claim', { task_id: task.id });
     handle('task_advance', { task_id: task.id, stage: 'review' });
 
-    const rejected = handle('task_review_cycle', {
+    const rejected = handle('task_approval', {
+      action: 'review',
       task_id: task.id,
-      action: 'reject',
+      decision: 'reject',
       reason: 'Missing error handling',
       regress_to: 'implement',
     }) as { task: { stage: string } };
@@ -1239,9 +1283,10 @@ describe('integration: full pipeline flow', () => {
     });
     handle('task_advance', { task_id: task.id, stage: 'review' });
 
-    const approved = handle('task_review_cycle', {
+    const approved = handle('task_approval', {
+      action: 'review',
       task_id: task.id,
-      action: 'approve',
+      decision: 'approve',
     }) as { task: { stage: string } };
     expect(approved.task.stage).toBe('done');
   });
@@ -1400,9 +1445,9 @@ describe('task_cleanup', () => {
       purgedComments: number;
       purgedApprovals: number;
     };
-    expect(typeof result.purgedTasks).toBe('number');
-    expect(typeof result.purgedComments).toBe('number');
-    expect(typeof result.purgedApprovals).toBe('number');
+    expect(result.purgedTasks).toBeGreaterThanOrEqual(0);
+    expect(result.purgedComments).toBeGreaterThanOrEqual(0);
+    expect(result.purgedApprovals).toBeGreaterThanOrEqual(0);
   });
 
   it('does not purge recent completed tasks', () => {
@@ -1416,33 +1461,340 @@ describe('task_cleanup', () => {
 });
 
 // =============================================================================
-// task_generate_rules
+// task_decision
 // =============================================================================
 
-describe('task_generate_rules', () => {
-  it('generates mdc format rules', () => {
-    const result = handle('task_generate_rules', { format: 'mdc' }) as { rules: string };
-    expect(result.rules).toContain('Pipeline Workflow');
-    expect(result.rules).toContain('task_next');
-    expect(result.rules).toContain('alwaysApply');
+describe('task_decision', () => {
+  it('creates a decision artifact with chose/over/because', () => {
+    const task = handle('task_create', { title: 'Decide something' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    const artifact = handle('task_decision', {
+      task_id: task.id,
+      chose: 'PostgreSQL',
+      over: 'MySQL, SQLite',
+      because: 'Better JSON support and extensibility',
+    }) as { name: string; content: string; stage: string };
+    expect(artifact.name).toBe('decision');
   });
 
-  it('generates claude_md format rules', () => {
-    const result = handle('task_generate_rules', { format: 'claude_md' }) as { rules: string };
-    expect(result.rules).toContain('Pipeline Tasks');
-    expect(result.rules).toContain('task_claim');
+  it('stores decision at current task stage', () => {
+    const task = handle('task_create', { title: 'Stage decision' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    handle('task_advance', { task_id: task.id, stage: 'implement' });
+    const artifact = handle('task_decision', {
+      task_id: task.id,
+      chose: 'REST',
+      over: 'GraphQL',
+      because: 'Simpler for this use case',
+    }) as { stage: string };
+    expect(artifact.stage).toBe('implement');
   });
 
-  it('includes project name when provided', () => {
-    const result = handle('task_generate_rules', { format: 'claude_md', project: 'my-proj' }) as {
+  it('contains structured markdown with Chose/Over/Because', () => {
+    const task = handle('task_create', { title: 'Structured decision' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    const artifact = handle('task_decision', {
+      task_id: task.id,
+      chose: 'TypeScript',
+      over: 'JavaScript',
+      because: 'Type safety',
+    }) as { content: string };
+    expect(artifact.content).toContain('**Chose:** TypeScript');
+    expect(artifact.content).toContain('**Over:** JavaScript');
+    expect(artifact.content).toContain('**Because:** Type safety');
+  });
+
+  it('rejects decision on non-existent task', () => {
+    expect(() =>
+      handle('task_decision', {
+        task_id: 99999,
+        chose: 'A',
+        over: 'B',
+        because: 'C',
+      }),
+    ).toThrow('not found');
+  });
+
+  it('increments version for multiple decisions on same task', () => {
+    const task = handle('task_create', { title: 'Multi decision' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    const d1 = handle('task_decision', {
+      task_id: task.id,
+      chose: 'Option A',
+      over: 'Option B',
+      because: 'Reason 1',
+    }) as { version: number };
+    const d2 = handle('task_decision', {
+      task_id: task.id,
+      chose: 'Option C',
+      over: 'Option D',
+      because: 'Reason 2',
+    }) as { version: number };
+    expect(d1.version).toBe(1);
+    expect(d2.version).toBe(2);
+  });
+});
+
+// =============================================================================
+// Consolidated tool: task_stage
+// =============================================================================
+
+describe('task_stage', () => {
+  it('advances task to next stage', () => {
+    const task = handle('task_create', { title: 'Stage advance' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    const advanced = handle('task_stage', { action: 'advance', task_id: task.id }) as {
+      stage: string;
+    };
+    expect(advanced.stage).toBe('plan');
+  });
+
+  it('advances to a specific stage', () => {
+    const task = handle('task_create', { title: 'Stage skip' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    const advanced = handle('task_stage', {
+      action: 'advance',
+      task_id: task.id,
+      stage: 'implement',
+    }) as { stage: string };
+    expect(advanced.stage).toBe('implement');
+  });
+
+  it('advances with inline comment', () => {
+    const task = handle('task_create', { title: 'Stage comment' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    handle('task_stage', { action: 'advance', task_id: task.id, comment: 'Spec done' });
+    const comments = handle('task_query', { type: 'comments', task_id: task.id }) as Array<{
+      content: string;
+    }>;
+    expect(comments).toHaveLength(1);
+    expect(comments[0].content).toBe('Spec done');
+  });
+
+  it('regresses task to earlier stage', () => {
+    const task = handle('task_create', { title: 'Stage regress' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    handle('task_stage', { action: 'advance', task_id: task.id, stage: 'implement' });
+    const regressed = handle('task_stage', {
+      action: 'regress',
+      task_id: task.id,
+      stage: 'spec',
+    }) as { stage: string };
+    expect(regressed.stage).toBe('spec');
+  });
+
+  it('completes a task', () => {
+    const task = handle('task_create', { title: 'Stage complete' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    const result = handle('task_stage', {
+      action: 'complete',
+      task_id: task.id,
+      result: 'All done',
+    }) as { status: string; result: string };
+    expect(result.status).toBe('completed');
+    expect(result.result).toBe('All done');
+  });
+
+  it('fails a task', () => {
+    const task = handle('task_create', { title: 'Stage fail' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    const result = handle('task_stage', {
+      action: 'fail',
+      task_id: task.id,
+      result: 'Error occurred',
+    }) as { status: string };
+    expect(result.status).toBe('failed');
+  });
+
+  it('cancels a task', () => {
+    const task = handle('task_create', { title: 'Stage cancel' }) as { id: number };
+    const result = handle('task_stage', {
+      action: 'cancel',
+      task_id: task.id,
+      reason: 'No longer needed',
+    }) as { status: string };
+    expect(result.status).toBe('cancelled');
+  });
+
+  it('rejects missing action', () => {
+    expect(() => handle('task_stage', { task_id: 1 })).toThrow('action is required');
+  });
+
+  it('rejects invalid action', () => {
+    expect(() => handle('task_stage', { action: 'bogus', task_id: 1 })).toThrow('Invalid action');
+  });
+});
+
+// =============================================================================
+// Consolidated tool: task_query
+// =============================================================================
+
+describe('task_query', () => {
+  it('returns subtasks of a parent', () => {
+    const parent = handle('task_create', { title: 'Parent' }) as { id: number };
+    handle('task_create', { title: 'Child 1', parent_id: parent.id });
+    handle('task_create', { title: 'Child 2', parent_id: parent.id });
+    const subtasks = handle('task_query', { type: 'subtasks', task_id: parent.id }) as {
+      title: string;
+    }[];
+    expect(subtasks).toHaveLength(2);
+  });
+
+  it('returns artifacts for a task', () => {
+    const task = handle('task_create', { title: 'Art task' }) as { id: number };
+    handle('task_artifact', { type: 'general', task_id: task.id, name: 'spec', content: 'S' });
+    handle('task_artifact', { type: 'general', task_id: task.id, name: 'plan', content: 'P' });
+    const artifacts = handle('task_query', { type: 'artifacts', task_id: task.id }) as unknown[];
+    expect(artifacts).toHaveLength(2);
+  });
+
+  it('filters artifacts by stage', () => {
+    const task = handle('task_create', { title: 'Art stage' }) as { id: number };
+    handle('task_artifact', {
+      type: 'general',
+      task_id: task.id,
+      name: 'spec',
+      content: 'S',
+      stage: 'spec',
+    });
+    handle('task_artifact', {
+      type: 'general',
+      task_id: task.id,
+      name: 'plan',
+      content: 'P',
+      stage: 'plan',
+    });
+    const artifacts = handle('task_query', {
+      type: 'artifacts',
+      task_id: task.id,
+      stage: 'spec',
+    }) as { name: string }[];
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0].name).toBe('spec');
+  });
+
+  it('returns comments for a task', () => {
+    const task = handle('task_create', { title: 'Comment task' }) as { id: number };
+    handle('task_comment', { task_id: task.id, content: 'First' });
+    handle('task_comment', { task_id: task.id, content: 'Second' });
+    const comments = handle('task_query', { type: 'comments', task_id: task.id }) as unknown[];
+    expect(comments).toHaveLength(2);
+  });
+
+  it('respects comment limit', () => {
+    const task = handle('task_create', { title: 'Many' }) as { id: number };
+    for (let i = 0; i < 5; i++) {
+      handle('task_comment', { task_id: task.id, content: `C${i}` });
+    }
+    const comments = handle('task_query', {
+      type: 'comments',
+      task_id: task.id,
+      limit: 2,
+    }) as unknown[];
+    expect(comments).toHaveLength(2);
+  });
+
+  it('rejects missing type', () => {
+    expect(() => handle('task_query', { task_id: 1 })).toThrow('type is required');
+  });
+});
+
+// =============================================================================
+// Consolidated tool: task_artifact
+// =============================================================================
+
+describe('task_artifact', () => {
+  it('adds a general artifact', () => {
+    const task = handle('task_create', { title: 'Artifact task' }) as { id: number };
+    const artifact = handle('task_artifact', {
+      type: 'general',
+      task_id: task.id,
+      name: 'spec',
+      content: 'The specification.',
+    }) as { name: string; content: string; created_by: string };
+    expect(artifact.name).toBe('spec');
+    expect(artifact.content).toBe('The specification.');
+    expect(artifact.created_by).toBe('test-agent');
+  });
+
+  it('creates a decision artifact', () => {
+    const task = handle('task_create', { title: 'Decision task' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    const artifact = handle('task_artifact', {
+      type: 'decision',
+      task_id: task.id,
+      chose: 'PostgreSQL',
+      over: 'MySQL',
+      because: 'Better JSON support',
+    }) as { name: string; content: string };
+    expect(artifact.name).toBe('decision');
+    expect(artifact.content).toContain('**Chose:** PostgreSQL');
+  });
+
+  it('creates a learning artifact', () => {
+    const task = handle('task_create', { title: 'Learning task' }) as { id: number };
+    handle('task_claim', { task_id: task.id });
+    const result = handle('task_artifact', {
+      type: 'learning',
+      task_id: task.id,
+      content: 'Always validate inputs',
+      category: 'technique',
+    }) as { name: string; content: string };
+    expect(result.name).toBe('learning');
+    expect(result.content).toContain('Always validate inputs');
+  });
+
+  it('rejects missing type', () => {
+    expect(() => handle('task_artifact', { task_id: 1 })).toThrow('type is required');
+  });
+});
+
+// =============================================================================
+// Consolidated tool: task_config
+// =============================================================================
+
+describe('task_config', () => {
+  it('gets default pipeline config', () => {
+    const result = handle('task_config', { action: 'pipeline' }) as { stages: string[] };
+    expect(result.stages).toContain('backlog');
+    expect(result.stages).toContain('done');
+  });
+
+  it('sets custom pipeline stages', () => {
+    handle('task_config', {
+      action: 'pipeline',
+      project: 'cfg-test',
+      stages: ['todo', 'doing', 'done'],
+    });
+    const result = handle('task_config', { action: 'pipeline', project: 'cfg-test' }) as {
+      stages: string[];
+    };
+    expect(result.stages).toEqual(['todo', 'doing', 'done']);
+  });
+
+  it('sets session identity', () => {
+    const result = handle('task_config', {
+      action: 'session',
+      id: 'cfg-id',
+      name: 'cfg-agent',
+    }) as { success: boolean; name: string };
+    expect(result.success).toBe(true);
+    expect(result.name).toBe('cfg-agent');
+  });
+
+  it('runs cleanup', () => {
+    const result = handle('task_config', { action: 'cleanup' }) as { purgedTasks: number };
+    expect(result.purgedTasks).toBeGreaterThanOrEqual(0);
+  });
+
+  it('generates rules', () => {
+    const result = handle('task_config', { action: 'rules', format: 'mdc' }) as {
       rules: string;
     };
-    expect(result.rules).toContain('my-proj');
+    expect(result.rules).toContain('Pipeline Workflow');
   });
 
-  it('rejects invalid format', () => {
-    expect(() => handle('task_generate_rules', { format: 'invalid' })).toThrow(
-      'Format must be "mdc" or "claude_md"',
-    );
+  it('rejects missing action', () => {
+    expect(() => handle('task_config', {})).toThrow('action is required');
   });
 });

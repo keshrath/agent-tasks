@@ -11,8 +11,14 @@ class EventBus {
       for (const h of handlers) {
         try {
           h(data);
-        } catch {
-          /* ignore */
+        } catch (err) {
+          process.stderr.write(
+            '[agent-tasks] Event handler error (' +
+              type +
+              '): ' +
+              (err instanceof Error ? err.message : String(err)) +
+              '\n',
+          );
         }
       }
     const wildcards = this.listeners.get('*');
@@ -20,8 +26,12 @@ class EventBus {
       for (const h of wildcards) {
         try {
           h({ type, data });
-        } catch {
-          /* ignore */
+        } catch (err) {
+          process.stderr.write(
+            '[agent-tasks] Event handler error (*): ' +
+              (err instanceof Error ? err.message : String(err)) +
+              '\n',
+          );
         }
       }
   }

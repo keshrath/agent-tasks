@@ -65,8 +65,12 @@ export function createDb(options: DbOptions = {}): Db {
     close(): void {
       try {
         raw.close();
-      } catch {
-        /* ignore */
+      } catch (err) {
+        process.stderr.write(
+          '[agent-tasks] DB close error: ' +
+            (err instanceof Error ? err.message : String(err)) +
+            '\n',
+        );
       }
     },
   };

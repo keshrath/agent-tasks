@@ -118,7 +118,12 @@ export class CleanupService {
         status: string;
         last_heartbeat?: string;
       }>;
-    } catch {
+    } catch (err) {
+      process.stderr.write(
+        '[agent-tasks] failStaleAgentTasks fetchAgents error: ' +
+          (err instanceof Error ? err.message : String(err)) +
+          '\n',
+      );
       return { failed: [], checked: agentNames.length };
     }
 
@@ -166,8 +171,12 @@ export class CleanupService {
         );
         const updated = this.db.queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [task.id]);
         if (updated) failed.push(updated);
-      } catch {
-        /* skip tasks that can't be failed */
+      } catch (err) {
+        process.stderr.write(
+          '[agent-tasks] failStaleAgentTasks task update error: ' +
+            (err instanceof Error ? err.message : String(err)) +
+            '\n',
+        );
       }
     }
 
