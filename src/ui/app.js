@@ -1955,6 +1955,171 @@ function copyArtifact(btn) {
     });
 }
 
+// ---- Theme sync from parent (agent-desk) via executeJavaScript ----
+
+window.addEventListener('message', function (event) {
+  if (!event.data || event.data.type !== 'theme-sync') return;
+  var colors = event.data.colors;
+  if (!colors) return;
+
+  // Contrast enforcement: ensure text is readable against background
+  function ensureContrast(bg, fg) {
+    var lum = function (hex) {
+      if (!hex || hex.charAt(0) !== '#' || hex.length < 7) return 0.5;
+      var r = parseInt(hex.slice(1, 3), 16) / 255;
+      var g = parseInt(hex.slice(3, 5), 16) / 255;
+      var b = parseInt(hex.slice(5, 7), 16) / 255;
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    var bgLum = lum(bg);
+    return bgLum < 0.5 ? (lum(fg) < 0.4 ? '#e0e0e0' : fg) : lum(fg) > 0.6 ? '#333333' : fg;
+  }
+
+  var root = document.documentElement;
+  var bgColor = colors.bg || null;
+
+  // Core backgrounds
+  if (colors.bg) root.style.setProperty('--bg', colors.bg);
+  if (colors.bgSurface) root.style.setProperty('--bg-surface', colors.bgSurface);
+  if (colors.bgElevated) root.style.setProperty('--bg-elevated', colors.bgElevated);
+  if (colors.bgHover) root.style.setProperty('--bg-hover', colors.bgHover);
+  if (colors.bgInset) root.style.setProperty('--bg-inset', colors.bgInset);
+
+  // Borders
+  if (colors.border) root.style.setProperty('--border', colors.border);
+  if (colors.borderLight) root.style.setProperty('--border-light', colors.borderLight);
+
+  // Text colors (with contrast enforcement)
+  if (colors.text)
+    root.style.setProperty('--text', bgColor ? ensureContrast(bgColor, colors.text) : colors.text);
+  if (colors.textSecondary)
+    root.style.setProperty(
+      '--text-secondary',
+      bgColor ? ensureContrast(bgColor, colors.textSecondary) : colors.textSecondary,
+    );
+  if (colors.textMuted)
+    root.style.setProperty(
+      '--text-muted',
+      bgColor ? ensureContrast(bgColor, colors.textMuted) : colors.textMuted,
+    );
+  if (colors.textDim)
+    root.style.setProperty(
+      '--text-dim',
+      bgColor ? ensureContrast(bgColor, colors.textDim) : colors.textDim,
+    );
+
+  // Accent colors
+  if (colors.accent) root.style.setProperty('--accent', colors.accent);
+  if (colors.accentHover) root.style.setProperty('--accent-hover', colors.accentHover);
+  if (colors.accentDim) root.style.setProperty('--accent-dim', colors.accentDim);
+  if (colors.accentSolid) root.style.setProperty('--accent-solid', colors.accentSolid);
+  if (colors.accentGlow) root.style.setProperty('--accent-glow', colors.accentGlow);
+
+  // Semantic colors
+  if (colors.green) root.style.setProperty('--green', colors.green);
+  if (colors.greenDim) root.style.setProperty('--green-dim', colors.greenDim);
+  if (colors.yellow) root.style.setProperty('--yellow', colors.yellow);
+  if (colors.yellowDim) root.style.setProperty('--yellow-dim', colors.yellowDim);
+  if (colors.orange) root.style.setProperty('--orange', colors.orange);
+  if (colors.orangeDim) root.style.setProperty('--orange-dim', colors.orangeDim);
+  if (colors.red) root.style.setProperty('--red', colors.red);
+  if (colors.redDim) root.style.setProperty('--red-dim', colors.redDim);
+  if (colors.purple) root.style.setProperty('--purple', colors.purple);
+  if (colors.purpleDim) root.style.setProperty('--purple-dim', colors.purpleDim);
+  if (colors.blue) root.style.setProperty('--blue', colors.blue);
+  if (colors.blueDim) root.style.setProperty('--blue-dim', colors.blueDim);
+  if (colors.indigo) root.style.setProperty('--indigo', colors.indigo);
+  if (colors.indigoDim) root.style.setProperty('--indigo-dim', colors.indigoDim);
+  if (colors.amber) root.style.setProperty('--amber', colors.amber);
+  if (colors.amberDim) root.style.setProperty('--amber-dim', colors.amberDim);
+  if (colors.gray) root.style.setProperty('--gray', colors.gray);
+  if (colors.grayDim) root.style.setProperty('--gray-dim', colors.grayDim);
+
+  // Stage colors
+  if (colors.stageBacklog) root.style.setProperty('--stage-backlog', colors.stageBacklog);
+  if (colors.stageSpec) root.style.setProperty('--stage-spec', colors.stageSpec);
+  if (colors.stagePlan) root.style.setProperty('--stage-plan', colors.stagePlan);
+  if (colors.stageImplement) root.style.setProperty('--stage-implement', colors.stageImplement);
+  if (colors.stageTest) root.style.setProperty('--stage-test', colors.stageTest);
+  if (colors.stageReview) root.style.setProperty('--stage-review', colors.stageReview);
+  if (colors.stageDone) root.style.setProperty('--stage-done', colors.stageDone);
+  if (colors.stageCancelled) root.style.setProperty('--stage-cancelled', colors.stageCancelled);
+
+  // Focus ring
+  if (colors.focusRing) root.style.setProperty('--focus-ring', colors.focusRing);
+
+  // Shadows (adapt for dark/light)
+  if (colors.isDark !== undefined) {
+    if (colors.isDark) {
+      root.style.setProperty(
+        '--shadow-1',
+        '0px 1px 2px 0px rgba(0,0,0,0.6), 0px 1px 3px 1px rgba(0,0,0,0.3)',
+      );
+      root.style.setProperty(
+        '--shadow-2',
+        '0px 1px 2px 0px rgba(0,0,0,0.6), 0px 2px 6px 2px rgba(0,0,0,0.3)',
+      );
+      root.style.setProperty(
+        '--shadow-3',
+        '0px 1px 3px 0px rgba(0,0,0,0.6), 0px 4px 8px 3px rgba(0,0,0,0.3)',
+      );
+      root.style.setProperty(
+        '--shadow-hover',
+        '0px 2px 4px 0px rgba(0,0,0,0.5), 0px 6px 16px 4px rgba(0,0,0,0.4)',
+      );
+      root.style.setProperty(
+        '--shadow-drag',
+        '0px 4px 8px 0px rgba(0,0,0,0.5), 0px 12px 32px 6px rgba(0,0,0,0.4)',
+      );
+      root.style.setProperty(
+        '--shadow-panel',
+        '-2px 0px 8px 0px rgba(0,0,0,0.5), -4px 0px 16px 2px rgba(0,0,0,0.3)',
+      );
+    } else {
+      root.style.setProperty(
+        '--shadow-1',
+        '0px 1px 2px 0px rgba(0,0,0,0.3), 0px 1px 3px 1px rgba(0,0,0,0.15)',
+      );
+      root.style.setProperty(
+        '--shadow-2',
+        '0px 1px 2px 0px rgba(0,0,0,0.3), 0px 2px 6px 2px rgba(0,0,0,0.15)',
+      );
+      root.style.setProperty(
+        '--shadow-3',
+        '0px 1px 3px 0px rgba(0,0,0,0.3), 0px 4px 8px 3px rgba(0,0,0,0.15)',
+      );
+      root.style.setProperty(
+        '--shadow-hover',
+        '0px 2px 4px 0px rgba(0,0,0,0.25), 0px 4px 12px 4px rgba(0,0,0,0.15)',
+      );
+      root.style.setProperty(
+        '--shadow-drag',
+        '0px 4px 8px 0px rgba(0,0,0,0.3), 0px 12px 32px 6px rgba(0,0,0,0.25)',
+      );
+      root.style.setProperty(
+        '--shadow-panel',
+        '-2px 0px 8px 0px rgba(0,0,0,0.3), -4px 0px 16px 2px rgba(0,0,0,0.15)',
+      );
+    }
+  }
+
+  // Apply theme attribute and hide the toggle (agent-desk controls the theme)
+  if (colors.isDark !== undefined) {
+    var theme = colors.isDark ? 'dark' : 'light';
+    if (colors.isDark) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    localStorage.setItem('agent-tasks-theme', theme);
+    updateThemeIcon(theme);
+  }
+
+  // Hide the local theme toggle — agent-desk controls the theme
+  var themeToggle = document.getElementById('theme-toggle');
+  if (themeToggle) themeToggle.style.display = 'none';
+});
+
 // ---- Boot ----
 
 connect();
