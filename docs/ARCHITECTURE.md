@@ -20,7 +20,7 @@ src/
 ├── storage/
 │   └── database.ts       # SQLite (WAL mode, schema versioning, FK cascades, FTS5)
 ├── transport/
-│   ├── mcp.ts            # 31 MCP tool definitions + dispatch
+│   ├── mcp.ts            # 32 MCP tool definitions + dispatch
 │   ├── rest.ts           # 19 REST endpoints + static file serving
 │   └── ws.ts             # WebSocket event streaming + livereload
 └── ui/

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.0] - 2026-03-29
+
+### Added
+
+- **Stage Gate Guards** — `GateConfig` now supports per-stage rules via `gates` field. Each stage can require named artifacts (`require_artifacts`), minimum artifact count (`require_min_artifacts`), comments (`require_comment`), or approvals (`require_approval`) before a task can advance. Configure via `task_pipeline_config`.
+- **Decisions Log** — new `task_decision` MCP tool for recording structured decisions (chose X over Y because Z) as artifacts. Creates a formatted markdown artifact at the current stage.
+
+### Changed
+
+- MCP tool count: 31 → 32
+
 ## [1.6.0] - 2026-03-25
 
 ### Added

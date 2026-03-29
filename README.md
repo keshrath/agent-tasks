@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
 [![Tests](https://img.shields.io/badge/tests-337%20passing-brightgreen)]()
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-31-purple)]()
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-32-purple)]()
 [![REST Endpoints](https://img.shields.io/badge/REST-18%20endpoints-orange)]()
 
 **Pipeline-driven task management for AI coding agents.** An [MCP](https://modelcontextprotocol.io/) server with stage-gated pipelines, multi-agent collaboration, and a real-time kanban dashboard. Tasks flow through configurable stages — `backlog`, `spec`, `plan`, `implement`, `test`, `review`, `done` — with dependency tracking, approval workflows, artifact versioning, and threaded comments.
@@ -37,7 +37,8 @@ When you run multiple AI agents on the same codebase, they need a shared task pi
 - **Real-time kanban dashboard** — drag-and-drop, side panel, inline creation, dark/light theme
 - **3 transport layers** — MCP (stdio), REST API (HTTP), WebSocket (real-time events)
 - **TodoWrite bridge** — intercepts Claude Code's built-in TodoWrite and syncs to the pipeline
-- **Stage gates** — configurable per-project gates that require comments or artifacts before advancing
+- **Stage gates** — configurable per-project gates with per-stage rules: require named artifacts, minimum artifact counts, comments, or approvals before advancing
+- **Decisions log** — structured decision artifacts (chose X over Y because Z) via `task_decision` tool
 - **Heartbeat-based cleanup** — auto-fails tasks from dead agents using agent-comm heartbeat data
 - **Task cleanup hooks** — auto-fails orphaned tasks on session stop and cleans up stale tasks on session start
 - **Agent bridge** — notifies connected agents on task events
@@ -101,17 +102,17 @@ Add agent-tasks as an MCP server in `~/.claude/settings.json`:
 }
 ```
 
-Once configured, Claude Code can use all 31 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
+Once configured, Claude Code can use all 32 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
 
 ---
 
-## MCP Tools (31)
+## MCP Tools (32)
 
 | Category                | Tools                                                                                                       |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------- |
 | **Task lifecycle** (12) | `task_create`, `task_list`, `task_next`, `task_claim`, `task_advance`, `task_regress`, `task_complete`, ... |
 | **Subtasks & deps** (4) | `task_expand`, `task_get_subtasks`, `task_add_dependency`, `task_remove_dependency`                         |
-| **Artifacts** (2)       | `task_add_artifact`, `task_get_artifacts`                                                                   |
+| **Artifacts** (3)       | `task_add_artifact`, `task_get_artifacts`, `task_decision`                                                  |
 | **Comments** (2)        | `task_comment`, `task_get_comments`                                                                         |
 | **Collaboration** (2)   | `task_add_collaborator`, `task_remove_collaborator`                                                         |
 | **Approvals** (5)       | `task_request_approval`, `task_approve`, `task_reject`, `task_pending_approvals`, `task_review_cycle`       |
@@ -178,7 +179,7 @@ npm run check         # Full CI: typecheck + lint + format + test
 
 ## Documentation
 
-- [API Reference](docs/API.md) — all 31 MCP tools, 18 REST endpoints, WebSocket protocol
+- [API Reference](docs/API.md) — all 32 MCP tools, 18 REST endpoints, WebSocket protocol
 - [Architecture](docs/ARCHITECTURE.md) — source structure, design principles, database schema
 - [Dashboard](docs/DASHBOARD.md) — kanban board features, keyboard shortcuts, screenshots
 - [Setup Guide](docs/SETUP.md) — installation, client setup (Claude Code, OpenCode, Cursor, Windsurf), hooks

@@ -141,10 +141,18 @@ export interface PipelineConfig {
   readonly updated_at: string;
 }
 
+export interface StageGate {
+  require_artifacts?: string[];
+  require_min_artifacts?: number;
+  require_comment?: boolean;
+  require_approval?: boolean;
+}
+
 export interface GateConfig {
   require_comment?: boolean;
   require_artifact?: boolean;
   exempt_stages?: string[];
+  gates?: Record<string, StageGate>;
 }
 
 // ---------------------------------------------------------------------------

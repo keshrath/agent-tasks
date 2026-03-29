@@ -282,6 +282,33 @@ export const tools: ToolDefinition[] = [
               items: { type: 'string' },
               description: 'Stages exempt from gate checks (e.g. ["backlog"])',
             },
+            gates: {
+              type: 'object',
+              description:
+                'Per-stage gate rules. Keys are stage names, values are StageGate objects with: require_artifacts (string[]), require_min_artifacts (number), require_comment (boolean), require_approval (boolean)',
+              additionalProperties: {
+                type: 'object',
+                properties: {
+                  require_artifacts: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Named artifacts that must exist at the stage before advancing',
+                  },
+                  require_min_artifacts: {
+                    type: 'number',
+                    description: 'Minimum number of artifacts required at the stage',
+                  },
+                  require_comment: {
+                    type: 'boolean',
+                    description: 'Require at least one comment before advancing from this stage',
+                  },
+                  require_approval: {
+                    type: 'boolean',
+                    description: 'Require an approved approval before advancing from this stage',
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -524,6 +551,21 @@ export const tools: ToolDefinition[] = [
       required: ['format'],
     },
   },
+  {
+    name: 'task_decision',
+    description:
+      'Record an architectural or design decision as a structured artifact on a task. Stored at the current stage.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'Task ID to record the decision on' },
+        chose: { type: 'string', description: 'What was chosen' },
+        over: { type: 'string', description: 'What alternatives were considered' },
+        because: { type: 'string', description: 'Rationale for the decision' },
+      },
+      required: ['task_id', 'chose', 'over', 'because'],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -723,12 +765,31 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
           ctx.tasks.setPipelineConfig(project, stages);
         }
         if (gateConfig && typeof gateConfig === 'object') {
+          const parsedGates: Record<string, Record<string, unknown>> = {};
+          if (gateConfig.gates && typeof gateConfig.gates === 'object') {
+            for (const [stageName, stageRule] of Object.entries(
+              gateConfig.gates as Record<string, Record<string, unknown>>,
+            )) {
+              parsedGates[stageName] = {
+                require_artifacts: Array.isArray(stageRule.require_artifacts)
+                  ? (stageRule.require_artifacts as string[])
+                  : undefined,
+                require_min_artifacts:
+                  typeof stageRule.require_min_artifacts === 'number'
+                    ? stageRule.require_min_artifacts
+                    : undefined,
+                require_comment: stageRule.require_comment === true ? true : undefined,
+                require_approval: stageRule.require_approval === true ? true : undefined,
+              };
+            }
+          }
           ctx.tasks.setGateConfig(project, {
             require_comment: gateConfig.require_comment === true,
             require_artifact: gateConfig.require_artifact === true,
             exempt_stages: Array.isArray(gateConfig.exempt_stages)
               ? (gateConfig.exempt_stages as string[])
               : undefined,
+            gates: Object.keys(parsedGates).length > 0 ? parsedGates : undefined,
           });
         }
         if (stages || gateConfig) {
@@ -895,6 +956,25 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
         const project = optString(args, 'project');
         const stages = ctx.tasks.getPipelineStages(project);
         return { rules: generateRules(format, stages, project) };
+      }
+
+      case 'task_decision': {
+        const taskId = requireNumber(args, 'task_id');
+        const chose = requireString(args, 'chose');
+        const over = requireString(args, 'over');
+        const because = requireString(args, 'because');
+        const task = ctx.tasks.getById(taskId);
+        if (!task) throw new ValidationError(`Task ${taskId} not found.`);
+        const decisionStage = task.stage;
+        const decisionContent = [
+          '## Decision',
+          `**Chose:** ${chose}`,
+          `**Over:** ${over}`,
+          `**Because:** ${because}`,
+          '',
+          `_Recorded at stage: ${decisionStage}_`,
+        ].join('\n');
+        return ctx.tasks.addArtifact(taskId, decisionStage, 'decision', decisionContent);
       }
 
       default:

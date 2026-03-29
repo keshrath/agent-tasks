@@ -2,7 +2,7 @@
 
 agent-tasks exposes three transport layers: MCP (stdio), REST (HTTP), and WebSocket (real-time events).
 
-## MCP Tools (31)
+## MCP Tools (32)
 
 ### Task lifecycle
 
@@ -32,10 +32,11 @@ agent-tasks exposes three transport layers: MCP (stdio), REST (HTTP), and WebSoc
 
 ### Artifacts
 
-| Tool                 | Description                                           |
-| -------------------- | ----------------------------------------------------- |
-| `task_add_artifact`  | Attach a document to a task with automatic versioning |
-| `task_get_artifacts` | Retrieve artifacts for a task (filter by stage)       |
+| Tool                 | Description                                                        |
+| -------------------- | ------------------------------------------------------------------ |
+| `task_add_artifact`  | Attach a document to a task with automatic versioning              |
+| `task_get_artifacts` | Retrieve artifacts for a task (filter by stage)                    |
+| `task_decision`      | Record a structured decision (chose, over, because) as an artifact |
 
 ### Comments
 
@@ -65,7 +66,7 @@ agent-tasks exposes three transport layers: MCP (stdio), REST (HTTP), and WebSoc
 
 | Tool                   | Description                                                          |
 | ---------------------- | -------------------------------------------------------------------- |
-| `task_pipeline_config` | Get or set pipeline stages per project                               |
+| `task_pipeline_config` | Get or set pipeline stages and gate guards per project               |
 | `task_set_session`     | Set the session identity (agent name)                                |
 | `task_cleanup`         | Clean up completed/cancelled tasks (configurable retention)          |
 | `task_generate_rules`  | Generate IDE rule files (.mdc for Cursor, CLAUDE.md for Claude Code) |

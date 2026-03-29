@@ -214,6 +214,17 @@ agent-tasks ships with 4 hook scripts. Add all of them to `~/.claude/settings.js
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/path/to/agent-tasks/scripts/hooks/session-start.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -242,12 +253,12 @@ agent-tasks ships with 4 hook scripts. Add all of them to `~/.claude/settings.js
 
 Replace `/path/to/agent-tasks` with the actual path (or use `npx` paths if installed globally).
 
-| Hook                    | Event               | Purpose                                     |
-| ----------------------- | ------------------- | ------------------------------------------- |
-| `session-start.js`      | SessionStart        | Announces dashboard URL                     |
-| `task-cleanup-start.js` | SessionStart        | Auto-fails tasks from dead sessions         |
-| `todowrite-bridge.js`   | PreToolUse          | Syncs TodoWrite to pipeline                 |
-| `task-cleanup-stop.js`  | Stop + SubagentStop | Blocks stop, then auto-fails orphaned tasks |
+| Hook                    | Event                        | Purpose                                     |
+| ----------------------- | ---------------------------- | ------------------------------------------- |
+| `session-start.js`      | SessionStart + SubagentStart | Announces dashboard URL and pipeline stages |
+| `task-cleanup-start.js` | SessionStart                 | Auto-fails tasks from dead sessions         |
+| `todowrite-bridge.js`   | PreToolUse                   | Syncs TodoWrite to pipeline                 |
+| `task-cleanup-stop.js`  | Stop + SubagentStop          | Blocks stop, then auto-fails orphaned tasks |
 
 #### Task Cleanup — Stop (`scripts/hooks/task-cleanup-stop.js`)
 
@@ -483,6 +494,48 @@ curl http://localhost:3422/api/pipeline
 # Get pipeline for a specific project
 curl http://localhost:3422/api/pipeline?project=my-project
 ```
+
+### Per-stage gate guards
+
+Gate guards enforce quality requirements before tasks can advance to the next stage. Configure via `task_pipeline_config`:
+
+```
+Use task_pipeline_config to set gate_config for project "backend" with gates:
+- implement stage requires artifact named "code-summary"
+- test stage requires artifact named "test-results" and a comment
+- review stage requires approval
+```
+
+This translates to:
+
+```json
+{
+  "gate_config": {
+    "gates": {
+      "implement": {
+        "require_artifacts": ["code-summary"],
+        "require_min_artifacts": 1
+      },
+      "test": {
+        "require_artifacts": ["test-results"],
+        "require_comment": true
+      },
+      "review": {
+        "require_approval": true
+      }
+    }
+  }
+}
+```
+
+| Gate option             | Type       | Description                                           |
+| ----------------------- | ---------- | ----------------------------------------------------- |
+| `require_artifacts`     | `string[]` | Named artifacts that must exist at the current stage  |
+| `require_min_artifacts` | `number`   | Minimum number of artifacts at the current stage      |
+| `require_comment`       | `boolean`  | At least one comment must exist on the task           |
+| `require_approval`      | `boolean`  | An approved approval must exist for the current stage |
+
+If a gate check fails, `task_advance` returns an error explaining what's missing.
 
 ---
 

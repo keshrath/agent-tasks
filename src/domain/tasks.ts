@@ -882,6 +882,61 @@ export class TaskService {
         );
       }
     }
+
+    const stageGate = gate.gates?.[task.stage];
+    if (!stageGate) return;
+
+    if (stageGate.require_comment) {
+      if (!inlineComment) {
+        const cnt = this.db.queryOne<{ cnt: number }>(
+          `SELECT COUNT(*) as cnt FROM task_comments WHERE task_id = ?`,
+          [task.id],
+        );
+        if (!cnt || cnt.cnt === 0) {
+          throw new ValidationError(
+            `Stage gate [${task.stage}]: comment required before advancing. Use task_comment or pass comment param to task_advance.`,
+          );
+        }
+      }
+    }
+
+    if (stageGate.require_artifacts && stageGate.require_artifacts.length > 0) {
+      const artifacts = this.db.queryAll<TaskArtifact>(
+        `SELECT * FROM task_artifacts WHERE task_id = ? AND stage = ?`,
+        [task.id, task.stage],
+      );
+      const artifactNames = new Set(artifacts.map((a) => a.name));
+      const missing = stageGate.require_artifacts.filter((n) => !artifactNames.has(n));
+      if (missing.length > 0) {
+        throw new ValidationError(
+          `Stage gate [${task.stage}]: required artifacts missing: ${missing.join(', ')}. Use task_add_artifact.`,
+        );
+      }
+    }
+
+    if (stageGate.require_min_artifacts !== undefined && stageGate.require_min_artifacts > 0) {
+      const cnt2 = this.db.queryOne<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM task_artifacts WHERE task_id = ? AND stage = ?`,
+        [task.id, task.stage],
+      );
+      if (!cnt2 || cnt2.cnt < stageGate.require_min_artifacts) {
+        throw new ValidationError(
+          `Stage gate [${task.stage}]: at least ${stageGate.require_min_artifacts} artifact(s) required (found ${cnt2?.cnt ?? 0}). Use task_add_artifact.`,
+        );
+      }
+    }
+
+    if (stageGate.require_approval) {
+      const approved = this.db.queryOne<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM task_approvals WHERE task_id = ? AND stage = ? AND status = 'approved'`,
+        [task.id, task.stage],
+      );
+      if (!approved || approved.cnt === 0) {
+        throw new ValidationError(
+          `Stage gate [${task.stage}]: approval required before advancing. Use task_request_approval + task_approve.`,
+        );
+      }
+    }
   }
 
   private checkDependencies(taskId: number): void {
