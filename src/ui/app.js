@@ -109,6 +109,7 @@ const state = {
   subtaskProgress: {},
   collaborators: {},
   stages: ['backlog', 'spec', 'plan', 'implement', 'test', 'review', 'done', 'cancelled'],
+  gateConfigs: {},
   collapsedColumns: new Set(),
   panelTaskId: null,
 };
@@ -238,6 +239,7 @@ function handleFullState(data) {
   state.subtaskProgress = data.subtaskProgress || {};
   state.collaborators = data.collaborators || {};
   if (data.stages) state.stages = data.stages;
+  if (data.gateConfigs) state.gateConfigs = data.gateConfigs;
   if (data.version) {
     document.getElementById('version').textContent = 'v' + data.version;
   }
@@ -729,6 +731,46 @@ function renderArtifactBlock(artifact) {
   return html;
 }
 
+// ---- Gate indicators ----
+
+function renderGateIndicator(stage) {
+  let gates = null;
+  for (const proj of Object.keys(state.gateConfigs)) {
+    const gc = state.gateConfigs[proj];
+    if (gc?.gates?.[stage]) {
+      gates = gc.gates;
+      break;
+    }
+  }
+  if (!gates || !gates[stage]) return '';
+  const g = gates[stage];
+  const reqs = [];
+  if (g.require_artifacts?.length) {
+    for (const a of g.require_artifacts) reqs.push(esc(a));
+  }
+  if (g.require_min_artifacts)
+    reqs.push(g.require_min_artifacts + ' artifact' + (g.require_min_artifacts > 1 ? 's' : ''));
+  if (g.require_comment) reqs.push('comment');
+  if (g.require_approval) reqs.push('approval');
+  if (!reqs.length) return '';
+  return `<div class="gate-indicator" title="Gate: requires ${reqs.join(', ')} to advance"><span class="material-symbols-outlined">lock</span>${reqs.map((r) => `<span class="gate-req">${r}</span>`).join('')}</div>`;
+}
+
+// ---- Decision rendering ----
+
+function renderDecisionBlock(artifact) {
+  const content = artifact.content || '';
+  const choseMatch = content.match(/\*\*Chose:\*\*\s*(.+)/);
+  const overMatch = content.match(/\*\*Over:\*\*\s*(.+)/);
+  const becauseMatch = content.match(/\*\*Because:\*\*\s*(.+)/);
+  const chose = choseMatch ? choseMatch[1].trim() : '';
+  const over = overMatch ? overMatch[1].trim() : '';
+  const because = becauseMatch ? becauseMatch[1].trim() : '';
+  if (!chose) return renderArtifactBlock(artifact);
+  const vLabel = artifact.version > 1 ? ' v' + artifact.version : '';
+  return `<div class="panel-decision"><div class="decision-header"><span class="material-symbols-outlined">gavel</span> Decision${vLabel} <span style="color:var(--text-dim);font-weight:400">(${esc(artifact.stage)}, ${esc(artifact.created_by)})</span></div><div class="decision-body"><div class="decision-row"><span class="decision-label">Chose</span><span class="decision-value decision-chose">${esc(chose)}</span></div><div class="decision-row"><span class="decision-label">Over</span><span class="decision-value decision-over">${esc(over)}</span></div><div class="decision-row"><span class="decision-label">Because</span><span class="decision-value decision-because">${esc(because)}</span></div></div></div>`;
+}
+
 // ---- Rendering ----
 
 function render() {
@@ -844,6 +886,8 @@ function renderBoard() {
           bodyContent = tasks.map((t, i) => renderCard(t, blocked.has(t.id), stage, i)).join('');
         }
 
+        const gateHtml = renderGateIndicator(stage);
+
         return `<div class="${colClass}" id="col-${esc(stage)}" data-stage="${esc(stage)}">
       <div class="column-header" data-action="toggle-collapse" data-stage="${esc(stage)}">
         <div class="column-header-left">
@@ -851,7 +895,7 @@ function renderBoard() {
           <h3>${esc(stage)}</h3>
         </div>
         <span class="${countClass}" aria-label="${tasks.length} tasks">${tasks.length}</span>
-      </div>
+      </div>${gateHtml}
       <div class="column-body" role="listbox" aria-label="${esc(stage)} tasks">
         ${bodyContent}
       </div>
@@ -1381,10 +1425,22 @@ function renderPanelContent(task) {
       extra += '</div>';
     }
 
-    if (artifacts.length) {
+    const decisions = artifacts.filter((a) => a.name === 'decision');
+    const otherArtifacts = artifacts.filter((a) => a.name !== 'decision');
+
+    if (decisions.length) {
       extra += '<div class="panel-section">';
-      extra += `<div class="panel-section-title"><span class="material-symbols-outlined">inventory_2</span> Artifacts (${artifacts.length})</div>`;
-      for (const a of artifacts) {
+      extra += `<div class="panel-section-title"><span class="material-symbols-outlined">gavel</span> Decisions (${decisions.length})</div>`;
+      for (const d of decisions) {
+        extra += renderDecisionBlock(d);
+      }
+      extra += '</div>';
+    }
+
+    if (otherArtifacts.length) {
+      extra += '<div class="panel-section">';
+      extra += `<div class="panel-section-title"><span class="material-symbols-outlined">inventory_2</span> Artifacts (${otherArtifacts.length})</div>`;
+      for (const a of otherArtifacts) {
         extra += renderArtifactBlock(a);
       }
       extra += '</div>';

@@ -283,7 +283,10 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   route('GET', '/api/pipeline', (req, res) => {
     const url = new URL(req.url!, `http://${req.headers.host}`);
     const project = url.searchParams.get('project') ?? undefined;
-    json(res, { stages: ctx.tasks.getPipelineStages(project) });
+    json(res, {
+      stages: ctx.tasks.getPipelineStages(project),
+      gate_config: ctx.tasks.getGateConfig(project),
+    });
   });
 
   route('GET', '/api/overview', (_req, res) => {

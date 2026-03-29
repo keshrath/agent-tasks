@@ -81,6 +81,21 @@ export class TaskService {
     return [...DEFAULT_STAGES];
   }
 
+  getAllGateConfigs(): Record<string, GateConfig> {
+    const configs = this.db.queryAll<PipelineConfig>(
+      'SELECT * FROM pipeline_config WHERE gate_config IS NOT NULL',
+    );
+    const result: Record<string, GateConfig> = {};
+    for (const c of configs) {
+      try {
+        result[c.project] = JSON.parse(c.gate_config!) as GateConfig;
+      } catch {
+        /* skip invalid */
+      }
+    }
+    return result;
+  }
+
   getGateConfig(project?: string): GateConfig | null {
     if (!project) return null;
     const config = this.db.queryOne<PipelineConfig>(

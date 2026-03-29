@@ -26,6 +26,32 @@ Click any task card to open the side panel on the right. The panel shows:
 | ------------------------------------ | ---------------------------------------------- |
 | ![Side panel](assets/side-panel.png) | ![Side panel dark](assets/side-panel-dark.png) |
 
+## Stage gate indicators
+
+When a project has stage gates configured (via `task_pipeline_config`), the column header shows a lock icon with the gate requirements as orange pills. This gives visual feedback about what's needed before tasks can advance.
+
+For example, if the `implement` stage requires a `code-summary` artifact, the column header shows:
+
+```
+🔒 code-summary
+```
+
+Gate types displayed: named artifact requirements, minimum artifact counts, comment requirements, and approval requirements. Gates are configured per project — see the [Setup Guide](SETUP.md#per-stage-gate-guards) for configuration.
+
+![Stage gate indicators](assets/stage-gates.png)
+
+## Decisions
+
+The side panel separates decision artifacts from regular artifacts. Decisions created via `task_decision` are rendered as structured cards with:
+
+- **Chose** — the selected option (highlighted green)
+- **Over** — the alternatives considered
+- **Because** — the rationale
+
+Decisions appear in their own "Decisions" section (with a gavel icon) above the regular "Artifacts" section, making architectural choices easy to find and review.
+
+![Decision card](assets/decisions.png)
+
 ## Inline creation
 
 Each column has an "Add task" button at the bottom. Click it to reveal an inline form — enter a title (and optionally a description) and press Enter. The task is created directly in that stage.
@@ -72,6 +98,8 @@ Columns with no tasks display a helpful empty state with an icon and hint text.
 - Full markdown rendering (GFM, code blocks, tables) via marked + DOMPurify
 - Syntax highlighting in code blocks via highlight.js
 - Expandable/collapsible artifacts with version diffs
+- Decision cards with structured Chose/Over/Because rendering
+- Stage gate indicators on column headers (lock icon + requirement pills)
 - Threaded comments with Markdown rendering
 - Drag-and-drop between stage columns with auto-scroll
 - Full-text search powered by FTS5
@@ -83,6 +111,6 @@ Columns with no tasks display a helpful empty state with an icon and hint text.
 
 The dashboard connects via WebSocket for real-time updates:
 
-- **On connect:** receives full state snapshot (`type: "state"`)
+- **On connect:** receives full state snapshot (`type: "state"`) with tasks, dependencies, artifact/comment counts, stages, gate configs, and collaborators
 - **Incremental events:** streamed as tasks change
 - **Polling:** server polls SQLite every 2s to detect cross-process changes (MCP stdio servers)
