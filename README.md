@@ -1,5 +1,7 @@
 # agent-tasks
 
+[![SafeSkill 80/100](https://img.shields.io/badge/SafeSkill-80%2F100_Passes%20with%20Notes-yellow)](https://safeskill.dev/scan/keshrath-agent-tasks)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
 [![Tests](https://img.shields.io/badge/tests-337%20passing-brightgreen)]()
