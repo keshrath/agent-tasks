@@ -11,37 +11,59 @@ import { ValidationError } from '../types.js';
 import { handlers, type SessionState } from './mcp-handlers.js';
 
 // ---------------------------------------------------------------------------
-// Tool definitions
+// Tool definitions (13 tools)
 // ---------------------------------------------------------------------------
 
 export const tools: ToolDefinition[] = [
   {
     name: 'task_create',
-    description: 'Create a pipeline task with optional stage, priority, and project.',
+    description:
+      'Create a pipeline task. Tasks start in "backlog" and move through stages: backlog → spec → plan → implement → test → review → done. Use parent_id to create subtasks under an existing task.',
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Task title (max 500 chars)' },
         description: { type: 'string', description: 'Detailed instructions (max 50K chars)' },
         assign_to: { type: 'string', description: 'Agent name to assign to' },
-        stage: { type: 'string', description: 'Pipeline stage (default: backlog)' },
+        stage: {
+          type: 'string',
+          description: 'Initial pipeline stage (default: backlog)',
+        },
         priority: {
           type: 'number',
-          description: 'Priority (higher = more important, default: 0)',
+          description: 'Priority — higher number = more important (default: 0)',
         },
         project: { type: 'string', description: 'Project name for grouping' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
-        parent_id: { type: 'number', description: 'Parent task ID (creates a subtask)' },
+        parent_id: {
+          type: 'number',
+          description: 'Parent task ID — creates a subtask that inherits project and priority',
+        },
       },
       required: ['title'],
     },
   },
   {
     name: 'task_list',
-    description: 'List tasks with optional filters and pagination.',
+    description:
+      'List, search, or pick tasks. Without params: returns all tasks. With filters: narrow by status/stage/project/assignee. With "query": full-text search across titles and descriptions. With "next": true: returns the single highest-priority unassigned task with all dependencies met (uses affinity scoring when agent is provided).',
     inputSchema: {
       type: 'object',
       properties: {
+        query: {
+          type: 'string',
+          description: 'Full-text search across task titles and descriptions (FTS5)',
+        },
+        next: {
+          type: 'boolean',
+          description:
+            'Return the single best available task — highest priority, unassigned, all dependencies met. Uses affinity scoring when "agent" is provided.',
+        },
+        agent: {
+          type: 'string',
+          description:
+            'Agent name for affinity scoring (only with next: true) — prefers tasks where the agent worked on the parent, a dependency, or the same project',
+        },
         status: {
           type: 'string',
           enum: ['pending', 'in_progress', 'completed', 'failed', 'cancelled'],
@@ -53,14 +75,18 @@ export const tools: ToolDefinition[] = [
         collaborator: { type: 'string', description: 'Filter tasks where agent is a collaborator' },
         root_only: { type: 'boolean', description: 'Only show top-level tasks (no subtasks)' },
         parent_id: { type: 'number', description: 'Filter subtasks of a specific parent' },
-        limit: { type: 'number', description: 'Max results (default/max: 500)' },
+        limit: {
+          type: 'number',
+          description: 'Max results (default: 500 for list, 50 for search)',
+        },
         offset: { type: 'number', description: 'Skip first N results (for pagination)' },
       },
     },
   },
   {
     name: 'task_claim',
-    description: 'Claim a pending task. Assigns it and advances from backlog to the next stage.',
+    description:
+      'Claim a pending task — assigns it to you and advances from backlog to spec. This is the standard way to start working on a task.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -75,7 +101,8 @@ export const tools: ToolDefinition[] = [
   },
   {
     name: 'task_update',
-    description: 'Update task metadata (title, description, priority, tags, assignment).',
+    description:
+      'Update task metadata — title, description, priority, tags, project, or assignment. Does not change stage or status (use task_stage for that).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -94,25 +121,9 @@ export const tools: ToolDefinition[] = [
     },
   },
   {
-    name: 'task_next',
-    description:
-      "Get the highest-priority unassigned task with all dependencies met. When agent is provided, uses affinity scoring to prefer tasks related to the agent's previous work (tie-breaker among same-priority tasks). Returns null if none.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        project: { type: 'string', description: 'Filter by project' },
-        stage: { type: 'string', description: 'Filter by stage' },
-        agent: {
-          type: 'string',
-          description:
-            'Agent name for affinity scoring — prefers tasks where the agent worked on the parent, a dependency, or the same project',
-        },
-      },
-    },
-  },
-  {
     name: 'task_delete',
-    description: 'Delete a task and all its artifacts and dependencies (cascading delete).',
+    description:
+      'Delete a task and all its artifacts, comments, and dependencies (cascading delete). Cannot be undone.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -122,49 +133,9 @@ export const tools: ToolDefinition[] = [
     },
   },
   {
-    name: 'task_search',
-    description: 'Full-text search across task titles and descriptions.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Search query' },
-        project: { type: 'string', description: 'Filter by project' },
-        limit: { type: 'number', description: 'Max results (default: 50)' },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'task_expand',
-    description:
-      'Break a task into subtasks. Creates subtasks with parent_id pointing to the given task, inheriting project and priority.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        task_id: { type: 'number', description: 'Parent task ID to expand' },
-        subtasks: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              title: { type: 'string', description: 'Subtask title' },
-              description: { type: 'string', description: 'Subtask description' },
-              priority: {
-                type: 'number',
-                description: 'Priority override (inherits from parent if omitted)',
-              },
-            },
-            required: ['title'],
-          },
-          description: 'Array of subtasks to create',
-        },
-      },
-      required: ['task_id', 'subtasks'],
-    },
-  },
-  {
     name: 'task_comment',
-    description: 'Add a comment to a task for async discussion between agents.',
+    description:
+      'Add a comment to a task — used for async discussion between agents. Supports threading via parent_comment_id. Comments also satisfy stage-gate "require_comment" checks.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -178,7 +149,7 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_stage',
     description:
-      'Manage task lifecycle stage transitions. Actions: "advance" moves to the next (or a specific) stage, "regress" sends back to an earlier stage, "complete" marks done, "fail" marks failed, "cancel" cancels.',
+      'Move a task through its lifecycle. Actions: "advance" → next stage (or jump to a specific one), "regress" → earlier stage (requires reason), "complete" → marks done with result, "fail" → marks failed with error, "cancel" → cancels with reason.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -191,7 +162,7 @@ export const tools: ToolDefinition[] = [
         stage: {
           type: 'string',
           description:
-            'Target stage (advance: optional, advances to next if omitted; regress: required)',
+            'Target stage (advance: optional — advances to next if omitted; regress: required)',
         },
         comment: {
           type: 'string',
@@ -213,7 +184,7 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_query',
     description:
-      'Query task-related data. Types: "subtasks" gets child tasks, "artifacts" gets attached documents, "comments" gets discussion threads.',
+      'Read task-related data. Types: "subtasks" → child tasks, "artifacts" → attached documents/decisions/learnings (filterable by stage), "comments" → discussion threads.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -238,7 +209,7 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_artifact',
     description:
-      'Create task artifacts. Types: "general" attaches a document, "decision" records a structured decision (chose/over/because), "learning" captures an insight (auto-propagated on completion).',
+      'Attach artifacts to a task. Types: "general" → document (spec, test-results, review-notes), "decision" → structured decision record (chose/over/because), "learning" → insight that auto-propagates to parent and sibling tasks on completion.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -283,7 +254,7 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_config',
     description:
-      'Configuration and utility operations. Actions: "pipeline" gets/sets pipeline stages and gate config, "session" sets session identity, "cleanup" runs data cleanup, "rules" generates IDE rule files.',
+      'Configuration and admin. Actions: "session" → set agent identity (call this first), "pipeline" → get/set pipeline stages and gate config for a project, "cleanup" → purge old completed tasks, "rules" → generate IDE rule files (.mdc or CLAUDE.md).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -373,7 +344,7 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_dependency',
     description:
-      'Manage task dependencies. "add" creates a relationship (blocks/related/duplicate). "remove" deletes one.',
+      'Manage task dependencies. "add" → create a blocks/related/duplicate relationship between two tasks (blocks advancement until resolved). "remove" → delete a dependency.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -399,7 +370,7 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_collaborator',
     description:
-      'Manage task collaborators. "add" assigns an agent with a role (collaborator, reviewer, watcher). "remove" unassigns one.',
+      'Manage task collaborators. "add" → assign an agent as collaborator (can work on it), reviewer (reviews artifacts), or watcher (gets notifications). "remove" → unassign an agent.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -422,7 +393,7 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_approval',
     description:
-      'Manage approval workflows. Actions: "request" creates an approval request, "approve" approves one, "reject" rejects one, "list" lists pending approvals, "review" is a convenience approve/reject that also advances or regresses the task.',
+      'Manage approval workflows for stage gates. Actions: "request" → create approval request at current stage, "approve"/"reject" → decide on a pending approval, "list" → show pending approvals, "review" → convenience action that approves+advances or rejects+regresses in one call.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -10,6 +10,36 @@ import type { EventBus } from './events.js';
 
 const AGENT_COMM_URL = process.env.AGENT_COMM_URL || 'http://localhost:3421';
 
+interface TaskPayload {
+  id: number;
+  title: string;
+  assigned_to?: string;
+}
+
+interface CommentPayload {
+  task_id: number;
+  agent_id: string;
+  content: string;
+}
+
+interface ApprovalPayload {
+  task_id: number;
+  stage: string;
+  reviewer?: string;
+}
+
+function isTaskPayload(v: unknown): v is TaskPayload {
+  return typeof v === 'object' && v !== null && typeof (v as TaskPayload).id === 'number';
+}
+
+function isCommentPayload(v: unknown): v is CommentPayload {
+  return typeof v === 'object' && v !== null && typeof (v as CommentPayload).task_id === 'number';
+}
+
+function isApprovalPayload(v: unknown): v is ApprovalPayload {
+  return typeof v === 'object' && v !== null && typeof (v as ApprovalPayload).task_id === 'number';
+}
+
 export class AgentBridge {
   private unsubs: (() => void)[] = [];
 
@@ -18,7 +48,8 @@ export class AgentBridge {
   start(): void {
     this.unsubs.push(
       this.events.on('task:claimed', (e) => {
-        const task = e.data.task as { id: number; title: string; assigned_to?: string };
+        const task = e.data.task;
+        if (!isTaskPayload(task)) return;
         if (task.assigned_to) {
           this.notify(
             `Task #${task.id} "${task.title}" has been assigned to you.`,
@@ -30,8 +61,9 @@ export class AgentBridge {
 
     this.unsubs.push(
       this.events.on('task:advanced', (e) => {
-        const task = e.data.task as { id: number; title: string; assigned_to?: string };
-        const toStage = e.data.to_stage as string;
+        const task = e.data.task;
+        if (!isTaskPayload(task)) return;
+        const toStage = String(e.data.to_stage ?? '');
         if (task.assigned_to) {
           this.notify(`Task #${task.id} "${task.title}" advanced to ${toStage}.`, task.assigned_to);
         }
@@ -40,7 +72,8 @@ export class AgentBridge {
 
     this.unsubs.push(
       this.events.on('comment:created', (e) => {
-        const comment = e.data.comment as { task_id: number; agent_id: string; content: string };
+        const comment = e.data.comment;
+        if (!isCommentPayload(comment)) return;
         this.notifyChannel(
           `Comment on task #${comment.task_id} by ${comment.agent_id}: ${comment.content.slice(0, 100)}`,
         );
@@ -49,11 +82,8 @@ export class AgentBridge {
 
     this.unsubs.push(
       this.events.on('approval:requested', (e) => {
-        const approval = e.data.approval as {
-          task_id: number;
-          stage: string;
-          reviewer?: string;
-        };
+        const approval = e.data.approval;
+        if (!isApprovalPayload(approval)) return;
         if (approval.reviewer) {
           this.notify(
             `Approval requested for task #${approval.task_id} at stage ${approval.stage}.`,

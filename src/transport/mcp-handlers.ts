@@ -152,7 +152,34 @@ export function handleCreate(
   );
 }
 
-export function handleList(ctx: AppContext, args: Record<string, unknown>): unknown {
+export function handleList(
+  ctx: AppContext,
+  args: Record<string, unknown>,
+  session: SessionState,
+): unknown {
+  const query = optString(args, 'query');
+  if (query) {
+    return ctx.tasks.search(query, {
+      project: optString(args, 'project'),
+      limit: optNumber(args, 'limit'),
+    });
+  }
+
+  const next = optBoolean(args, 'next');
+  if (next) {
+    const result = ctx.tasks.next(
+      optString(args, 'project'),
+      optString(args, 'stage'),
+      optString(args, 'agent') ?? sessionName(session),
+    );
+    if (!result) return { message: 'No available tasks.' };
+    return {
+      ...result.task,
+      affinity_score: result.affinity_score,
+      affinity_reasons: result.affinity_reasons,
+    };
+  }
+
   return ctx.tasks.list({
     status: optString(args, 'status')
       ? validateEnum(
@@ -192,72 +219,9 @@ export function handleUpdate(ctx: AppContext, args: Record<string, unknown>): un
   });
 }
 
-export function handleNext(
-  ctx: AppContext,
-  args: Record<string, unknown>,
-  session: SessionState,
-): unknown {
-  const result = ctx.tasks.next(
-    optString(args, 'project'),
-    optString(args, 'stage'),
-    optString(args, 'agent') ?? sessionName(session),
-  );
-  if (!result) return { message: 'No available tasks.' };
-  return {
-    ...result.task,
-    affinity_score: result.affinity_score,
-    affinity_reasons: result.affinity_reasons,
-  };
-}
-
 export function handleDelete(ctx: AppContext, args: Record<string, unknown>): unknown {
   ctx.tasks.delete(requireNumber(args, 'task_id'));
   return { success: true };
-}
-
-export function handleSearch(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return ctx.tasks.search(requireString(args, 'query'), {
-    project: optString(args, 'project'),
-    limit: optNumber(args, 'limit'),
-  });
-}
-
-export function handleExpand(
-  ctx: AppContext,
-  args: Record<string, unknown>,
-  session: SessionState,
-): unknown {
-  const parentId = requireNumber(args, 'task_id');
-  const parent = ctx.tasks.getById(parentId);
-  if (!parent) throw new ValidationError(`Task ${parentId} not found.`);
-  const subtaskDefs = args.subtasks;
-  if (!Array.isArray(subtaskDefs) || subtaskDefs.length === 0) {
-    throw new ValidationError('"subtasks" must be a non-empty array.');
-  }
-  const created = [];
-  for (const sub of subtaskDefs) {
-    if (
-      typeof sub !== 'object' ||
-      sub === null ||
-      typeof (sub as Record<string, unknown>).title !== 'string'
-    ) {
-      throw new ValidationError('Each subtask must have a "title" string.');
-    }
-    const s = sub as Record<string, unknown>;
-    created.push(
-      ctx.tasks.create(
-        {
-          title: s.title as string,
-          description: (s.description as string) ?? undefined,
-          priority: typeof s.priority === 'number' ? s.priority : parent.priority,
-          project: parent.project ?? undefined,
-          parent_id: parentId,
-        },
-        sessionName(session),
-      ),
-    );
-  }
-  return created;
 }
 
 export function handleComment(
@@ -606,89 +570,6 @@ export function handleApproval(
 }
 
 // ---------------------------------------------------------------------------
-// Backward-compatibility aliases
-// ---------------------------------------------------------------------------
-
-function handleSetSession(
-  ctx: AppContext,
-  args: Record<string, unknown>,
-  session: SessionState,
-): unknown {
-  return handleConfig(ctx, { ...args, action: 'session' }, session);
-}
-
-function handleComplete(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return handleStage(ctx, { ...args, action: 'complete' }, { current: null });
-}
-
-function handleFail(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return handleStage(ctx, { ...args, action: 'fail' }, { current: null });
-}
-
-function handleCancel(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return handleStage(ctx, { ...args, action: 'cancel' }, { current: null });
-}
-
-function handleAdvance(
-  ctx: AppContext,
-  args: Record<string, unknown>,
-  session: SessionState,
-): unknown {
-  return handleStage(ctx, { ...args, action: 'advance' }, session);
-}
-
-function handleRegress(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return handleStage(ctx, { ...args, action: 'regress' }, { current: null });
-}
-
-function handleAddArtifact(
-  ctx: AppContext,
-  args: Record<string, unknown>,
-  session: SessionState,
-): unknown {
-  return handleArtifact(ctx, { ...args, type: 'general' }, session);
-}
-
-function handleGetArtifacts(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return handleQuery(ctx, { ...args, type: 'artifacts' });
-}
-
-function handleGetComments(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return handleQuery(ctx, { ...args, type: 'comments' });
-}
-
-function handleGetSubtasks(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return handleQuery(ctx, { ...args, type: 'subtasks' });
-}
-
-function handleDecision(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return handleArtifact(ctx, { ...args, type: 'decision' }, { current: null });
-}
-
-function handleLearn(
-  ctx: AppContext,
-  args: Record<string, unknown>,
-  session: SessionState,
-): unknown {
-  return handleArtifact(ctx, { ...args, type: 'learning' }, session);
-}
-
-function handleOldPipelineConfig(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return handleConfig(ctx, { ...args, action: 'pipeline' }, { current: null });
-}
-
-function handleOldCleanup(
-  ctx: AppContext,
-  args: Record<string, unknown>,
-): unknown | Promise<unknown> {
-  return handleConfig(ctx, { ...args, action: 'cleanup' }, { current: null });
-}
-
-function handleOldGenerateRules(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return handleConfig(ctx, { ...args, action: 'rules' }, { current: null });
-}
-
-// ---------------------------------------------------------------------------
 // Dispatch map
 // ---------------------------------------------------------------------------
 
@@ -697,10 +578,7 @@ export const handlers: Record<string, HandlerFn> = {
   task_list: handleList,
   task_claim: handleClaim,
   task_update: handleUpdate,
-  task_next: handleNext,
   task_delete: handleDelete,
-  task_search: handleSearch,
-  task_expand: handleExpand,
   task_comment: handleComment,
   task_stage: handleStage,
   task_query: handleQuery,
@@ -709,21 +587,4 @@ export const handlers: Record<string, HandlerFn> = {
   task_dependency: handleDependency,
   task_collaborator: handleCollaborator,
   task_approval: handleApproval,
-
-  // Backward-compatibility aliases for old tool names
-  task_set_session: handleSetSession,
-  task_complete: handleComplete,
-  task_fail: handleFail,
-  task_cancel: handleCancel,
-  task_advance: handleAdvance,
-  task_regress: handleRegress,
-  task_add_artifact: handleAddArtifact,
-  task_get_artifacts: handleGetArtifacts,
-  task_get_comments: handleGetComments,
-  task_get_subtasks: handleGetSubtasks,
-  task_decision: handleDecision,
-  task_learn: handleLearn,
-  task_pipeline_config: handleOldPipelineConfig,
-  task_cleanup: handleOldCleanup,
-  task_generate_rules: handleOldGenerateRules,
 };

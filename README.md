@@ -2,8 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-396%20passing-brightgreen)]()
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-16-purple)]()
+[![Tests](https://img.shields.io/badge/tests-378%20passing-brightgreen)]()
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-13-purple)]()
 [![REST Endpoints](https://img.shields.io/badge/REST-18%20endpoints-orange)]()
 
 **Pipeline-driven task management for AI coding agents.** An [MCP](https://modelcontextprotocol.io/) server with stage-gated pipelines, multi-agent collaboration, and a real-time kanban dashboard. Tasks flow through configurable stages — `backlog`, `spec`, `plan`, `implement`, `test`, `review`, `done` — with dependency tracking, approval workflows, artifact versioning, and threaded comments.
@@ -40,7 +40,7 @@ When you run multiple AI agents on the same codebase, they need a shared task pi
 - **Stage gates** — configurable per-project gates with per-stage rules: require named artifacts, minimum artifact counts, comments, or approvals before advancing
 - **Decisions log** — structured decision artifacts (chose X over Y because Z) via `task_artifact(type: "decision")`
 - **Learnings propagation** — `task_artifact(type: "learning")` captures insights (technique, pitfall, decision, pattern); auto-propagated to parent and sibling tasks on completion
-- **Agent affinity** — `task_next` prefers routing tasks to agents with related history (parent, dependency, project) as a tie-breaker
+- **Agent affinity** — `task_list(next: true)` prefers routing tasks to agents with related history (parent, dependency, project) as a tie-breaker
 - **Heartbeat-based cleanup** — auto-fails tasks from dead agents using agent-comm heartbeat data
 - **Task cleanup hooks** — auto-fails orphaned tasks on session stop and cleans up stale tasks on session start
 - **Agent bridge** — notifies connected agents on task events
@@ -104,21 +104,21 @@ Add agent-tasks as an MCP server in `~/.claude/settings.json`:
 }
 ```
 
-Once configured, Claude Code can use all 32 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
+Once configured, Claude Code can use all 13 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
 
 ---
 
-## MCP Tools (16)
+## MCP Tools (13)
 
-| Category                    | Tools                                                                                              |
-| --------------------------- | -------------------------------------------------------------------------------------------------- |
-| **Task CRUD** (7)           | `task_create`, `task_list`, `task_next`, `task_claim`, `task_update`, `task_delete`, `task_search` |
-| **Lifecycle** (1)           | `task_stage` (advance, regress, complete, fail, cancel)                                            |
-| **Subtasks & deps** (2)     | `task_expand`, `task_dependency`                                                                   |
-| **Artifacts & queries** (2) | `task_artifact` (general, decision, learning), `task_query` (subtasks, artifacts, comments)        |
-| **Comments & collab** (2)   | `task_comment`, `task_collaborator`                                                                |
-| **Approvals** (1)           | `task_approval`                                                                                    |
-| **Config & utils** (1)      | `task_config` (pipeline, session, cleanup, rules)                                                  |
+| Category                    | Tools                                                                                                                         |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Task CRUD** (5)           | `task_create`, `task_list` (also: search via `query`, pick next via `next: true`), `task_claim`, `task_update`, `task_delete` |
+| **Lifecycle** (1)           | `task_stage` (advance, regress, complete, fail, cancel)                                                                       |
+| **Dependencies** (1)        | `task_dependency` (subtasks: use `task_create` with `parent_id`)                                                              |
+| **Artifacts & queries** (2) | `task_artifact` (general, decision, learning), `task_query` (subtasks, artifacts, comments)                                   |
+| **Comments & collab** (2)   | `task_comment`, `task_collaborator`                                                                                           |
+| **Approvals** (1)           | `task_approval`                                                                                                               |
+| **Config & utils** (1)      | `task_config` (pipeline, session, cleanup, rules)                                                                             |
 
 See [full API reference](docs/API.md) for detailed descriptions of every tool and endpoint.
 
@@ -181,7 +181,7 @@ npm run check         # Full CI: typecheck + lint + format + test
 
 ## Documentation
 
-- [API Reference](docs/API.md) — all 32 MCP tools, 18 REST endpoints, WebSocket protocol
+- [API Reference](docs/API.md) — all 13 MCP tools, 18 REST endpoints, WebSocket protocol
 - [Architecture](docs/ARCHITECTURE.md) — source structure, design principles, database schema
 - [Dashboard](docs/DASHBOARD.md) — kanban board features, keyboard shortcuts, screenshots
 - [Setup Guide](docs/SETUP.md) — installation, client setup (Claude Code, OpenCode, Cursor, Windsurf), hooks

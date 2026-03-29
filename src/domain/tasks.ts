@@ -59,32 +59,61 @@ const VALID_STATUSES: readonly TaskStatus[] = [
 ];
 
 export class TaskService {
+  private configCache = new Map<
+    string,
+    { stages: string[]; gate: GateConfig | null; at: number }
+  >();
+  private static readonly CONFIG_CACHE_TTL = 30_000;
+
   constructor(
     private readonly db: Db,
     private readonly events: EventBus,
   ) {}
 
-  // ---- Pipeline Config ----
+  // ---- Pipeline Config (cached) ----
 
-  getPipelineStages(project?: string): string[] {
-    if (project) {
-      const config = this.db.queryOne<PipelineConfig>(
-        'SELECT * FROM pipeline_config WHERE project = ?',
-        [project],
-      );
-      if (config) {
+  private getCachedConfig(project: string): { stages: string[]; gate: GateConfig | null } | null {
+    const entry = this.configCache.get(project);
+    if (entry && Date.now() - entry.at < TaskService.CONFIG_CACHE_TTL) {
+      return { stages: entry.stages, gate: entry.gate };
+    }
+    return null;
+  }
+
+  private invalidateConfigCache(project: string): void {
+    this.configCache.delete(project);
+  }
+
+  private loadAndCacheConfig(project: string): { stages: string[]; gate: GateConfig | null } {
+    const config = this.db.queryOne<PipelineConfig>(
+      'SELECT * FROM pipeline_config WHERE project = ?',
+      [project],
+    );
+    let stages = [...DEFAULT_STAGES];
+    let gate: GateConfig | null = null;
+    if (config) {
+      try {
+        stages = JSON.parse(config.stages);
+      } catch {
+        // fall back to defaults
+      }
+      if (config.gate_config) {
         try {
-          return JSON.parse(config.stages);
-        } catch (err) {
-          process.stderr.write(
-            '[agent-tasks] getPipelineStages JSON parse: ' +
-              (err instanceof Error ? err.message : String(err)) +
-              '\n',
-          );
+          gate = JSON.parse(config.gate_config) as GateConfig;
+        } catch {
+          // fall back to null
         }
       }
     }
-    return [...DEFAULT_STAGES];
+    this.configCache.set(project, { stages, gate, at: Date.now() });
+    return { stages, gate };
+  }
+
+  getPipelineStages(project?: string): string[] {
+    if (!project) return [...DEFAULT_STAGES];
+    const cached = this.getCachedConfig(project);
+    if (cached) return cached.stages;
+    return this.loadAndCacheConfig(project).stages;
   }
 
   getAllGateConfigs(): Record<string, GateConfig> {
@@ -94,13 +123,15 @@ export class TaskService {
     const result: Record<string, GateConfig> = {};
     for (const c of configs) {
       try {
-        result[c.project] = JSON.parse(c.gate_config!) as GateConfig;
-      } catch (err) {
-        process.stderr.write(
-          '[agent-tasks] getAllGateConfigs JSON parse: ' +
-            (err instanceof Error ? err.message : String(err)) +
-            '\n',
-        );
+        const gate = JSON.parse(c.gate_config!) as GateConfig;
+        result[c.project] = gate;
+        const cached = this.configCache.get(c.project);
+        if (cached) {
+          cached.gate = gate;
+          cached.at = Date.now();
+        }
+      } catch {
+        // skip corrupt entries
       }
     }
     return result;
@@ -108,21 +139,9 @@ export class TaskService {
 
   getGateConfig(project?: string): GateConfig | null {
     if (!project) return null;
-    const config = this.db.queryOne<PipelineConfig>(
-      'SELECT * FROM pipeline_config WHERE project = ?',
-      [project],
-    );
-    if (!config?.gate_config) return null;
-    try {
-      return JSON.parse(config.gate_config) as GateConfig;
-    } catch (err) {
-      process.stderr.write(
-        '[agent-tasks] getGateConfig JSON parse: ' +
-          (err instanceof Error ? err.message : String(err)) +
-          '\n',
-      );
-      return null;
-    }
+    const cached = this.getCachedConfig(project);
+    if (cached) return cached.gate;
+    return this.loadAndCacheConfig(project).gate;
   }
 
   setGateConfig(project: string, gateConfig: GateConfig): PipelineConfig {
@@ -133,6 +152,7 @@ export class TaskService {
        ON CONFLICT(project) DO UPDATE SET gate_config = ?, updated_at = datetime('now')`,
       [project, JSON.stringify(this.getPipelineStages(project)), json, json],
     );
+    this.invalidateConfigCache(project);
     return this.db.queryOne<PipelineConfig>('SELECT * FROM pipeline_config WHERE project = ?', [
       project,
     ])!;
@@ -162,6 +182,7 @@ export class TaskService {
        ON CONFLICT(project) DO UPDATE SET stages = ?, updated_at = datetime('now')`,
       [project, json, json],
     );
+    this.invalidateConfigCache(project);
     this.events.emit('pipeline:configured', { project, stages });
     return this.db.queryOne<PipelineConfig>('SELECT * FROM pipeline_config WHERE project = ?', [
       project,

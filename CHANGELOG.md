@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.0] - 2026-03-30
+
+### Removed
+
+- **`task_search`** — merged into `task_list(query: "...")` for full-text search
+- **`task_next`** — merged into `task_list(next: true)` with optional `agent` for affinity scoring
+- **`task_expand`** — removed (use `task_create` with `parent_id` to create subtasks)
+- **Dead code cleanup** — deleted 4 orphaned pre-refactor files (`src/db.ts`, `src/event-bus.ts`, `src/session.ts`, `src/tasks.ts`) totaling ~700 lines
+- **Backward-compat aliases** — removed 15 old tool name aliases from handler dispatch
+
+### Changed
+
+- MCP tool count: 16 → 13
+- **Improved tool descriptions** — all 13 tools now have detailed descriptions with examples, parameter explanations, and getting-started guidance for better LLM adoption
+- **Gate config caching** — `getPipelineStages()`, `getGateConfig()`, `getAllGateConfigs()` now use in-memory cache with 30s TTL, invalidated on writes
+- **Type-safe agent bridge** — replaced unsafe `as` casts in `agent-bridge.ts` with runtime type guard functions
+- Updated all docs (README, CLAUDE.md, ARCHITECTURE.md)
+
+[1.9.0]: https://github.com/keshrath/agent-tasks/compare/v1.8.0...v1.9.0
+
 ## [1.8.0] - 2026-03-29
 
 ### Changed
