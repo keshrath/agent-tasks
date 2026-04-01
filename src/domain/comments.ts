@@ -73,6 +73,18 @@ export class CommentService {
     );
   }
 
+  countByTaskIds(taskIds: number[]): Record<number, number> {
+    if (taskIds.length === 0) return {};
+    const placeholders = taskIds.map(() => '?').join(',');
+    const rows = this.db.queryAll<{ task_id: number; cnt: number }>(
+      `SELECT task_id, COUNT(*) as cnt FROM task_comments WHERE task_id IN (${placeholders}) GROUP BY task_id`,
+      taskIds,
+    );
+    const counts: Record<number, number> = {};
+    for (const r of rows) counts[r.task_id] = r.cnt;
+    return counts;
+  }
+
   countByTask(): Record<number, number> {
     const rows = this.db.queryAll<{ task_id: number; cnt: number }>(
       'SELECT task_id, COUNT(*) as cnt FROM task_comments GROUP BY task_id',

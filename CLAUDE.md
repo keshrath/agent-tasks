@@ -60,7 +60,7 @@ Configurable per project via `task_pipeline_config`. Tasks advance through stage
 
 - **REST**: `GET /health`, `GET/POST /api/tasks`, `PUT /api/tasks/:id/stage`, `GET /api/tasks/:id/artifacts`, `GET/POST /api/tasks/:id/comments`, `GET /api/search?q=`, `GET /api/agents`
 - **WebSocket**: Full state on connect, incremental events streamed, DB polling for cross-process updates (2s interval)
-- **MCP** (13 tools): `task_create`, `task_list` (search via `query`, pick next via `next: true`), `task_claim`, `task_update`, `task_delete`, `task_comment`, `task_stage`, `task_query`, `task_artifact`, `task_config`, `task_dependency`, `task_collaborator`, `task_approval`
+- **MCP** (14 tools): `task_create`, `task_get`, `task_list` (search via `query`, pick next via `next: true`), `task_claim`, `task_update`, `task_delete`, `task_comment`, `task_stage`, `task_query`, `task_artifact`, `task_config`, `task_dependency`, `task_collaborator`, `task_approval`
 
 ## Live Updates
 
@@ -95,7 +95,7 @@ Custom error hierarchy in `src/types.ts`:
 ## Database
 
 - SQLite with WAL mode, better-sqlite3
-- Schema versioning via `_meta` table (current: V4)
-- Migrations in `src/storage/database.ts`: `migrateV1()`, `migrateV2()`, `migrateV3()`, `migrateV4()`
+- Schema versioning via `_meta` table (current: V5)
+- Migrations in `src/storage/database.ts`: `migrateV1()`, `migrateV2()`, `migrateV3()`, `migrateV4()`, `migrateV5()`
 - All tables use FK constraints with `ON DELETE CASCADE`
 - FTS5 virtual table for full-text search with triggers for sync

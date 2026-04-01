@@ -24,7 +24,7 @@ export interface Db {
   close(): void;
 }
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 export function createDb(options: DbOptions = {}): Db {
   const dbPath = resolveDbPath(options.path);
@@ -103,6 +103,7 @@ function applySchema(db: Database.Database): void {
   if (currentVersion < 2) migrateV2(db);
   if (currentVersion < 3) migrateV3(db);
   if (currentVersion < 4) migrateV4(db);
+  if (currentVersion < 5) migrateV5(db);
 
   db.prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`).run(
     String(SCHEMA_VERSION),
@@ -280,4 +281,9 @@ function migrateV4(db: Database.Database): void {
   if (!pcCols.some((c) => c.name === 'gate_config')) {
     db.exec(`ALTER TABLE pipeline_config ADD COLUMN gate_config TEXT`);
   }
+}
+
+function migrateV5(db: Database.Database): void {
+  // -- Index on depends_on for reverse-dependency lookups
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_task_deps_depends_on ON task_dependencies(depends_on)`);
 }

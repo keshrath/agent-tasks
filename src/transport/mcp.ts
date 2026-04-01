@@ -44,6 +44,18 @@ export const tools: ToolDefinition[] = [
     },
   },
   {
+    name: 'task_get',
+    description:
+      'Get a single task by ID with full details including artifacts count, comments count, dependencies, and collaborators.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'Task ID to retrieve' },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
     name: 'task_list',
     description:
       'List, search, or pick tasks. Without params: returns all tasks. With filters: narrow by status/stage/project/assignee. With "query": full-text search across titles and descriptions. With "next": true: returns the single highest-priority unassigned task with all dependencies met (uses affinity scoring when agent is provided).',

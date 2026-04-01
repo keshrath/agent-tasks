@@ -289,13 +289,26 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
     });
   });
 
-  route('GET', '/api/overview', (_req, res) => {
+  route('GET', '/api/overview', (req, res) => {
+    const url = new URL(req.url!, `http://${req.headers.host}`);
+    const limit = url.searchParams.has('limit')
+      ? parseInt(url.searchParams.get('limit')!, 10)
+      : 100;
+    const offset = url.searchParams.has('offset')
+      ? parseInt(url.searchParams.get('offset')!, 10)
+      : 0;
+    const totalCount = ctx.tasks.count();
+    const tasks = ctx.tasks.list({ limit, offset });
+    const taskIds = tasks.map((t) => t.id);
     json(res, {
-      tasks: ctx.tasks.list(),
-      dependencies: ctx.tasks.getAllDependencies(),
-      artifactCounts: ctx.tasks.getArtifactCounts(),
-      commentCounts: ctx.comments.countByTask(),
-      subtaskProgress: ctx.tasks.getAllSubtaskProgress(),
+      tasks,
+      total: totalCount,
+      limit,
+      offset,
+      dependencies: ctx.tasks.getDependenciesForTasks(taskIds),
+      artifactCounts: ctx.tasks.getArtifactCountsForTasks(taskIds),
+      commentCounts: ctx.comments.countByTaskIds(taskIds),
+      subtaskProgress: ctx.tasks.getSubtaskProgressForTasks(taskIds),
       stages: ctx.tasks.getPipelineStages(),
     });
   });

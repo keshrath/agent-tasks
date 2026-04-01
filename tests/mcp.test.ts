@@ -23,7 +23,7 @@ afterEach(() => {
 
 describe('tool definitions', () => {
   it('exports all defined tools', () => {
-    expect(tools.length).toBe(13);
+    expect(tools.length).toBe(14);
   });
 
   it('has unique tool names', () => {

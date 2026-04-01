@@ -3,6 +3,8 @@ import type { Db } from '../storage/database.js';
 import type { AgentBridge } from './agent-bridge.js';
 import type { Task } from '../types.js';
 
+const AGENT_COMM_TIMEOUT_MS = parseInt(process.env.AGENT_TASKS_COMM_TIMEOUT_MS ?? '5000', 10);
+
 export class CleanupService {
   private timer: ReturnType<typeof setInterval> | null = null;
 
@@ -113,7 +115,7 @@ export class CleanupService {
     const agentNames = [...new Set(inProgressTasks.map((t) => t.assigned_to!))];
     let agents: Array<{ name: string; status: string; last_heartbeat?: string }>;
     try {
-      agents = (await this.agentBridge.fetchAgents()) as Array<{
+      agents = (await this.fetchAgentsWithTimeout()) as Array<{
         name: string;
         status: string;
         last_heartbeat?: string;
@@ -181,6 +183,32 @@ export class CleanupService {
     }
 
     return { failed, checked: agentNames.length };
+  }
+
+  private async fetchAgentsWithTimeout(): Promise<unknown[]> {
+    if (!this.agentBridge) return [];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), AGENT_COMM_TIMEOUT_MS);
+    try {
+      const result = await Promise.race([
+        this.agentBridge.fetchAgents(),
+        new Promise<never>((_resolve, reject) => {
+          controller.signal.addEventListener('abort', () => {
+            reject(new Error(`agent-comm fetch timed out after ${AGENT_COMM_TIMEOUT_MS}ms`));
+          });
+        }),
+      ]);
+      return result;
+    } catch (err) {
+      process.stderr.write(
+        '[agent-tasks] fetchAgentsWithTimeout: ' +
+          (err instanceof Error ? err.message : String(err)) +
+          '\n',
+      );
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   purgeEverything(): {

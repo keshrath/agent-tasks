@@ -653,59 +653,112 @@ export class TaskService {
       return { task: candidates[0], affinity_score: 0, affinity_reasons: [] };
     }
 
+    const scored = this.computeAffinityBatch(topCandidates, agent);
+
     let bestTask = topCandidates[0];
     let bestScore = 0;
     let bestReasons: string[] = [];
 
-    for (const candidate of topCandidates) {
-      const { score, reasons } = this.computeAffinity(candidate, agent);
+    for (const { task: t, score, reasons } of scored) {
       if (score > bestScore) {
         bestScore = score;
         bestReasons = reasons;
-        bestTask = candidate;
+        bestTask = t;
       }
     }
 
     return { task: bestTask, affinity_score: bestScore, affinity_reasons: bestReasons };
   }
 
-  private computeAffinity(task: Task, agent: string): { score: number; reasons: string[] } {
-    let score = 0;
-    const reasons: string[] = [];
-
-    if (task.parent_id) {
-      const parent = this.getById(task.parent_id);
-      if (parent?.assigned_to === agent) {
-        score += 3;
-        reasons.push('worked on parent task');
-      }
-    }
-
-    const deps = this.db.queryAll<TaskDependency>(
-      `SELECT d.depends_on FROM task_dependencies d WHERE d.task_id = ? AND d.relationship = 'blocks'`,
-      [task.id],
-    );
-    for (const dep of deps) {
-      const depTask = this.getById(dep.depends_on);
-      if (depTask?.assigned_to === agent) {
-        score += 2;
-        reasons.push('worked on dependency #' + dep.depends_on);
-        break;
-      }
-    }
-
-    if (task.project) {
-      const projectHistory = this.db.queryOne<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM tasks WHERE project = ? AND assigned_to = ? AND status IN ('completed', 'in_progress')`,
-        [task.project, agent],
+  private computeAffinityBatch(
+    tasks: Task[],
+    agent: string,
+  ): { task: Task; score: number; reasons: string[] }[] {
+    const parentIds = [...new Set(tasks.map((t) => t.parent_id).filter((id) => id !== null))];
+    const parentMap = new Map<number, Task>();
+    if (parentIds.length > 0) {
+      const placeholders = parentIds.map(() => '?').join(',');
+      const parents = this.db.queryAll<Task>(
+        `SELECT * FROM tasks WHERE id IN (${placeholders})`,
+        parentIds,
       );
-      if (projectHistory && projectHistory.cnt > 0) {
-        score += 1;
-        reasons.push('worked on project ' + task.project);
+      for (const p of parents) parentMap.set(p.id, p);
+    }
+
+    const taskIds = tasks.map((t) => t.id);
+    const depsMap = new Map<number, TaskDependency[]>();
+    if (taskIds.length > 0) {
+      const placeholders = taskIds.map(() => '?').join(',');
+      const allDeps = this.db.queryAll<TaskDependency>(
+        `SELECT * FROM task_dependencies WHERE task_id IN (${placeholders}) AND relationship = 'blocks'`,
+        taskIds,
+      );
+      for (const d of allDeps) {
+        let arr = depsMap.get(d.task_id);
+        if (!arr) {
+          arr = [];
+          depsMap.set(d.task_id, arr);
+        }
+        arr.push(d);
       }
     }
 
-    return { score, reasons };
+    const depTargetIds = new Set<number>();
+    for (const deps of depsMap.values()) {
+      for (const d of deps) depTargetIds.add(d.depends_on);
+    }
+    const depTaskMap = new Map<number, Task>();
+    if (depTargetIds.size > 0) {
+      const placeholders = [...depTargetIds].map(() => '?').join(',');
+      const depTasks = this.db.queryAll<Task>(`SELECT * FROM tasks WHERE id IN (${placeholders})`, [
+        ...depTargetIds,
+      ]);
+      for (const t of depTasks) depTaskMap.set(t.id, t);
+    }
+
+    const projects = [...new Set(tasks.map((t) => t.project).filter((p) => p !== null))];
+    const projectCounts = new Map<string, number>();
+    if (projects.length > 0) {
+      const placeholders = projects.map(() => '?').join(',');
+      const rows = this.db.queryAll<{ project: string; cnt: number }>(
+        `SELECT project, COUNT(*) as cnt FROM tasks WHERE project IN (${placeholders}) AND assigned_to = ? AND status IN ('completed', 'in_progress') GROUP BY project`,
+        [...projects, agent],
+      );
+      for (const r of rows) projectCounts.set(r.project, r.cnt);
+    }
+
+    return tasks.map((task) => {
+      let score = 0;
+      const reasons: string[] = [];
+
+      if (task.parent_id) {
+        const parent = parentMap.get(task.parent_id);
+        if (parent?.assigned_to === agent) {
+          score += 3;
+          reasons.push('worked on parent task');
+        }
+      }
+
+      const deps = depsMap.get(task.id) ?? [];
+      for (const dep of deps) {
+        const depTask = depTaskMap.get(dep.depends_on);
+        if (depTask?.assigned_to === agent) {
+          score += 2;
+          reasons.push('worked on dependency #' + dep.depends_on);
+          break;
+        }
+      }
+
+      if (task.project) {
+        const cnt = projectCounts.get(task.project) ?? 0;
+        if (cnt > 0) {
+          score += 1;
+          reasons.push('worked on project ' + task.project);
+        }
+      }
+
+      return { task, score, reasons };
+    });
   }
 
   // ---- Dependencies ----
@@ -773,6 +826,15 @@ export class TaskService {
     return this.db.queryAll<TaskDependency>('SELECT * FROM task_dependencies');
   }
 
+  getDependenciesForTasks(taskIds: number[]): TaskDependency[] {
+    if (taskIds.length === 0) return [];
+    const placeholders = taskIds.map(() => '?').join(',');
+    return this.db.queryAll<TaskDependency>(
+      `SELECT * FROM task_dependencies WHERE task_id IN (${placeholders}) OR depends_on IN (${placeholders})`,
+      [...taskIds, ...taskIds],
+    );
+  }
+
   // ---- Artifacts ----
 
   addArtifact(
@@ -830,6 +892,18 @@ export class TaskService {
     return counts;
   }
 
+  getArtifactCountsForTasks(taskIds: number[]): Record<number, number> {
+    if (taskIds.length === 0) return {};
+    const placeholders = taskIds.map(() => '?').join(',');
+    const rows = this.db.queryAll<{ task_id: number; cnt: number }>(
+      `SELECT task_id, COUNT(*) as cnt FROM task_artifacts WHERE task_id IN (${placeholders}) GROUP BY task_id`,
+      taskIds,
+    );
+    const counts: Record<number, number> = {};
+    for (const r of rows) counts[r.task_id] = r.cnt;
+    return counts;
+  }
+
   // ---- Subtasks ----
 
   getSubtasks(taskId: number): Task[] {
@@ -852,6 +926,22 @@ export class TaskService {
       if (r.status === 'completed') done += r.cnt;
     }
     return { total, done };
+  }
+
+  getSubtaskProgressForTasks(taskIds: number[]): Record<number, { total: number; done: number }> {
+    if (taskIds.length === 0) return {};
+    const placeholders = taskIds.map(() => '?').join(',');
+    const rows = this.db.queryAll<{ parent_id: number; status: string; cnt: number }>(
+      `SELECT parent_id, status, COUNT(*) as cnt FROM tasks WHERE parent_id IN (${placeholders}) GROUP BY parent_id, status`,
+      taskIds,
+    );
+    const progress: Record<number, { total: number; done: number }> = {};
+    for (const r of rows) {
+      if (!progress[r.parent_id]) progress[r.parent_id] = { total: 0, done: 0 };
+      progress[r.parent_id].total += r.cnt;
+      if (r.status === 'completed') progress[r.parent_id].done += r.cnt;
+    }
+    return progress;
   }
 
   getAllSubtaskProgress(): Record<number, { total: number; done: number }> {

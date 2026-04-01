@@ -152,6 +152,23 @@ export function handleCreate(
   );
 }
 
+export function handleGet(ctx: AppContext, args: Record<string, unknown>): unknown {
+  const taskId = requireNumber(args, 'task_id');
+  const task = ctx.tasks.getById(taskId);
+  if (!task) throw new ValidationError(`Task ${taskId} not found.`);
+  const deps = ctx.tasks.getDependencies(taskId);
+  const artifacts = ctx.tasks.getArtifacts(taskId);
+  const collaborators = ctx.collaborators.list(taskId);
+  const commentCounts = ctx.comments.countByTaskIds([taskId]);
+  return {
+    ...task,
+    artifacts,
+    comments_count: commentCounts[taskId] ?? 0,
+    dependencies: deps,
+    collaborators,
+  };
+}
+
 export function handleList(
   ctx: AppContext,
   args: Record<string, unknown>,
@@ -575,6 +592,7 @@ export function handleApproval(
 
 export const handlers: Record<string, HandlerFn> = {
   task_create: handleCreate,
+  task_get: handleGet,
   task_list: handleList,
   task_claim: handleClaim,
   task_update: handleUpdate,
