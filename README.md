@@ -91,20 +91,7 @@ node dist/server.js --port 3422
 
 ## Claude Code Integration
 
-Add agent-tasks as an MCP server in `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "agent-tasks": {
-      "command": "node",
-      "args": ["/path/to/agent-tasks/dist/index.js"]
-    }
-  }
-}
-```
-
-Once configured, Claude Code can use all 13 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
+Once configured (see [Quick Start](#quick-start) above), Claude Code can use all 13 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
 
 ---
 
