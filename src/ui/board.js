@@ -212,7 +212,7 @@ function renderBoard() {
   var getFilteredTasks = TaskBoard.getFilteredTasks;
   var getBlockedTaskIds = TaskBoard.getBlockedTaskIds;
 
-  const board = document.getElementById('board');
+  const board = TaskBoard._root.getElementById('board');
   const blocked = getBlockedTaskIds();
   const filtered = getFilteredTasks();
   const visibleStages = state.stages.filter((s) => s !== 'cancelled');
@@ -350,7 +350,7 @@ function renderStats() {
   const pending = state.tasks.filter((t) => t.status === 'pending').length;
   const done = state.tasks.filter((t) => t.status === 'completed').length;
 
-  const statsEl = document.getElementById('stats');
+  const statsEl = TaskBoard._root.getElementById('stats');
   const values = { total, active, pending, done };
 
   morph(

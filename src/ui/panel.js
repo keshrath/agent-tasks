@@ -117,10 +117,10 @@ function openPanel(id) {
   if (!task) return;
 
   state.panelTaskId = id;
-  const wrapper = document.getElementById('board-wrapper');
+  const wrapper = TaskBoard._root.getElementById('board-wrapper');
   wrapper.classList.add('panel-open');
 
-  const panel = document.getElementById('side-panel');
+  const panel = TaskBoard._root.getElementById('side-panel');
   const hasArtifacts = (state.artifactCounts[id] || 0) > 0;
   if (hasArtifacts) {
     panel.classList.add('panel-wide');
@@ -136,14 +136,14 @@ function openPanel(id) {
 
 function closePanel() {
   TaskBoard.state.panelTaskId = null;
-  const wrapper = document.getElementById('board-wrapper');
+  const wrapper = TaskBoard._root.getElementById('board-wrapper');
   wrapper.classList.remove('panel-open');
   hidePanelBackdrop();
   highlightActiveCard(null);
 }
 
 function showPanelBackdrop() {
-  let backdrop = document.getElementById('panel-backdrop');
+  let backdrop = TaskBoard._root.getElementById('panel-backdrop');
   if (!backdrop) {
     backdrop = document.createElement('div');
     backdrop.id = 'panel-backdrop';
@@ -155,16 +155,16 @@ function showPanelBackdrop() {
 }
 
 function hidePanelBackdrop() {
-  const backdrop = document.getElementById('panel-backdrop');
+  const backdrop = TaskBoard._root.getElementById('panel-backdrop');
   if (backdrop) backdrop.style.display = 'none';
 }
 
 function highlightActiveCard(id) {
-  document
+  TaskBoard._root
     .querySelectorAll('.task-card.active-card')
     .forEach((c) => c.classList.remove('active-card'));
   if (id) {
-    const card = document.querySelector(`.task-card[data-task-id="${id}"]`);
+    const card = TaskBoard._root.querySelector(`.task-card[data-task-id="${id}"]`);
     if (card) card.classList.add('active-card');
   }
 }
@@ -179,8 +179,8 @@ function renderPanelContent(task) {
   var renderMarkdown = TaskBoard.renderMarkdown;
   var renderAvatar = TaskBoard.renderAvatar;
 
-  const panelBody = document.getElementById('panel-body');
-  const panelHeader = document.getElementById('panel-header-content');
+  const panelBody = TaskBoard._root.getElementById('panel-body');
+  const panelHeader = TaskBoard._root.getElementById('panel-header-content');
 
   const stageClass = `stage-${task.stage}`;
 
@@ -375,7 +375,7 @@ function renderPanelContent(task) {
 // ---- Comment submission ----
 
 function submitComment(taskId) {
-  const input = document.getElementById('comment-input');
+  const input = TaskBoard._root.getElementById('comment-input');
   const content = input?.value?.trim();
   if (!content) return;
 
@@ -394,7 +394,7 @@ function submitComment(taskId) {
 // ---- Artifact interactions ----
 
 function toggleArtifact(id) {
-  const wrapper = document.getElementById(id);
+  const wrapper = TaskBoard._root.getElementById(id);
   if (!wrapper) return;
   const isCollapsed = wrapper.classList.contains('artifact-collapsed');
   wrapper.classList.toggle('artifact-collapsed', !isCollapsed);
@@ -438,7 +438,7 @@ function copyArtifact(btn) {
 
 function openArtifactFullscreen(artId) {
   var esc = TaskBoard.esc;
-  const wrapper = document.getElementById(artId);
+  const wrapper = TaskBoard._root.getElementById(artId);
   if (!wrapper) return;
   const content = wrapper.querySelector('.artifact-code, .diff-viewer');
   if (!content) return;
@@ -479,7 +479,7 @@ function openArtifactFullscreen(artId) {
 // ---- Panel resize ----
 
 function initPanelResize() {
-  const panel = document.getElementById('side-panel');
+  const panel = TaskBoard._root.getElementById('side-panel');
   if (!panel) return;
   const handle = document.createElement('div');
   handle.className = 'panel-resize-handle';
@@ -517,7 +517,7 @@ function initPanelResize() {
 // ---- Panel event delegation ----
 
 function initPanelEvents() {
-  document.getElementById('side-panel').addEventListener('click', (e) => {
+  TaskBoard._root.getElementById('side-panel').addEventListener('click', (e) => {
     const closeBtn = e.target.closest('[data-action="close-panel"]');
     if (closeBtn) {
       closePanel();

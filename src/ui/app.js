@@ -30,6 +30,7 @@ TaskBoard._fetch = function (url, opts) {
   return fetch(TaskBoard._baseUrl + url, opts);
 };
 TaskBoard._wsUrl = null;
+TaskBoard._root = document;
 
 var filters = {
   search: '',
@@ -75,7 +76,7 @@ TaskBoard.saveCollapsed = saveCollapsed;
 // ---- Theme ----
 
 function updateThemeIcon(theme) {
-  var icon = document.querySelector('.theme-icon');
+  var icon = TaskBoard._root.querySelector('.theme-icon');
   if (icon) icon.textContent = theme === 'dark' ? 'light_mode' : 'dark_mode';
 }
 
@@ -121,14 +122,14 @@ function updateFilterDropdowns() {
   var projects = [...new Set(state.tasks.map((t) => t.project).filter(Boolean))].sort();
   var assignees = [...new Set(state.tasks.map((t) => t.assigned_to).filter(Boolean))].sort();
 
-  var projectSelect = document.getElementById('filter-project');
+  var projectSelect = TaskBoard._root.getElementById('filter-project');
   var currentProject = projectSelect.value;
   projectSelect.innerHTML =
     '<option value="">All projects</option>' +
     projects.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
   projectSelect.value = currentProject;
 
-  var assigneeSelect = document.getElementById('filter-assignee');
+  var assigneeSelect = TaskBoard._root.getElementById('filter-assignee');
   var currentAssignee = assigneeSelect.value;
   assigneeSelect.innerHTML =
     '<option value="">All assignees</option>' +
@@ -137,13 +138,13 @@ function updateFilterDropdowns() {
 }
 
 function applyRestoredFilters() {
-  var searchInput = document.getElementById('filter-search');
+  var searchInput = TaskBoard._root.getElementById('filter-search');
   if (filters.search && searchInput) searchInput.value = filters.search;
-  var projectSelect = document.getElementById('filter-project');
+  var projectSelect = TaskBoard._root.getElementById('filter-project');
   if (filters.project && projectSelect) projectSelect.value = filters.project;
-  var assigneeSelect = document.getElementById('filter-assignee');
+  var assigneeSelect = TaskBoard._root.getElementById('filter-assignee');
   if (filters.assignee && assigneeSelect) assigneeSelect.value = filters.assignee;
-  var prioritySelect = document.getElementById('filter-priority');
+  var prioritySelect = TaskBoard._root.getElementById('filter-priority');
   if (filters.minPriority && prioritySelect) prioritySelect.value = String(filters.minPriority);
 }
 
@@ -191,7 +192,7 @@ function connect() {
 }
 
 function setConnectionStatus(status) {
-  var el = document.getElementById('connection-status');
+  var el = TaskBoard._root.getElementById('connection-status');
   el.textContent =
     status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting' : 'Disconnected';
   el.className = 'status-badge ' + status;
@@ -215,7 +216,7 @@ function handleFullState(data) {
   if (data.stages) state.stages = data.stages;
   if (data.gateConfigs) state.gateConfigs = data.gateConfigs;
   if (data.version) {
-    document.getElementById('version').textContent = 'v' + data.version;
+    TaskBoard._root.getElementById('version').textContent = 'v' + data.version;
   }
   updateFilterDropdowns();
   applyRestoredFilters();
@@ -239,7 +240,7 @@ function quickFingerprint(data) {
 }
 
 function dismissLoading() {
-  var overlay = document.getElementById('loading-overlay');
+  var overlay = TaskBoard._root.getElementById('loading-overlay');
   if (overlay && !overlay.classList.contains('hidden')) {
     overlay.classList.add('hidden');
     overlay.setAttribute('aria-hidden', 'true');
@@ -357,7 +358,7 @@ function handleEvent(event) {
 // ---- Legacy Modal (cleanup only) ----
 
 function closeModal() {
-  document.getElementById('task-modal').hidden = true;
+  TaskBoard._root.getElementById('task-modal').hidden = true;
 }
 
 // ---- Init ----
@@ -367,7 +368,7 @@ function _init() {
   if (savedTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
   updateThemeIcon(savedTheme || 'light');
 
-  document.getElementById('theme-toggle')?.addEventListener('click', () => {
+  TaskBoard._root.getElementById('theme-toggle')?.addEventListener('click', () => {
     var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     var next = isDark ? 'light' : 'dark';
     if (isDark) {
@@ -379,7 +380,7 @@ function _init() {
     updateThemeIcon(next);
   });
 
-  document.getElementById('filter-search')?.addEventListener('input', (e) => {
+  TaskBoard._root.getElementById('filter-search')?.addEventListener('input', (e) => {
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => {
       filters.search = e.target.value;
@@ -389,21 +390,21 @@ function _init() {
     }, 200);
   });
 
-  document.getElementById('filter-project')?.addEventListener('change', (e) => {
+  TaskBoard._root.getElementById('filter-project')?.addEventListener('change', (e) => {
     filters.project = e.target.value;
     saveFilters();
     TaskBoard.resetColumnVisibleCounts();
     render();
   });
 
-  document.getElementById('filter-assignee')?.addEventListener('change', (e) => {
+  TaskBoard._root.getElementById('filter-assignee')?.addEventListener('change', (e) => {
     filters.assignee = e.target.value;
     saveFilters();
     TaskBoard.resetColumnVisibleCounts();
     render();
   });
 
-  document.getElementById('filter-priority')?.addEventListener('change', (e) => {
+  TaskBoard._root.getElementById('filter-priority')?.addEventListener('change', (e) => {
     filters.minPriority = parseInt(e.target.value) || 0;
     saveFilters();
     TaskBoard.resetColumnVisibleCounts();
@@ -412,7 +413,7 @@ function _init() {
 
   // ---- Event Delegation (board) ----
 
-  document.getElementById('board')?.addEventListener('click', (e) => {
+  TaskBoard._root.getElementById('board')?.addEventListener('click', (e) => {
     var action = e.target.closest('[data-action]');
 
     if (action) {
@@ -469,7 +470,7 @@ function _init() {
     }
   });
 
-  document.getElementById('board')?.addEventListener('dblclick', (e) => {
+  TaskBoard._root.getElementById('board')?.addEventListener('dblclick', (e) => {
     var titleEl = e.target.closest('[data-action="edit-title"]');
     if (titleEl) {
       e.stopPropagation();
@@ -477,7 +478,7 @@ function _init() {
     }
   });
 
-  document.getElementById('board')?.addEventListener('keydown', (e) => {
+  TaskBoard._root.getElementById('board')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       var card = e.target.closest('.task-card[data-task-id]');
       if (card) TaskBoard.openPanel(parseInt(card.dataset.taskId, 10));
@@ -486,7 +487,7 @@ function _init() {
 
   // ---- Collapsed column click (expand) ----
 
-  document.getElementById('board')?.addEventListener('click', (e) => {
+  TaskBoard._root.getElementById('board')?.addEventListener('click', (e) => {
     var col = e.target.closest('.kanban-column.collapsed');
     if (col) {
       var stage = col.dataset.stage;
@@ -496,8 +497,8 @@ function _init() {
     }
   });
 
-  document.getElementById('modal-close-btn')?.addEventListener('click', closeModal);
-  document.getElementById('task-modal')?.addEventListener('click', (e) => {
+  TaskBoard._root.getElementById('modal-close-btn')?.addEventListener('click', closeModal);
+  TaskBoard._root.getElementById('task-modal')?.addEventListener('click', (e) => {
     if (e.target === e.currentTarget) closeModal();
   });
 
@@ -517,12 +518,12 @@ function _init() {
         TaskBoard.closePanel();
         return;
       }
-      var modal = document.getElementById('task-modal');
+      var modal = TaskBoard._root.getElementById('task-modal');
       if (modal && !modal.hidden) {
         closeModal();
         return;
       }
-      var cleanupModal = document.getElementById('cleanup-modal');
+      var cleanupModal = TaskBoard._root.getElementById('cleanup-modal');
       if (cleanupModal && !cleanupModal.classList.contains('hidden')) {
         cleanupModal.classList.add('hidden');
         return;
@@ -539,29 +540,29 @@ function _init() {
       ((e.ctrlKey || e.metaKey) && e.key === 'k')
     ) {
       e.preventDefault();
-      document.getElementById('filter-search')?.focus();
+      TaskBoard._root.getElementById('filter-search')?.focus();
     }
   });
 
   // ---- Cleanup Dialog ----
 
-  document.getElementById('cleanup-btn')?.addEventListener('click', () => {
-    document.getElementById('cleanup-modal').classList.remove('hidden');
+  TaskBoard._root.getElementById('cleanup-btn')?.addEventListener('click', () => {
+    TaskBoard._root.getElementById('cleanup-modal').classList.remove('hidden');
   });
 
-  document.getElementById('cleanup-close-btn')?.addEventListener('click', () => {
-    document.getElementById('cleanup-modal').classList.add('hidden');
+  TaskBoard._root.getElementById('cleanup-close-btn')?.addEventListener('click', () => {
+    TaskBoard._root.getElementById('cleanup-modal').classList.add('hidden');
   });
 
-  document.getElementById('cleanup-modal')?.addEventListener('click', (e) => {
+  TaskBoard._root.getElementById('cleanup-modal')?.addEventListener('click', (e) => {
     if (e.target === e.currentTarget) {
-      document.getElementById('cleanup-modal').classList.add('hidden');
+      TaskBoard._root.getElementById('cleanup-modal').classList.add('hidden');
     }
   });
 
-  document.getElementById('cleanup-completed')?.addEventListener('click', () => {
+  TaskBoard._root.getElementById('cleanup-completed')?.addEventListener('click', () => {
     var showToast = TaskBoard.showToast;
-    document.getElementById('cleanup-modal').classList.add('hidden');
+    TaskBoard._root.getElementById('cleanup-modal').classList.add('hidden');
     TaskBoard._fetch('/api/cleanup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -578,7 +579,7 @@ function _init() {
       .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
   });
 
-  document.getElementById('cleanup-everything')?.addEventListener('click', () => {
+  TaskBoard._root.getElementById('cleanup-everything')?.addEventListener('click', () => {
     var showToast = TaskBoard.showToast;
     if (
       !confirm(
@@ -586,7 +587,7 @@ function _init() {
       )
     )
       return;
-    document.getElementById('cleanup-modal').classList.add('hidden');
+    TaskBoard._root.getElementById('cleanup-modal').classList.add('hidden');
     TaskBoard._fetch('/api/cleanup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -756,7 +757,7 @@ function _init() {
       updateThemeIcon(theme);
     }
 
-    var themeToggle = document.getElementById('theme-toggle');
+    var themeToggle = TaskBoard._root.getElementById('theme-toggle');
     if (themeToggle) themeToggle.style.display = 'none';
   });
 
@@ -777,16 +778,42 @@ TaskBoard.mount = function (container, options) {
   options = options || {};
   TaskBoard._baseUrl = options.baseUrl || '';
   TaskBoard._wsUrl = options.wsUrl || null;
-  if (options.cssUrl && !document.getElementById('tb-plugin-css')) {
+
+  var shadow = container.attachShadow({ mode: 'open' });
+
+  if (options.cssUrl) {
     var link = document.createElement('link');
-    link.id = 'tb-plugin-css';
     link.rel = 'stylesheet';
     link.href = options.cssUrl;
-    document.head.appendChild(link);
+    shadow.appendChild(link);
   }
+
+  var fonts = document.createElement('link');
+  fonts.rel = 'stylesheet';
+  fonts.href =
+    'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap';
+  shadow.appendChild(fonts);
+  var icons = document.createElement('link');
+  icons.rel = 'stylesheet';
+  icons.href =
+    'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap';
+  shadow.appendChild(icons);
+
+  var pluginStyle = document.createElement('style');
+  pluginStyle.textContent =
+    ':host { display:block; width:100%; height:100%; overflow:hidden; }' +
+    '.tb-wrapper { font-family:var(--font-sans); font-size:14px; color:var(--text); background:var(--bg); line-height:1.5; width:100%; height:100%; overflow:hidden; }' +
+    '.tb-wrapper #app { height:100%; }';
+  shadow.appendChild(pluginStyle);
+
   if (typeof TaskBoard._template === 'function') {
-    container.innerHTML = TaskBoard._template();
+    var wrapper = document.createElement('div');
+    wrapper.className = 'theme-dark tb-wrapper';
+    wrapper.innerHTML = TaskBoard._template();
+    shadow.appendChild(wrapper);
   }
+
+  TaskBoard._root = shadow;
   _init();
 };
 
@@ -797,8 +824,12 @@ TaskBoard.unmount = function () {
     ws = null;
   }
   clearTimeout(reconnectTimer);
+  TaskBoard._root = document;
 };
 
-// ---- Auto-init for standalone mode ----
+// ---- Auto-init — check URL params for embedded mode (iframe in agent-desk) ----
 
+var _params = new URLSearchParams(location.search);
+if (_params.get('baseUrl')) TaskBoard._baseUrl = _params.get('baseUrl');
+if (_params.get('wsUrl')) TaskBoard._wsUrl = _params.get('wsUrl');
 _init();

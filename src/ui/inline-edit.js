@@ -15,7 +15,7 @@ var activeDropdown = null;
 function showInlineCreate(stage) {
   dismissInlineCreate();
 
-  const col = document.querySelector(`.kanban-column[data-stage="${stage}"]`);
+  const col = TaskBoard._root.querySelector(`.kanban-column[data-stage="${stage}"]`);
   if (!col) return;
 
   const addBtn = col.querySelector('.column-add-btn');

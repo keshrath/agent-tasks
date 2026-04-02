@@ -282,7 +282,7 @@ function renderDiff(content) {
 // ---- Toast ----
 
 function showToast(title, body, type) {
-  const container = document.getElementById('toast-container');
+  const container = TaskBoard._root.getElementById('toast-container');
   const el = document.createElement('div');
   el.className = 'toast';
 

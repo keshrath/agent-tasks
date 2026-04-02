@@ -27,11 +27,11 @@ function onDragEnd(e) {
   if (card) card.classList.remove('dragging');
   draggedTaskId = null;
   stopDragAutoScroll();
-  document
+  TaskBoard._root
     .querySelectorAll('.kanban-column.drag-over')
     .forEach((c) => c.classList.remove('drag-over'));
-  document.querySelectorAll('.drop-placeholder').forEach((p) => p.remove());
-  const board = document.getElementById('board');
+  TaskBoard._root.querySelectorAll('.drop-placeholder').forEach((p) => p.remove());
+  const board = TaskBoard._root.getElementById('board');
   board.classList.remove('drag-scroll-left', 'drag-scroll-right');
 }
 
@@ -39,7 +39,7 @@ function onDragOver(e, col) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
   if (col && !col.classList.contains('drag-over')) {
-    document
+    TaskBoard._root
       .querySelectorAll('.kanban-column.drag-over')
       .forEach((c) => c.classList.remove('drag-over'));
     col.classList.add('drag-over');
@@ -52,7 +52,7 @@ function onDrop(e, col) {
 
   e.preventDefault();
   if (col) col.classList.remove('drag-over');
-  document.querySelectorAll('.drop-placeholder').forEach((p) => p.remove());
+  TaskBoard._root.querySelectorAll('.drop-placeholder').forEach((p) => p.remove());
 
   if (!draggedTaskId) return;
   const targetStage = col.dataset.stage;
@@ -74,7 +74,7 @@ function onDrop(e, col) {
 }
 
 function startDragAutoScroll() {
-  const board = document.getElementById('board');
+  const board = TaskBoard._root.getElementById('board');
   dragScrollInterval = setInterval(() => {
     if (!draggedTaskId) return;
     const rect = board.getBoundingClientRect();
@@ -105,7 +105,7 @@ function stopDragAutoScroll() {
 // ---- Drag event wiring ----
 
 function initDragEvents() {
-  var board = document.getElementById('board');
+  var board = TaskBoard._root.getElementById('board');
 
   board.addEventListener('dragstart', (e) => {
     const card = e.target.closest('.task-card[data-task-id]');
