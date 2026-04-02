@@ -294,13 +294,13 @@ function renderPanelContent(task) {
   panelBody.innerHTML = html + skeletonHTML;
 
   Promise.all([
-    fetch(`/api/tasks/${task.id}/artifacts`)
+    TaskBoard._fetch(`/api/tasks/${task.id}/artifacts`)
       .then((r) => r.json())
       .catch(() => []),
-    fetch(`/api/tasks/${task.id}/comments`)
+    TaskBoard._fetch(`/api/tasks/${task.id}/comments`)
       .then((r) => r.json())
       .catch(() => []),
-    fetch(`/api/tasks/${task.id}/subtasks`)
+    TaskBoard._fetch(`/api/tasks/${task.id}/subtasks`)
       .then((r) => r.json())
       .catch(() => []),
   ]).then(([artifacts, comments, subtasks]) => {
@@ -379,7 +379,7 @@ function submitComment(taskId) {
   const content = input?.value?.trim();
   if (!content) return;
 
-  fetch(`/api/tasks/${taskId}/comments`, {
+  TaskBoard._fetch(`/api/tasks/${taskId}/comments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content, agent_id: 'dashboard' }),

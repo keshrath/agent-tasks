@@ -59,7 +59,7 @@ function onDrop(e, col) {
   const task = state.tasks.find((t) => t.id === draggedTaskId);
   if (!task || task.stage === targetStage) return;
 
-  fetch(`/api/tasks/${draggedTaskId}/stage`, {
+  TaskBoard._fetch(`/api/tasks/${draggedTaskId}/stage`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ stage: targetStage }),

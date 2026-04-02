@@ -1,0 +1,20 @@
+{
+  "id": "agent-tasks",
+  "name": "Tasks",
+  "icon": "task_alt",
+  "version": "1.9.7",
+  "description": "Pipeline task board — kanban, stages, artifacts, dependencies",
+  "ui": "./dist/ui/app.js",
+  "css": "./dist/ui/styles.css",
+  "uiFiles": [
+    "morphdom.min.js",
+    "ui-utils.js",
+    "board.js",
+    "panel.js",
+    "drag.js",
+    "inline-edit.js",
+    "template.js",
+    "app.js"
+  ],
+  "position": 2
+}

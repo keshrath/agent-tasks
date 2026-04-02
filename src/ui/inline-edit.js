@@ -64,7 +64,7 @@ function dismissInlineCreate() {
 
 function createTaskInline(title, stage) {
   var showToast = TaskBoard.showToast;
-  fetch('/api/tasks', {
+  TaskBoard._fetch('/api/tasks', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, stage, created_by: 'dashboard' }),
@@ -205,7 +205,7 @@ function dismissDropdownOnOutsideClick(e) {
 
 function updateTask(taskId, updates) {
   var showToast = TaskBoard.showToast;
-  fetch(`/api/tasks/${taskId}`, {
+  TaskBoard._fetch(`/api/tasks/${taskId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),

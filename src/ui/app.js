@@ -3,7 +3,7 @@
 //
 // WebSocket connection, state management, initialization, tab/filter management,
 // theme, keyboard navigation, cleanup dialog, theme sync.
-// Modules: ui-utils.js, board.js, panel.js, drag.js, inline-edit.js
+// Modules: ui-utils.js, board.js, panel.js, drag.js, inline-edit.js, template.js
 // =============================================================================
 
 window.TaskBoard = window.TaskBoard || {};
@@ -24,6 +24,12 @@ var state = {
 };
 
 TaskBoard.state = state;
+
+TaskBoard._baseUrl = '';
+TaskBoard._fetch = function (url, opts) {
+  return fetch(TaskBoard._baseUrl + url, opts);
+};
+TaskBoard._wsUrl = null;
 
 var filters = {
   search: '',
@@ -72,22 +78,6 @@ function updateThemeIcon(theme) {
   var icon = document.querySelector('.theme-icon');
   if (icon) icon.textContent = theme === 'dark' ? 'light_mode' : 'dark_mode';
 }
-
-var savedTheme = localStorage.getItem('agent-tasks-theme');
-if (savedTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-updateThemeIcon(savedTheme || 'light');
-
-document.getElementById('theme-toggle').addEventListener('click', () => {
-  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  var next = isDark ? 'light' : 'dark';
-  if (isDark) {
-    document.documentElement.removeAttribute('data-theme');
-  } else {
-    document.documentElement.setAttribute('data-theme', 'dark');
-  }
-  localStorage.setItem('agent-tasks-theme', next);
-  updateThemeIcon(next);
-});
 
 // ---- Blocked tasks ----
 
@@ -146,37 +136,6 @@ function updateFilterDropdowns() {
   assigneeSelect.value = currentAssignee;
 }
 
-document.getElementById('filter-search').addEventListener('input', (e) => {
-  clearTimeout(searchDebounce);
-  searchDebounce = setTimeout(() => {
-    filters.search = e.target.value;
-    saveFilters();
-    TaskBoard.resetColumnVisibleCounts();
-    render();
-  }, 200);
-});
-
-document.getElementById('filter-project').addEventListener('change', (e) => {
-  filters.project = e.target.value;
-  saveFilters();
-  TaskBoard.resetColumnVisibleCounts();
-  render();
-});
-
-document.getElementById('filter-assignee').addEventListener('change', (e) => {
-  filters.assignee = e.target.value;
-  saveFilters();
-  TaskBoard.resetColumnVisibleCounts();
-  render();
-});
-
-document.getElementById('filter-priority').addEventListener('change', (e) => {
-  filters.minPriority = parseInt(e.target.value) || 0;
-  saveFilters();
-  TaskBoard.resetColumnVisibleCounts();
-  render();
-});
-
 function applyRestoredFilters() {
   var searchInput = document.getElementById('filter-search');
   if (filters.search && searchInput) searchInput.value = filters.search;
@@ -199,7 +158,7 @@ function render() {
 
 function connect() {
   var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}`);
+  ws = new WebSocket(`${proto}//${TaskBoard._wsUrl || location.host}`);
   setConnectionStatus('connecting');
 
   ws.onopen = () => setConnectionStatus('connected');
@@ -395,365 +354,451 @@ function handleEvent(event) {
   }
 }
 
-// ---- Event Delegation (board) ----
-
-document.getElementById('board').addEventListener('click', (e) => {
-  var action = e.target.closest('[data-action]');
-
-  if (action) {
-    var act = action.dataset.action;
-
-    if (act === 'toggle-collapse') {
-      e.stopPropagation();
-      var stage = action.dataset.stage;
-      if (state.collapsedColumns.has(stage)) {
-        state.collapsedColumns.delete(stage);
-      } else {
-        state.collapsedColumns.add(stage);
-      }
-      saveCollapsed();
-      render();
-      return;
-    }
-
-    if (act === 'inline-create') {
-      e.stopPropagation();
-      TaskBoard.showInlineCreate(action.dataset.stage);
-      return;
-    }
-
-    if (act === 'add-task') {
-      e.stopPropagation();
-      TaskBoard.showInlineCreate(action.dataset.stage);
-      return;
-    }
-
-    if (act === 'cycle-priority') {
-      e.stopPropagation();
-      TaskBoard.cyclePriority(parseInt(action.dataset.taskId, 10));
-      return;
-    }
-
-    if (act === 'change-assignee') {
-      e.stopPropagation();
-      TaskBoard.showAssigneeDropdown(parseInt(action.dataset.taskId, 10), action);
-      return;
-    }
-
-    if (act === 'show-more') {
-      e.stopPropagation();
-      TaskBoard.showMoreCards(action.dataset.stage);
-      render();
-      return;
-    }
-  }
-
-  var card = e.target.closest('.task-card[data-task-id]');
-  if (card) {
-    TaskBoard.openPanel(parseInt(card.dataset.taskId, 10));
-  }
-});
-
-document.getElementById('board').addEventListener('dblclick', (e) => {
-  var titleEl = e.target.closest('[data-action="edit-title"]');
-  if (titleEl) {
-    e.stopPropagation();
-    TaskBoard.startInlineEdit(titleEl);
-  }
-});
-
-document.getElementById('board').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    var card = e.target.closest('.task-card[data-task-id]');
-    if (card) TaskBoard.openPanel(parseInt(card.dataset.taskId, 10));
-  }
-});
-
-// ---- Collapsed column click (expand) ----
-
-document.getElementById('board').addEventListener('click', (e) => {
-  var col = e.target.closest('.kanban-column.collapsed');
-  if (col) {
-    var stage = col.dataset.stage;
-    state.collapsedColumns.delete(stage);
-    saveCollapsed();
-    render();
-  }
-});
-
 // ---- Legacy Modal (cleanup only) ----
 
 function closeModal() {
   document.getElementById('task-modal').hidden = true;
 }
 
-document.getElementById('modal-close-btn')?.addEventListener('click', closeModal);
-document.getElementById('task-modal').addEventListener('click', (e) => {
-  if (e.target === e.currentTarget) closeModal();
-});
+// ---- Init ----
 
-// ---- Keyboard Navigation ----
+function _init() {
+  var savedTheme = localStorage.getItem('agent-tasks-theme');
+  if (savedTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  updateThemeIcon(savedTheme || 'light');
 
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (TaskBoard.getActiveDropdown()) {
-      TaskBoard.dismissDropdown();
-      return;
-    }
-    if (TaskBoard.getActiveInlineCreate()) {
-      TaskBoard.dismissInlineCreate();
-      return;
-    }
-    if (state.panelTaskId) {
-      TaskBoard.closePanel();
-      return;
-    }
-    var modal = document.getElementById('task-modal');
-    if (!modal.hidden) {
-      closeModal();
-      return;
-    }
-    var cleanupModal = document.getElementById('cleanup-modal');
-    if (!cleanupModal.classList.contains('hidden')) {
-      cleanupModal.classList.add('hidden');
-      return;
-    }
-  }
-
-  var isInput =
-    document.activeElement?.tagName === 'INPUT' ||
-    document.activeElement?.tagName === 'TEXTAREA' ||
-    document.activeElement?.getAttribute('contenteditable') === 'true';
-
-  if (
-    (e.key === '/' && !e.ctrlKey && !e.metaKey && !isInput) ||
-    ((e.ctrlKey || e.metaKey) && e.key === 'k')
-  ) {
-    e.preventDefault();
-    document.getElementById('filter-search').focus();
-  }
-});
-
-// ---- Cleanup Dialog ----
-
-document.getElementById('cleanup-btn')?.addEventListener('click', () => {
-  document.getElementById('cleanup-modal').classList.remove('hidden');
-});
-
-document.getElementById('cleanup-close-btn')?.addEventListener('click', () => {
-  document.getElementById('cleanup-modal').classList.add('hidden');
-});
-
-document.getElementById('cleanup-modal')?.addEventListener('click', (e) => {
-  if (e.target === e.currentTarget) {
-    document.getElementById('cleanup-modal').classList.add('hidden');
-  }
-});
-
-document.getElementById('cleanup-completed')?.addEventListener('click', () => {
-  var showToast = TaskBoard.showToast;
-  document.getElementById('cleanup-modal').classList.add('hidden');
-  fetch('/api/cleanup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ force: true }),
-  })
-    .then((r) => r.json())
-    .then((result) => {
-      showToast(
-        'Cleanup complete',
-        `Purged ${result.purgedTasks} tasks, ${result.purgedComments} comments, ${result.purgedApprovals} approvals`,
-        'success',
-      );
-    })
-    .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
-});
-
-document.getElementById('cleanup-everything')?.addEventListener('click', () => {
-  var showToast = TaskBoard.showToast;
-  if (
-    !confirm(
-      'This will remove ALL tasks — completed, in-progress, everything. This cannot be undone. Continue?',
-    )
-  )
-    return;
-  document.getElementById('cleanup-modal').classList.add('hidden');
-  fetch('/api/cleanup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ all: true }),
-  })
-    .then((r) => r.json())
-    .then((result) => {
-      showToast(
-        'Everything purged',
-        `Purged ${result.purgedTasks} tasks, ${result.purgedComments} comments, ${result.purgedApprovals} approvals`,
-        'success',
-      );
-    })
-    .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
-});
-
-// ---- Theme sync from parent (agent-desk) via executeJavaScript ----
-
-window.addEventListener('message', function (event) {
-  if (!event.data || event.data.type !== 'theme-sync') return;
-  var colors = event.data.colors;
-  if (!colors) return;
-
-  function ensureContrast(bg, fg) {
-    var lum = function (hex) {
-      if (!hex || hex.charAt(0) !== '#' || hex.length < 7) return 0.5;
-      var r = parseInt(hex.slice(1, 3), 16) / 255;
-      var g = parseInt(hex.slice(3, 5), 16) / 255;
-      var b = parseInt(hex.slice(5, 7), 16) / 255;
-      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    };
-    var bgLum = lum(bg);
-    return bgLum < 0.5 ? (lum(fg) < 0.4 ? '#e0e0e0' : fg) : lum(fg) > 0.6 ? '#333333' : fg;
-  }
-
-  var root = document.documentElement;
-  var bgColor = colors.bg || null;
-
-  if (colors.bg) root.style.setProperty('--bg', colors.bg);
-  if (colors.bgSurface) root.style.setProperty('--bg-surface', colors.bgSurface);
-  if (colors.bgElevated) root.style.setProperty('--bg-elevated', colors.bgElevated);
-  if (colors.bgHover) root.style.setProperty('--bg-hover', colors.bgHover);
-  if (colors.bgInset) root.style.setProperty('--bg-inset', colors.bgInset);
-
-  if (colors.border) root.style.setProperty('--border', colors.border);
-  if (colors.borderLight) root.style.setProperty('--border-light', colors.borderLight);
-
-  if (colors.text)
-    root.style.setProperty('--text', bgColor ? ensureContrast(bgColor, colors.text) : colors.text);
-  if (colors.textSecondary)
-    root.style.setProperty(
-      '--text-secondary',
-      bgColor ? ensureContrast(bgColor, colors.textSecondary) : colors.textSecondary,
-    );
-  if (colors.textMuted)
-    root.style.setProperty(
-      '--text-muted',
-      bgColor ? ensureContrast(bgColor, colors.textMuted) : colors.textMuted,
-    );
-  if (colors.textDim)
-    root.style.setProperty(
-      '--text-dim',
-      bgColor ? ensureContrast(bgColor, colors.textDim) : colors.textDim,
-    );
-
-  if (colors.accent) root.style.setProperty('--accent', colors.accent);
-  if (colors.accentHover) root.style.setProperty('--accent-hover', colors.accentHover);
-  if (colors.accentDim) root.style.setProperty('--accent-dim', colors.accentDim);
-  if (colors.accentSolid) root.style.setProperty('--accent-solid', colors.accentSolid);
-  if (colors.accentGlow) root.style.setProperty('--accent-glow', colors.accentGlow);
-
-  if (colors.green) root.style.setProperty('--green', colors.green);
-  if (colors.greenDim) root.style.setProperty('--green-dim', colors.greenDim);
-  if (colors.yellow) root.style.setProperty('--yellow', colors.yellow);
-  if (colors.yellowDim) root.style.setProperty('--yellow-dim', colors.yellowDim);
-  if (colors.orange) root.style.setProperty('--orange', colors.orange);
-  if (colors.orangeDim) root.style.setProperty('--orange-dim', colors.orangeDim);
-  if (colors.red) root.style.setProperty('--red', colors.red);
-  if (colors.redDim) root.style.setProperty('--red-dim', colors.redDim);
-  if (colors.purple) root.style.setProperty('--purple', colors.purple);
-  if (colors.purpleDim) root.style.setProperty('--purple-dim', colors.purpleDim);
-  if (colors.blue) root.style.setProperty('--blue', colors.blue);
-  if (colors.blueDim) root.style.setProperty('--blue-dim', colors.blueDim);
-  if (colors.indigo) root.style.setProperty('--indigo', colors.indigo);
-  if (colors.indigoDim) root.style.setProperty('--indigo-dim', colors.indigoDim);
-  if (colors.amber) root.style.setProperty('--amber', colors.amber);
-  if (colors.amberDim) root.style.setProperty('--amber-dim', colors.amberDim);
-  if (colors.gray) root.style.setProperty('--gray', colors.gray);
-  if (colors.grayDim) root.style.setProperty('--gray-dim', colors.grayDim);
-
-  if (colors.stageBacklog) root.style.setProperty('--stage-backlog', colors.stageBacklog);
-  if (colors.stageSpec) root.style.setProperty('--stage-spec', colors.stageSpec);
-  if (colors.stagePlan) root.style.setProperty('--stage-plan', colors.stagePlan);
-  if (colors.stageImplement) root.style.setProperty('--stage-implement', colors.stageImplement);
-  if (colors.stageTest) root.style.setProperty('--stage-test', colors.stageTest);
-  if (colors.stageReview) root.style.setProperty('--stage-review', colors.stageReview);
-  if (colors.stageDone) root.style.setProperty('--stage-done', colors.stageDone);
-  if (colors.stageCancelled) root.style.setProperty('--stage-cancelled', colors.stageCancelled);
-
-  if (colors.focusRing) root.style.setProperty('--focus-ring', colors.focusRing);
-
-  if (colors.isDark !== undefined) {
-    if (colors.isDark) {
-      root.style.setProperty(
-        '--shadow-1',
-        '0px 1px 2px 0px rgba(0,0,0,0.6), 0px 1px 3px 1px rgba(0,0,0,0.3)',
-      );
-      root.style.setProperty(
-        '--shadow-2',
-        '0px 1px 2px 0px rgba(0,0,0,0.6), 0px 2px 6px 2px rgba(0,0,0,0.3)',
-      );
-      root.style.setProperty(
-        '--shadow-3',
-        '0px 1px 3px 0px rgba(0,0,0,0.6), 0px 4px 8px 3px rgba(0,0,0,0.3)',
-      );
-      root.style.setProperty(
-        '--shadow-hover',
-        '0px 2px 4px 0px rgba(0,0,0,0.5), 0px 6px 16px 4px rgba(0,0,0,0.4)',
-      );
-      root.style.setProperty(
-        '--shadow-drag',
-        '0px 4px 8px 0px rgba(0,0,0,0.5), 0px 12px 32px 6px rgba(0,0,0,0.4)',
-      );
-      root.style.setProperty(
-        '--shadow-panel',
-        '-2px 0px 8px 0px rgba(0,0,0,0.5), -4px 0px 16px 2px rgba(0,0,0,0.3)',
-      );
-    } else {
-      root.style.setProperty(
-        '--shadow-1',
-        '0px 1px 2px 0px rgba(0,0,0,0.3), 0px 1px 3px 1px rgba(0,0,0,0.15)',
-      );
-      root.style.setProperty(
-        '--shadow-2',
-        '0px 1px 2px 0px rgba(0,0,0,0.3), 0px 2px 6px 2px rgba(0,0,0,0.15)',
-      );
-      root.style.setProperty(
-        '--shadow-3',
-        '0px 1px 3px 0px rgba(0,0,0,0.3), 0px 4px 8px 3px rgba(0,0,0,0.15)',
-      );
-      root.style.setProperty(
-        '--shadow-hover',
-        '0px 2px 4px 0px rgba(0,0,0,0.25), 0px 4px 12px 4px rgba(0,0,0,0.15)',
-      );
-      root.style.setProperty(
-        '--shadow-drag',
-        '0px 4px 8px 0px rgba(0,0,0,0.3), 0px 12px 32px 6px rgba(0,0,0,0.25)',
-      );
-      root.style.setProperty(
-        '--shadow-panel',
-        '-2px 0px 8px 0px rgba(0,0,0,0.3), -4px 0px 16px 2px rgba(0,0,0,0.15)',
-      );
-    }
-  }
-
-  if (colors.isDark !== undefined) {
-    var theme = colors.isDark ? 'dark' : 'light';
-    if (colors.isDark) {
-      document.documentElement.setAttribute('data-theme', 'dark');
-    } else {
+  document.getElementById('theme-toggle')?.addEventListener('click', () => {
+    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var next = isDark ? 'light' : 'dark';
+    if (isDark) {
       document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'dark');
     }
-    localStorage.setItem('agent-tasks-theme', theme);
-    updateThemeIcon(theme);
+    localStorage.setItem('agent-tasks-theme', next);
+    updateThemeIcon(next);
+  });
+
+  document.getElementById('filter-search')?.addEventListener('input', (e) => {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+      filters.search = e.target.value;
+      saveFilters();
+      TaskBoard.resetColumnVisibleCounts();
+      render();
+    }, 200);
+  });
+
+  document.getElementById('filter-project')?.addEventListener('change', (e) => {
+    filters.project = e.target.value;
+    saveFilters();
+    TaskBoard.resetColumnVisibleCounts();
+    render();
+  });
+
+  document.getElementById('filter-assignee')?.addEventListener('change', (e) => {
+    filters.assignee = e.target.value;
+    saveFilters();
+    TaskBoard.resetColumnVisibleCounts();
+    render();
+  });
+
+  document.getElementById('filter-priority')?.addEventListener('change', (e) => {
+    filters.minPriority = parseInt(e.target.value) || 0;
+    saveFilters();
+    TaskBoard.resetColumnVisibleCounts();
+    render();
+  });
+
+  // ---- Event Delegation (board) ----
+
+  document.getElementById('board')?.addEventListener('click', (e) => {
+    var action = e.target.closest('[data-action]');
+
+    if (action) {
+      var act = action.dataset.action;
+
+      if (act === 'toggle-collapse') {
+        e.stopPropagation();
+        var stage = action.dataset.stage;
+        if (state.collapsedColumns.has(stage)) {
+          state.collapsedColumns.delete(stage);
+        } else {
+          state.collapsedColumns.add(stage);
+        }
+        saveCollapsed();
+        render();
+        return;
+      }
+
+      if (act === 'inline-create') {
+        e.stopPropagation();
+        TaskBoard.showInlineCreate(action.dataset.stage);
+        return;
+      }
+
+      if (act === 'add-task') {
+        e.stopPropagation();
+        TaskBoard.showInlineCreate(action.dataset.stage);
+        return;
+      }
+
+      if (act === 'cycle-priority') {
+        e.stopPropagation();
+        TaskBoard.cyclePriority(parseInt(action.dataset.taskId, 10));
+        return;
+      }
+
+      if (act === 'change-assignee') {
+        e.stopPropagation();
+        TaskBoard.showAssigneeDropdown(parseInt(action.dataset.taskId, 10), action);
+        return;
+      }
+
+      if (act === 'show-more') {
+        e.stopPropagation();
+        TaskBoard.showMoreCards(action.dataset.stage);
+        render();
+        return;
+      }
+    }
+
+    var card = e.target.closest('.task-card[data-task-id]');
+    if (card) {
+      TaskBoard.openPanel(parseInt(card.dataset.taskId, 10));
+    }
+  });
+
+  document.getElementById('board')?.addEventListener('dblclick', (e) => {
+    var titleEl = e.target.closest('[data-action="edit-title"]');
+    if (titleEl) {
+      e.stopPropagation();
+      TaskBoard.startInlineEdit(titleEl);
+    }
+  });
+
+  document.getElementById('board')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      var card = e.target.closest('.task-card[data-task-id]');
+      if (card) TaskBoard.openPanel(parseInt(card.dataset.taskId, 10));
+    }
+  });
+
+  // ---- Collapsed column click (expand) ----
+
+  document.getElementById('board')?.addEventListener('click', (e) => {
+    var col = e.target.closest('.kanban-column.collapsed');
+    if (col) {
+      var stage = col.dataset.stage;
+      state.collapsedColumns.delete(stage);
+      saveCollapsed();
+      render();
+    }
+  });
+
+  document.getElementById('modal-close-btn')?.addEventListener('click', closeModal);
+  document.getElementById('task-modal')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeModal();
+  });
+
+  // ---- Keyboard Navigation ----
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (TaskBoard.getActiveDropdown()) {
+        TaskBoard.dismissDropdown();
+        return;
+      }
+      if (TaskBoard.getActiveInlineCreate()) {
+        TaskBoard.dismissInlineCreate();
+        return;
+      }
+      if (state.panelTaskId) {
+        TaskBoard.closePanel();
+        return;
+      }
+      var modal = document.getElementById('task-modal');
+      if (modal && !modal.hidden) {
+        closeModal();
+        return;
+      }
+      var cleanupModal = document.getElementById('cleanup-modal');
+      if (cleanupModal && !cleanupModal.classList.contains('hidden')) {
+        cleanupModal.classList.add('hidden');
+        return;
+      }
+    }
+
+    var isInput =
+      document.activeElement?.tagName === 'INPUT' ||
+      document.activeElement?.tagName === 'TEXTAREA' ||
+      document.activeElement?.getAttribute('contenteditable') === 'true';
+
+    if (
+      (e.key === '/' && !e.ctrlKey && !e.metaKey && !isInput) ||
+      ((e.ctrlKey || e.metaKey) && e.key === 'k')
+    ) {
+      e.preventDefault();
+      document.getElementById('filter-search')?.focus();
+    }
+  });
+
+  // ---- Cleanup Dialog ----
+
+  document.getElementById('cleanup-btn')?.addEventListener('click', () => {
+    document.getElementById('cleanup-modal').classList.remove('hidden');
+  });
+
+  document.getElementById('cleanup-close-btn')?.addEventListener('click', () => {
+    document.getElementById('cleanup-modal').classList.add('hidden');
+  });
+
+  document.getElementById('cleanup-modal')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) {
+      document.getElementById('cleanup-modal').classList.add('hidden');
+    }
+  });
+
+  document.getElementById('cleanup-completed')?.addEventListener('click', () => {
+    var showToast = TaskBoard.showToast;
+    document.getElementById('cleanup-modal').classList.add('hidden');
+    TaskBoard._fetch('/api/cleanup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force: true }),
+    })
+      .then((r) => r.json())
+      .then((result) => {
+        showToast(
+          'Cleanup complete',
+          `Purged ${result.purgedTasks} tasks, ${result.purgedComments} comments, ${result.purgedApprovals} approvals`,
+          'success',
+        );
+      })
+      .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
+  });
+
+  document.getElementById('cleanup-everything')?.addEventListener('click', () => {
+    var showToast = TaskBoard.showToast;
+    if (
+      !confirm(
+        'This will remove ALL tasks — completed, in-progress, everything. This cannot be undone. Continue?',
+      )
+    )
+      return;
+    document.getElementById('cleanup-modal').classList.add('hidden');
+    TaskBoard._fetch('/api/cleanup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ all: true }),
+    })
+      .then((r) => r.json())
+      .then((result) => {
+        showToast(
+          'Everything purged',
+          `Purged ${result.purgedTasks} tasks, ${result.purgedComments} comments, ${result.purgedApprovals} approvals`,
+          'success',
+        );
+      })
+      .catch(() => showToast('Cleanup failed', 'Network error', 'error'));
+  });
+
+  // ---- Theme sync from parent (agent-desk) via executeJavaScript ----
+
+  window.addEventListener('message', function (event) {
+    if (!event.data || event.data.type !== 'theme-sync') return;
+    var colors = event.data.colors;
+    if (!colors) return;
+
+    function ensureContrast(bg, fg) {
+      var lum = function (hex) {
+        if (!hex || hex.charAt(0) !== '#' || hex.length < 7) return 0.5;
+        var r = parseInt(hex.slice(1, 3), 16) / 255;
+        var g = parseInt(hex.slice(3, 5), 16) / 255;
+        var b = parseInt(hex.slice(5, 7), 16) / 255;
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      var bgLum = lum(bg);
+      return bgLum < 0.5 ? (lum(fg) < 0.4 ? '#e0e0e0' : fg) : lum(fg) > 0.6 ? '#333333' : fg;
+    }
+
+    var root = document.documentElement;
+    var bgColor = colors.bg || null;
+
+    if (colors.bg) root.style.setProperty('--bg', colors.bg);
+    if (colors.bgSurface) root.style.setProperty('--bg-surface', colors.bgSurface);
+    if (colors.bgElevated) root.style.setProperty('--bg-elevated', colors.bgElevated);
+    if (colors.bgHover) root.style.setProperty('--bg-hover', colors.bgHover);
+    if (colors.bgInset) root.style.setProperty('--bg-inset', colors.bgInset);
+
+    if (colors.border) root.style.setProperty('--border', colors.border);
+    if (colors.borderLight) root.style.setProperty('--border-light', colors.borderLight);
+
+    if (colors.text)
+      root.style.setProperty(
+        '--text',
+        bgColor ? ensureContrast(bgColor, colors.text) : colors.text,
+      );
+    if (colors.textSecondary)
+      root.style.setProperty(
+        '--text-secondary',
+        bgColor ? ensureContrast(bgColor, colors.textSecondary) : colors.textSecondary,
+      );
+    if (colors.textMuted)
+      root.style.setProperty(
+        '--text-muted',
+        bgColor ? ensureContrast(bgColor, colors.textMuted) : colors.textMuted,
+      );
+    if (colors.textDim)
+      root.style.setProperty(
+        '--text-dim',
+        bgColor ? ensureContrast(bgColor, colors.textDim) : colors.textDim,
+      );
+
+    if (colors.accent) root.style.setProperty('--accent', colors.accent);
+    if (colors.accentHover) root.style.setProperty('--accent-hover', colors.accentHover);
+    if (colors.accentDim) root.style.setProperty('--accent-dim', colors.accentDim);
+    if (colors.accentSolid) root.style.setProperty('--accent-solid', colors.accentSolid);
+    if (colors.accentGlow) root.style.setProperty('--accent-glow', colors.accentGlow);
+
+    if (colors.green) root.style.setProperty('--green', colors.green);
+    if (colors.greenDim) root.style.setProperty('--green-dim', colors.greenDim);
+    if (colors.yellow) root.style.setProperty('--yellow', colors.yellow);
+    if (colors.yellowDim) root.style.setProperty('--yellow-dim', colors.yellowDim);
+    if (colors.orange) root.style.setProperty('--orange', colors.orange);
+    if (colors.orangeDim) root.style.setProperty('--orange-dim', colors.orangeDim);
+    if (colors.red) root.style.setProperty('--red', colors.red);
+    if (colors.redDim) root.style.setProperty('--red-dim', colors.redDim);
+    if (colors.purple) root.style.setProperty('--purple', colors.purple);
+    if (colors.purpleDim) root.style.setProperty('--purple-dim', colors.purpleDim);
+    if (colors.blue) root.style.setProperty('--blue', colors.blue);
+    if (colors.blueDim) root.style.setProperty('--blue-dim', colors.blueDim);
+    if (colors.indigo) root.style.setProperty('--indigo', colors.indigo);
+    if (colors.indigoDim) root.style.setProperty('--indigo-dim', colors.indigoDim);
+    if (colors.amber) root.style.setProperty('--amber', colors.amber);
+    if (colors.amberDim) root.style.setProperty('--amber-dim', colors.amberDim);
+    if (colors.gray) root.style.setProperty('--gray', colors.gray);
+    if (colors.grayDim) root.style.setProperty('--gray-dim', colors.grayDim);
+
+    if (colors.stageBacklog) root.style.setProperty('--stage-backlog', colors.stageBacklog);
+    if (colors.stageSpec) root.style.setProperty('--stage-spec', colors.stageSpec);
+    if (colors.stagePlan) root.style.setProperty('--stage-plan', colors.stagePlan);
+    if (colors.stageImplement) root.style.setProperty('--stage-implement', colors.stageImplement);
+    if (colors.stageTest) root.style.setProperty('--stage-test', colors.stageTest);
+    if (colors.stageReview) root.style.setProperty('--stage-review', colors.stageReview);
+    if (colors.stageDone) root.style.setProperty('--stage-done', colors.stageDone);
+    if (colors.stageCancelled) root.style.setProperty('--stage-cancelled', colors.stageCancelled);
+
+    if (colors.focusRing) root.style.setProperty('--focus-ring', colors.focusRing);
+
+    if (colors.isDark !== undefined) {
+      if (colors.isDark) {
+        root.style.setProperty(
+          '--shadow-1',
+          '0px 1px 2px 0px rgba(0,0,0,0.6), 0px 1px 3px 1px rgba(0,0,0,0.3)',
+        );
+        root.style.setProperty(
+          '--shadow-2',
+          '0px 1px 2px 0px rgba(0,0,0,0.6), 0px 2px 6px 2px rgba(0,0,0,0.3)',
+        );
+        root.style.setProperty(
+          '--shadow-3',
+          '0px 1px 3px 0px rgba(0,0,0,0.6), 0px 4px 8px 3px rgba(0,0,0,0.3)',
+        );
+        root.style.setProperty(
+          '--shadow-hover',
+          '0px 2px 4px 0px rgba(0,0,0,0.5), 0px 6px 16px 4px rgba(0,0,0,0.4)',
+        );
+        root.style.setProperty(
+          '--shadow-drag',
+          '0px 4px 8px 0px rgba(0,0,0,0.5), 0px 12px 32px 6px rgba(0,0,0,0.4)',
+        );
+        root.style.setProperty(
+          '--shadow-panel',
+          '-2px 0px 8px 0px rgba(0,0,0,0.5), -4px 0px 16px 2px rgba(0,0,0,0.3)',
+        );
+      } else {
+        root.style.setProperty(
+          '--shadow-1',
+          '0px 1px 2px 0px rgba(0,0,0,0.3), 0px 1px 3px 1px rgba(0,0,0,0.15)',
+        );
+        root.style.setProperty(
+          '--shadow-2',
+          '0px 1px 2px 0px rgba(0,0,0,0.3), 0px 2px 6px 2px rgba(0,0,0,0.15)',
+        );
+        root.style.setProperty(
+          '--shadow-3',
+          '0px 1px 3px 0px rgba(0,0,0,0.3), 0px 4px 8px 3px rgba(0,0,0,0.15)',
+        );
+        root.style.setProperty(
+          '--shadow-hover',
+          '0px 2px 4px 0px rgba(0,0,0,0.25), 0px 4px 12px 4px rgba(0,0,0,0.15)',
+        );
+        root.style.setProperty(
+          '--shadow-drag',
+          '0px 4px 8px 0px rgba(0,0,0,0.3), 0px 12px 32px 6px rgba(0,0,0,0.25)',
+        );
+        root.style.setProperty(
+          '--shadow-panel',
+          '-2px 0px 8px 0px rgba(0,0,0,0.3), -4px 0px 16px 2px rgba(0,0,0,0.15)',
+        );
+      }
+    }
+
+    if (colors.isDark !== undefined) {
+      var theme = colors.isDark ? 'dark' : 'light';
+      if (colors.isDark) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+      localStorage.setItem('agent-tasks-theme', theme);
+      updateThemeIcon(theme);
+    }
+
+    var themeToggle = document.getElementById('theme-toggle');
+    if (themeToggle) themeToggle.style.display = 'none';
+  });
+
+  // ---- Initialize modules ----
+
+  TaskBoard.initDragEvents();
+  TaskBoard.initPanelEvents();
+  TaskBoard.initPanelResize();
+
+  // ---- Boot ----
+
+  connect();
+}
+
+// ---- Plugin mount/unmount ----
+
+TaskBoard.mount = function (container, options) {
+  options = options || {};
+  TaskBoard._baseUrl = options.baseUrl || '';
+  TaskBoard._wsUrl = options.wsUrl || null;
+  if (options.cssUrl && !document.getElementById('tb-plugin-css')) {
+    var link = document.createElement('link');
+    link.id = 'tb-plugin-css';
+    link.rel = 'stylesheet';
+    link.href = options.cssUrl;
+    document.head.appendChild(link);
   }
+  if (typeof TaskBoard._template === 'function') {
+    container.innerHTML = TaskBoard._template();
+  }
+  _init();
+};
 
-  var themeToggle = document.getElementById('theme-toggle');
-  if (themeToggle) themeToggle.style.display = 'none';
-});
+TaskBoard.unmount = function () {
+  if (ws) {
+    ws.onclose = null;
+    ws.close();
+    ws = null;
+  }
+  clearTimeout(reconnectTimer);
+};
 
-// ---- Initialize modules ----
+// ---- Auto-init for standalone mode ----
 
-TaskBoard.initDragEvents();
-TaskBoard.initPanelEvents();
-TaskBoard.initPanelResize();
-
-// ---- Boot ----
-
-connect();
+_init();

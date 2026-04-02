@@ -1,6 +1,6 @@
 {
   "name": "agent-tasks",
-  "version": "1.9.6",
+  "version": "1.9.7",
   "description": "Pipeline-driven task management for AI coding agents — stages, dependencies, artifacts, and multi-agent claiming",
   "type": "module",
   "main": "dist/index.js",
