@@ -6,7 +6,7 @@
     "url": "https://github.com/keshrath/agent-tasks",
     "source": "github"
   },
-  "version": "1.9.11",
+  "version": "1.9.12",
   "packages": [
     {
       "registryType": "npm",

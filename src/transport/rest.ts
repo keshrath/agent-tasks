@@ -229,6 +229,20 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
     }
   });
 
+  route('DELETE', '/api/tasks/:id', async (_req, res, params) => {
+    try {
+      const taskId = parseId(params);
+      ctx.tasks.delete(taskId);
+      json(res, { ok: true });
+    } catch (err) {
+      if (err instanceof TasksError) {
+        json(res, { error: err.message }, err.statusCode);
+      } else {
+        json(res, { error: 'Internal error' }, 500);
+      }
+    }
+  });
+
   route('GET', '/api/tasks/:id/artifacts', (req, res, params) => {
     const url = new URL(req.url!, `http://${req.headers.host}`);
     const stage = url.searchParams.get('stage') ?? undefined;

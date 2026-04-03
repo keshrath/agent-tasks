@@ -189,14 +189,19 @@ function renderPanelContent(task) {
       <span class="panel-task-id">#${task.id}</span>
       <span class="panel-stage-badge ${stageClass}">${esc(task.stage)}</span>
     </div>
-    <button class="panel-close-btn" data-action="close-panel" aria-label="Close panel">
-      <span class="material-symbols-outlined">close</span>
-    </button>`;
+    <div class="panel-header-right">
+      <button class="panel-delete-btn" data-action="delete-task" data-task-id="${task.id}" aria-label="Delete task" title="Delete task">
+        <span class="material-symbols-outlined">delete</span>
+      </button>
+      <button class="panel-close-btn" data-action="close-panel" aria-label="Close panel">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>`;
 
   const deps = state.dependencies.filter((d) => d.task_id === task.id);
   const blocking = state.dependencies.filter((d) => d.depends_on === task.id);
 
-  let html = `<div class="panel-title">${esc(task.title)}</div>`;
+  let html = `<div class="panel-title" data-action="edit-panel-title" data-task-id="${task.id}" title="Click to edit">${esc(task.title)}</div>`;
 
   html += '<div class="panel-section">';
   html +=
@@ -235,13 +240,17 @@ function renderPanelContent(task) {
 
   html += '</div></div>';
 
+  html += '<div class="panel-section">';
+  html +=
+    '<div class="panel-section-title"><span class="material-symbols-outlined">notes</span> Description' +
+    `<button class="panel-edit-btn" data-action="edit-description" data-task-id="${task.id}" title="Edit description">` +
+    '<span class="material-symbols-outlined">edit</span></button></div>';
   if (task.description) {
-    html += '<div class="panel-section">';
-    html +=
-      '<div class="panel-section-title"><span class="material-symbols-outlined">notes</span> Description</div>';
     html += `<div class="panel-description">${renderMarkdown(task.description)}</div>`;
-    html += '</div>';
+  } else {
+    html += '<div class="panel-description panel-description-empty">No description</div>';
   }
+  html += '</div>';
 
   if (task.result) {
     html += '<div class="panel-section">';
@@ -516,11 +525,168 @@ function initPanelResize() {
 
 // ---- Panel event delegation ----
 
+function startPanelTitleEdit(titleEl) {
+  var taskId = parseInt(titleEl.dataset.taskId, 10);
+  var task = TaskBoard.state.tasks.find(function (t) {
+    return t.id === taskId;
+  });
+  if (!task) return;
+
+  titleEl.setAttribute('contenteditable', 'true');
+  titleEl.focus();
+
+  var range = document.createRange();
+  range.selectNodeContents(titleEl);
+  var sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  var finish = function () {
+    titleEl.removeAttribute('contenteditable');
+    var newTitle = titleEl.textContent.trim();
+    if (newTitle && newTitle !== task.title) {
+      TaskBoard.updateTask(taskId, { title: newTitle });
+    } else {
+      titleEl.textContent = task.title;
+    }
+  };
+
+  titleEl.addEventListener('blur', finish, { once: true });
+  titleEl.addEventListener(
+    'keydown',
+    function (ev) {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        titleEl.blur();
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        titleEl.textContent = task.title;
+        titleEl.removeAttribute('contenteditable');
+      }
+    },
+    { once: true },
+  );
+}
+
+function startDescriptionEdit(taskId) {
+  var esc = TaskBoard.esc;
+  var task = TaskBoard.state.tasks.find(function (t) {
+    return t.id === taskId;
+  });
+  if (!task) return;
+
+  var descEl = TaskBoard._root.querySelector('.panel-description');
+  if (!descEl) return;
+
+  var editor = document.createElement('div');
+  editor.className = 'panel-description-editor';
+  editor.innerHTML =
+    '<textarea class="panel-desc-textarea" rows="6">' +
+    esc(task.description || '') +
+    '</textarea>' +
+    '<div class="panel-desc-actions">' +
+    '<button class="panel-desc-save" data-task-id="' +
+    taskId +
+    '">Save</button>' +
+    '<button class="panel-desc-cancel">Cancel</button>' +
+    '</div>';
+
+  descEl.replaceWith(editor);
+  editor.querySelector('.panel-desc-textarea').focus();
+
+  editor.querySelector('.panel-desc-save').addEventListener('click', function () {
+    var newDesc = editor.querySelector('.panel-desc-textarea').value.trim();
+    TaskBoard.updateTask(taskId, { description: newDesc || null });
+    setTimeout(function () {
+      openPanel(taskId);
+    }, 300);
+  });
+
+  editor.querySelector('.panel-desc-cancel').addEventListener('click', function () {
+    openPanel(taskId);
+  });
+}
+
+function deleteTask(taskId) {
+  var task = TaskBoard.state.tasks.find(function (t) {
+    return t.id === taskId;
+  });
+  if (!task) return;
+
+  var overlay = document.createElement('div');
+  overlay.className = 'confirm-overlay';
+  overlay.innerHTML =
+    '<div class="confirm-dialog">' +
+    '<div class="confirm-title">Delete task #' +
+    taskId +
+    '?</div>' +
+    '<div class="confirm-body">' +
+    TaskBoard.esc(task.title) +
+    '</div>' +
+    '<div class="confirm-actions">' +
+    '<button class="confirm-cancel">Cancel</button>' +
+    '<button class="confirm-delete">Delete</button>' +
+    '</div></div>';
+
+  var root =
+    TaskBoard._root === document
+      ? document.body
+      : TaskBoard._root.querySelector('[class*="wrapper"]') || TaskBoard._root;
+  root.appendChild(overlay);
+
+  overlay.querySelector('.confirm-cancel').addEventListener('click', function () {
+    overlay.remove();
+  });
+
+  overlay.querySelector('.confirm-delete').addEventListener('click', function () {
+    overlay.remove();
+    TaskBoard._fetch('/api/tasks/' + taskId, { method: 'DELETE' })
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (result) {
+        if (result.error) {
+          TaskBoard.showToast('Delete failed', result.error, 'error');
+        } else {
+          TaskBoard.showToast('Deleted', 'Task #' + taskId + ' deleted', 'success');
+          closePanel();
+        }
+      })
+      .catch(function () {
+        TaskBoard.showToast('Delete failed', 'Network error', 'error');
+      });
+  });
+
+  overlay.addEventListener('click', function (ev) {
+    if (ev.target === overlay) overlay.remove();
+  });
+}
+
 function initPanelEvents() {
   TaskBoard._root.getElementById('side-panel').addEventListener('click', (e) => {
     const closeBtn = e.target.closest('[data-action="close-panel"]');
     if (closeBtn) {
       closePanel();
+      return;
+    }
+
+    const editTitle = e.target.closest('[data-action="edit-panel-title"]');
+    if (editTitle && !editTitle.hasAttribute('contenteditable')) {
+      startPanelTitleEdit(editTitle);
+      return;
+    }
+
+    const editDesc = e.target.closest('[data-action="edit-description"]');
+    if (editDesc) {
+      startDescriptionEdit(parseInt(editDesc.dataset.taskId, 10));
+      return;
+    }
+
+    const delBtn = e.target.closest('[data-action="delete-task"]');
+    if (delBtn) {
+      deleteTask(parseInt(delBtn.dataset.taskId, 10));
       return;
     }
 
