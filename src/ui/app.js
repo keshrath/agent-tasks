@@ -802,13 +802,13 @@ TaskBoard.mount = function (container, options) {
   var pluginStyle = document.createElement('style');
   pluginStyle.textContent =
     ':host { display:block; width:100%; height:100%; overflow:hidden; }' +
-    '.tb-wrapper { font-family:var(--font-sans); font-size:14px; color:var(--text); background:var(--bg); line-height:1.5; width:100%; height:100%; overflow:hidden; }' +
-    '.tb-wrapper #app { height:100%; }';
+    '.tb-wrapper { font-family:var(--font-sans); font-size:14px; color:var(--text); background:var(--bg); line-height:1.5; width:100%; height:100%; overflow:hidden; display:flex; flex-direction:column; }';
   shadow.appendChild(pluginStyle);
 
   if (typeof TaskBoard._template === 'function') {
     var wrapper = document.createElement('div');
-    wrapper.className = 'theme-dark tb-wrapper';
+    wrapper.className = 'tb-wrapper';
+    wrapper.setAttribute('data-theme', 'dark');
     wrapper.innerHTML = TaskBoard._template();
     shadow.appendChild(wrapper);
   }
@@ -832,4 +832,8 @@ TaskBoard.unmount = function () {
 var _params = new URLSearchParams(location.search);
 if (_params.get('baseUrl')) TaskBoard._baseUrl = _params.get('baseUrl');
 if (_params.get('wsUrl')) TaskBoard._wsUrl = _params.get('wsUrl');
-_init();
+try {
+  _init();
+} catch (e) {
+  /* standalone init may fail in file:// context — plugin mode uses mount() */
+}
