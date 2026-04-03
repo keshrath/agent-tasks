@@ -22,7 +22,7 @@ function formatDate(iso) {
   if (!iso) return '\u2014';
   try {
     const d = new Date(iso + 'Z');
-    return d.toLocaleString(undefined, {
+    return d.toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
