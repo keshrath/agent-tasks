@@ -530,7 +530,7 @@ header {
 .kanban-column {
   min-width: var(--column-min);
   max-width: var(--column-max);
-  flex: 1;
+  flex: 1 0 var(--column-min);
   background: var(--bg-surface);
   border-radius: var(--radius);
   border: none;
