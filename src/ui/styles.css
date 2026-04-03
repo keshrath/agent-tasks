@@ -503,6 +503,7 @@ header {
   display: flex;
   flex: 1;
   overflow: hidden;
+  position: relative;
   transition: all var(--transition-slow);
 }
 
@@ -1515,8 +1516,13 @@ header {
 }
 
 .board-wrapper.panel-open .side-panel {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
   width: var(--panel-width);
   min-width: var(--panel-width);
+  z-index: 80;
 }
 
 .board-wrapper.panel-open .side-panel.panel-wide {
