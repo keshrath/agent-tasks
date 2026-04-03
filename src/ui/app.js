@@ -815,6 +815,8 @@ TaskBoard.mount = function (container, options) {
 
   TaskBoard._root = shadow;
   _init();
+  var themeBtn = shadow.getElementById('theme-toggle');
+  if (themeBtn) themeBtn.style.display = 'none';
 };
 
 TaskBoard.unmount = function () {
