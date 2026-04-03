@@ -11,7 +11,7 @@ import { ValidationError } from '../types.js';
 import { handlers, type SessionState } from './mcp-handlers.js';
 
 // ---------------------------------------------------------------------------
-// Tool definitions (13 tools)
+// Tool definitions (8 tools)
 // ---------------------------------------------------------------------------
 
 export const tools: ToolDefinition[] = [
@@ -46,11 +46,25 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_get',
     description:
-      'Get a single task by ID with full details including artifacts count, comments count, dependencies, and collaborators.',
+      'Get a single task by ID. By default returns task with artifact count, comment count, dependencies, and collaborators. Use "include" to inline full subtasks, artifacts (filterable by stage), or comments (with limit).',
     inputSchema: {
       type: 'object',
       properties: {
         task_id: { type: 'number', description: 'Task ID to retrieve' },
+        include: {
+          type: 'array',
+          items: { type: 'string', enum: ['subtasks', 'artifacts', 'comments'] },
+          description:
+            'Inline related data: "subtasks" → child tasks, "artifacts" → full artifact list (use stage to filter), "comments" → discussion threads (use limit to cap)',
+        },
+        stage: {
+          type: 'string',
+          description: 'Filter artifacts by stage (only when include has "artifacts")',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max comments to return (only when include has "comments", default: 100)',
+        },
       },
       required: ['task_id'],
     },
@@ -96,25 +110,9 @@ export const tools: ToolDefinition[] = [
     },
   },
   {
-    name: 'task_claim',
-    description:
-      'Claim a pending task — assigns it to you and advances from backlog to spec. This is the standard way to start working on a task.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        task_id: { type: 'number', description: 'Task ID to claim' },
-        claimer: {
-          type: 'string',
-          description: 'Agent name claiming (uses session name if omitted)',
-        },
-      },
-      required: ['task_id'],
-    },
-  },
-  {
     name: 'task_update',
     description:
-      'Update task metadata — title, description, priority, tags, project, or assignment. Does not change stage or status (use task_stage for that).',
+      'Update task metadata — title, description, priority, tags, project, assignment, or dependencies. Does not change stage or status (use task_stage for that).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -127,6 +125,24 @@ export const tools: ToolDefinition[] = [
         assign_to: {
           type: 'string',
           description: 'New assignee (empty string to unassign)',
+        },
+        dependency: {
+          type: 'object',
+          description: 'Add or remove a dependency in the same call',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['add', 'remove'],
+              description: 'Add or remove the dependency',
+            },
+            depends_on: { type: 'number', description: 'The task ID this task depends on' },
+            relationship: {
+              type: 'string',
+              enum: ['blocks', 'related', 'duplicate'],
+              description: 'Relationship type (default: blocks, only for add)',
+            },
+          },
+          required: ['action', 'depends_on'],
         },
       },
       required: ['task_id'],
@@ -145,32 +161,22 @@ export const tools: ToolDefinition[] = [
     },
   },
   {
-    name: 'task_comment',
-    description:
-      'Add a comment to a task — used for async discussion between agents. Supports threading via parent_comment_id. Comments also satisfy stage-gate "require_comment" checks.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        task_id: { type: 'number', description: 'Task ID' },
-        content: { type: 'string', description: 'Comment text' },
-        parent_comment_id: { type: 'number', description: 'Reply to this comment (threading)' },
-      },
-      required: ['task_id', 'content'],
-    },
-  },
-  {
     name: 'task_stage',
     description:
-      'Move a task through its lifecycle. Actions: "advance" → next stage (or jump to a specific one), "regress" → earlier stage (requires reason), "complete" → marks done with result, "fail" → marks failed with error, "cancel" → cancels with reason.',
+      'Move a task through its lifecycle. Actions: "claim" → assign to you and advance from backlog to spec, "advance" → next stage (or jump to a specific one), "regress" → earlier stage (requires reason), "complete" → marks done with result, "fail" → marks failed with error, "cancel" → cancels with reason.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['advance', 'regress', 'complete', 'fail', 'cancel'],
+          enum: ['claim', 'advance', 'regress', 'complete', 'fail', 'cancel'],
           description: 'Lifecycle action to perform',
         },
         task_id: { type: 'number', description: 'Task ID' },
+        claimer: {
+          type: 'string',
+          description: 'Agent name claiming (claim only, uses session name if omitted)',
+        },
         stage: {
           type: 'string',
           description:
@@ -194,40 +200,15 @@ export const tools: ToolDefinition[] = [
     },
   },
   {
-    name: 'task_query',
-    description:
-      'Read task-related data. Types: "subtasks" → child tasks, "artifacts" → attached documents/decisions/learnings (filterable by stage), "comments" → discussion threads.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        type: {
-          type: 'string',
-          enum: ['subtasks', 'artifacts', 'comments'],
-          description: 'What to query',
-        },
-        task_id: { type: 'number', description: 'Task ID' },
-        stage: {
-          type: 'string',
-          description: 'Filter artifacts by stage (only used with type: "artifacts")',
-        },
-        limit: {
-          type: 'number',
-          description: 'Max comments to return (only used with type: "comments", default: 100)',
-        },
-      },
-      required: ['type', 'task_id'],
-    },
-  },
-  {
     name: 'task_artifact',
     description:
-      'Attach artifacts to a task. Types: "general" → document (spec, test-results, review-notes), "decision" → structured decision record (chose/over/because), "learning" → insight that auto-propagates to parent and sibling tasks on completion.',
+      'Attach artifacts or comments to a task. Types: "general" → document (spec, test-results, review-notes), "decision" → structured decision record (chose/over/because), "learning" → insight that auto-propagates to parent and sibling tasks on completion, "comment" → discussion comment (supports threading via parent_comment_id, satisfies stage-gate require_comment checks).',
     inputSchema: {
       type: 'object',
       properties: {
         type: {
           type: 'string',
-          enum: ['general', 'decision', 'learning'],
+          enum: ['general', 'decision', 'learning', 'comment'],
           description: 'Artifact type',
         },
         task_id: { type: 'number', description: 'Task ID' },
@@ -239,7 +220,7 @@ export const tools: ToolDefinition[] = [
         content: {
           type: 'string',
           description:
-            'Artifact content (type: "general": text/markdown/JSON, max 100K; type: "learning": the insight)',
+            'Artifact content (type: "general": text/markdown/JSON, max 100K; type: "learning": the insight; type: "comment": comment text)',
         },
         stage: {
           type: 'string',
@@ -258,6 +239,10 @@ export const tools: ToolDefinition[] = [
           type: 'string',
           enum: ['technique', 'pitfall', 'decision', 'pattern'],
           description: 'Learning category (type: "learning" only, default: technique)',
+        },
+        parent_comment_id: {
+          type: 'number',
+          description: 'Reply to this comment (type: "comment" only, for threading)',
         },
       },
       required: ['type', 'task_id'],
@@ -348,104 +333,6 @@ export const tools: ToolDefinition[] = [
           type: 'string',
           enum: ['mdc', 'claude_md'],
           description: 'Output format for rules: mdc (Cursor) or claude_md (Claude Code)',
-        },
-      },
-      required: ['action'],
-    },
-  },
-  {
-    name: 'task_dependency',
-    description:
-      'Manage task dependencies. "add" → create a blocks/related/duplicate relationship between two tasks (blocks advancement until resolved). "remove" → delete a dependency.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['add', 'remove'],
-          description: 'Action to perform',
-        },
-        task_id: { type: 'number', description: 'Task that depends on another' },
-        depends_on: {
-          type: 'number',
-          description: 'Task that must complete first (for blocks) or related task',
-        },
-        relationship: {
-          type: 'string',
-          enum: ['blocks', 'related', 'duplicate'],
-          description: 'Relationship type (default: blocks, only used with "add")',
-        },
-      },
-      required: ['action', 'task_id', 'depends_on'],
-    },
-  },
-  {
-    name: 'task_collaborator',
-    description:
-      'Manage task collaborators. "add" → assign an agent as collaborator (can work on it), reviewer (reviews artifacts), or watcher (gets notifications). "remove" → unassign an agent.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['add', 'remove'],
-          description: 'Action to perform',
-        },
-        task_id: { type: 'number', description: 'Task ID' },
-        agent_id: { type: 'string', description: 'Agent name or ID' },
-        role: {
-          type: 'string',
-          enum: ['collaborator', 'reviewer', 'watcher'],
-          description: 'Role (default: collaborator, only used with "add")',
-        },
-      },
-      required: ['action', 'task_id', 'agent_id'],
-    },
-  },
-  {
-    name: 'task_approval',
-    description:
-      'Manage approval workflows for stage gates. Actions: "request" → create approval request at current stage, "approve"/"reject" → decide on a pending approval, "list" → show pending approvals, "review" → convenience action that approves+advances or rejects+regresses in one call.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['request', 'approve', 'reject', 'list', 'review'],
-          description: 'Action to perform',
-        },
-        task_id: {
-          type: 'number',
-          description: 'Task ID (required for request and review)',
-        },
-        approval_id: {
-          type: 'number',
-          description: 'Approval ID (required for approve and reject)',
-        },
-        stage: {
-          type: 'string',
-          description: 'Stage requiring approval (request only, defaults to current)',
-        },
-        reviewer: {
-          type: 'string',
-          description: 'Reviewer to assign (request) or filter by (list)',
-        },
-        comment: {
-          type: 'string',
-          description: 'Comment (optional for approve, required for reject)',
-        },
-        decision: {
-          type: 'string',
-          enum: ['approve', 'reject'],
-          description: 'Decision for review action',
-        },
-        reason: {
-          type: 'string',
-          description: 'Rejection reason (required for review+reject)',
-        },
-        regress_to: {
-          type: 'string',
-          description: 'Stage to regress to on rejection (reject/review, default: implement)',
         },
       },
       required: ['action'],

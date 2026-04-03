@@ -60,7 +60,7 @@ Configurable per project via `task_pipeline_config`. Tasks advance through stage
 
 - **REST**: `GET /health`, `GET/POST /api/tasks`, `PUT /api/tasks/:id/stage`, `GET /api/tasks/:id/artifacts`, `GET/POST /api/tasks/:id/comments`, `GET /api/search?q=`, `GET /api/agents`
 - **WebSocket**: Full state on connect, incremental events streamed, DB polling for cross-process updates (2s interval)
-- **MCP** (14 tools): `task_create`, `task_get`, `task_list` (search via `query`, pick next via `next: true`), `task_claim`, `task_update`, `task_delete`, `task_comment`, `task_stage`, `task_query`, `task_artifact`, `task_config`, `task_dependency`, `task_collaborator`, `task_approval`
+- **MCP** (8 tools): `task_create`, `task_get` (include subtasks/artifacts/comments), `task_list` (search via `query`, pick next via `next: true`), `task_update` (metadata + dependencies), `task_delete`, `task_stage` (claim/advance/regress/complete/fail/cancel), `task_artifact` (general/decision/learning/comment), `task_config`
 
 ## Live Updates
 

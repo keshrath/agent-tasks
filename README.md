@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
 [![Tests](https://img.shields.io/badge/tests-378%20passing-brightgreen)]()
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-13-purple)]()
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-8-purple)]()
 [![REST Endpoints](https://img.shields.io/badge/REST-18%20endpoints-orange)]()
 
 **Pipeline-driven task management for AI coding agents.** An [MCP](https://modelcontextprotocol.io/) server with stage-gated pipelines, multi-agent collaboration, and a real-time kanban dashboard. Tasks flow through configurable stages — `backlog`, `spec`, `plan`, `implement`, `test`, `review`, `done` — with dependency tracking, approval workflows, artifact versioning, and threaded comments.
@@ -91,21 +91,19 @@ node dist/server.js --port 3422
 
 ## Claude Code Integration
 
-Once configured (see [Quick Start](#quick-start) above), Claude Code can use all 13 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
+Once configured (see [Quick Start](#quick-start) above), Claude Code can use all 8 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
 
 ---
 
-## MCP Tools (13)
+## MCP Tools (8)
 
-| Category                    | Tools                                                                                                                         |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Task CRUD** (5)           | `task_create`, `task_list` (also: search via `query`, pick next via `next: true`), `task_claim`, `task_update`, `task_delete` |
-| **Lifecycle** (1)           | `task_stage` (advance, regress, complete, fail, cancel)                                                                       |
-| **Dependencies** (1)        | `task_dependency` (subtasks: use `task_create` with `parent_id`)                                                              |
-| **Artifacts & queries** (2) | `task_artifact` (general, decision, learning), `task_query` (subtasks, artifacts, comments)                                   |
-| **Comments & collab** (2)   | `task_comment`, `task_collaborator`                                                                                           |
-| **Approvals** (1)           | `task_approval`                                                                                                               |
-| **Config & utils** (1)      | `task_config` (pipeline, session, cleanup, rules)                                                                             |
+| Category               | Tools                                                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Task CRUD** (4)      | `task_create`, `task_get` (include subtasks/artifacts/comments), `task_list` (search, next), `task_delete` |
+| **Metadata** (1)       | `task_update` (title, description, priority, tags, project, assignment, dependencies)                      |
+| **Lifecycle** (1)      | `task_stage` (claim, advance, regress, complete, fail, cancel)                                             |
+| **Artifacts** (1)      | `task_artifact` (general, decision, learning, comment)                                                     |
+| **Config & utils** (1) | `task_config` (pipeline, session, cleanup, rules)                                                          |
 
 See [full API reference](docs/API.md) for detailed descriptions of every tool and endpoint.
 
@@ -168,7 +166,7 @@ npm run check         # Full CI: typecheck + lint + format + test
 
 ## Documentation
 
-- [API Reference](docs/API.md) — all 13 MCP tools, 18 REST endpoints, WebSocket protocol
+- [API Reference](docs/API.md) — all 8 MCP tools, 18 REST endpoints, WebSocket protocol
 - [Architecture](docs/ARCHITECTURE.md) — source structure, design principles, database schema
 - [Dashboard](docs/DASHBOARD.md) — kanban board features, keyboard shortcuts, screenshots
 - [Setup Guide](docs/SETUP.md) — installation, client setup (Claude Code, OpenCode, Cursor, Windsurf), hooks

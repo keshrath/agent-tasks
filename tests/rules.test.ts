@@ -31,10 +31,11 @@ describe('generateRules', () => {
     it('lists key MCP tools', () => {
       const result = generateRules('mdc', DEFAULT_STAGES);
       expect(result).toContain('task_create');
-      expect(result).toContain('task_claim');
+      expect(result).toContain('task_get');
+      expect(result).toContain('task_list');
       expect(result).toContain('task_stage');
       expect(result).toContain('task_artifact');
-      expect(result).toContain('task_comment');
+      expect(result).toContain('task_config');
     });
   });
 

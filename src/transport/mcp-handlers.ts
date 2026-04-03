@@ -9,7 +9,6 @@ import { writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { AppContext } from '../context.js';
-import type { CollaboratorRole } from '../types.js';
 import { ValidationError, type TaskRelationshipType } from '../types.js';
 import { generateRules } from '../domain/rules.js';
 
@@ -157,16 +156,32 @@ export function handleGet(ctx: AppContext, args: Record<string, unknown>): unkno
   const task = ctx.tasks.getById(taskId);
   if (!task) throw new ValidationError(`Task ${taskId} not found.`);
   const deps = ctx.tasks.getDependencies(taskId);
-  const artifacts = ctx.tasks.getArtifacts(taskId);
   const collaborators = ctx.collaborators.list(taskId);
   const commentCounts = ctx.comments.countByTaskIds([taskId]);
-  return {
+
+  const include = optStringArray(args, 'include') ?? [];
+  const result: Record<string, unknown> = {
     ...task,
-    artifacts,
     comments_count: commentCounts[taskId] ?? 0,
     dependencies: deps,
     collaborators,
   };
+
+  if (include.includes('subtasks')) {
+    result.subtasks = ctx.tasks.getSubtasks(taskId);
+  }
+
+  if (include.includes('artifacts')) {
+    result.artifacts = ctx.tasks.getArtifacts(taskId, optString(args, 'stage'));
+  } else {
+    result.artifacts = ctx.tasks.getArtifacts(taskId);
+  }
+
+  if (include.includes('comments')) {
+    result.comments = ctx.comments.list(taskId, optNumber(args, 'limit'));
+  }
+
+  return result;
 }
 
 export function handleList(
@@ -216,24 +231,61 @@ export function handleList(
   });
 }
 
-export function handleClaim(
-  ctx: AppContext,
-  args: Record<string, unknown>,
-  session: SessionState,
-): unknown {
-  const claimer = optString(args, 'claimer') ?? sessionName(session);
-  return ctx.tasks.claim(requireNumber(args, 'task_id'), claimer);
-}
-
 export function handleUpdate(ctx: AppContext, args: Record<string, unknown>): unknown {
-  return ctx.tasks.update(requireNumber(args, 'task_id'), {
-    title: optString(args, 'title'),
-    description: optString(args, 'description'),
-    priority: optNumber(args, 'priority'),
-    project: optString(args, 'project'),
-    tags: optStringArray(args, 'tags'),
-    assigned_to: optString(args, 'assign_to'),
-  });
+  const taskId = requireNumber(args, 'task_id');
+
+  const dep = args.dependency as Record<string, unknown> | undefined;
+  if (dep && typeof dep === 'object') {
+    const depAction = validateEnum(
+      dep.action as string | undefined,
+      ['add', 'remove'] as const,
+      'dependency.action',
+    );
+    const dependsOn = dep.depends_on;
+    if (typeof dependsOn !== 'number') {
+      throw new ValidationError('"dependency.depends_on" is required and must be a number.');
+    }
+    if (depAction === 'add') {
+      const relationship = optionalEnum(
+        dep.relationship as string | undefined,
+        ['blocks', 'related', 'duplicate'] as const,
+        'dependency.relationship',
+        'blocks' as TaskRelationshipType,
+      );
+      ctx.tasks.addDependency(taskId, dependsOn, relationship);
+    } else {
+      ctx.tasks.removeDependency(taskId, dependsOn);
+    }
+  }
+
+  const hasMetadataUpdate =
+    optString(args, 'title') !== undefined ||
+    optString(args, 'description') !== undefined ||
+    optNumber(args, 'priority') !== undefined ||
+    optString(args, 'project') !== undefined ||
+    optStringArray(args, 'tags') !== undefined ||
+    args.assign_to !== undefined;
+
+  if (hasMetadataUpdate) {
+    return ctx.tasks.update(taskId, {
+      title: optString(args, 'title'),
+      description: optString(args, 'description'),
+      priority: optNumber(args, 'priority'),
+      project: optString(args, 'project'),
+      tags: optStringArray(args, 'tags'),
+      assigned_to: optString(args, 'assign_to'),
+    });
+  }
+
+  if (dep) {
+    return {
+      success: true,
+      task_id: taskId,
+      dependency: dep,
+    };
+  }
+
+  return ctx.tasks.update(taskId, {});
 }
 
 export function handleDelete(ctx: AppContext, args: Record<string, unknown>): unknown {
@@ -241,21 +293,8 @@ export function handleDelete(ctx: AppContext, args: Record<string, unknown>): un
   return { success: true };
 }
 
-export function handleComment(
-  ctx: AppContext,
-  args: Record<string, unknown>,
-  session: SessionState,
-): unknown {
-  return ctx.comments.add(
-    requireNumber(args, 'task_id'),
-    sessionName(session),
-    requireString(args, 'content'),
-    optNumber(args, 'parent_comment_id'),
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Consolidated: task_stage (advance, regress, complete, fail, cancel)
+// Consolidated: task_stage (claim, advance, regress, complete, fail, cancel)
 // ---------------------------------------------------------------------------
 
 export function handleStage(
@@ -265,10 +304,15 @@ export function handleStage(
 ): unknown {
   const action = validateEnum(
     optString(args, 'action'),
-    ['advance', 'regress', 'complete', 'fail', 'cancel'] as const,
+    ['claim', 'advance', 'regress', 'complete', 'fail', 'cancel'] as const,
     'action',
   );
   const taskId = requireNumber(args, 'task_id');
+
+  if (action === 'claim') {
+    const claimer = optString(args, 'claimer') ?? sessionName(session);
+    return ctx.tasks.claim(taskId, claimer);
+  }
 
   if (action === 'advance') {
     const advanceComment = optString(args, 'comment');
@@ -296,31 +340,7 @@ export function handleStage(
 }
 
 // ---------------------------------------------------------------------------
-// Consolidated: task_query (subtasks, artifacts, comments)
-// ---------------------------------------------------------------------------
-
-export function handleQuery(ctx: AppContext, args: Record<string, unknown>): unknown {
-  const type = validateEnum(
-    optString(args, 'type'),
-    ['subtasks', 'artifacts', 'comments'] as const,
-    'type',
-  );
-  const taskId = requireNumber(args, 'task_id');
-
-  if (type === 'subtasks') {
-    return ctx.tasks.getSubtasks(taskId);
-  }
-
-  if (type === 'artifacts') {
-    return ctx.tasks.getArtifacts(taskId, optString(args, 'stage'));
-  }
-
-  // type === 'comments'
-  return ctx.comments.list(taskId, optNumber(args, 'limit'));
-}
-
-// ---------------------------------------------------------------------------
-// Consolidated: task_artifact (general, decision, learning)
+// Consolidated: task_artifact (general, decision, learning, comment)
 // ---------------------------------------------------------------------------
 
 export function handleArtifact(
@@ -330,7 +350,7 @@ export function handleArtifact(
 ): unknown {
   const type = validateEnum(
     optString(args, 'type'),
-    ['general', 'decision', 'learning'] as const,
+    ['general', 'decision', 'learning', 'comment'] as const,
     'type',
   );
   const taskId = requireNumber(args, 'task_id');
@@ -363,12 +383,21 @@ export function handleArtifact(
     return ctx.tasks.addArtifact(taskId, 'decision', decisionContent, 'system', decisionStage);
   }
 
-  // type === 'learning'
-  return ctx.tasks.learn(
+  if (type === 'learning') {
+    return ctx.tasks.learn(
+      taskId,
+      requireString(args, 'content'),
+      optString(args, 'category') ?? 'technique',
+      sessionName(session),
+    );
+  }
+
+  // type === 'comment'
+  return ctx.comments.add(
     taskId,
-    requireString(args, 'content'),
-    optString(args, 'category') ?? 'technique',
     sessionName(session),
+    requireString(args, 'content'),
+    optNumber(args, 'parent_comment_id'),
   );
 }
 
@@ -485,107 +514,6 @@ function handleGenerateRules(ctx: AppContext, args: Record<string, unknown>): un
   return { rules: generateRules(format, stages, project) };
 }
 
-export function handleDependency(ctx: AppContext, args: Record<string, unknown>): unknown {
-  const action = validateEnum(optString(args, 'action'), ['add', 'remove'] as const, 'action');
-  if (action === 'add') {
-    const relationship = optionalEnum(
-      optString(args, 'relationship'),
-      ['blocks', 'related', 'duplicate'] as const,
-      'relationship',
-      'blocks' as TaskRelationshipType,
-    );
-    ctx.tasks.addDependency(
-      requireNumber(args, 'task_id'),
-      requireNumber(args, 'depends_on'),
-      relationship,
-    );
-    return { success: true, task_id: args.task_id, depends_on: args.depends_on, relationship };
-  }
-  ctx.tasks.removeDependency(requireNumber(args, 'task_id'), requireNumber(args, 'depends_on'));
-  return { success: true };
-}
-
-export function handleCollaborator(ctx: AppContext, args: Record<string, unknown>): unknown {
-  const action = validateEnum(optString(args, 'action'), ['add', 'remove'] as const, 'action');
-  if (action === 'add') {
-    return ctx.collaborators.add(
-      requireNumber(args, 'task_id'),
-      requireString(args, 'agent_id'),
-      optionalEnum(
-        optString(args, 'role'),
-        ['collaborator', 'reviewer', 'watcher'] as const,
-        'role',
-        'collaborator' as CollaboratorRole,
-      ),
-    );
-  }
-  ctx.collaborators.remove(requireNumber(args, 'task_id'), requireString(args, 'agent_id'));
-  return { success: true };
-}
-
-export function handleApproval(
-  ctx: AppContext,
-  args: Record<string, unknown>,
-  session: SessionState,
-): unknown {
-  const action = validateEnum(
-    optString(args, 'action'),
-    ['request', 'approve', 'reject', 'list', 'review'] as const,
-    'action',
-  );
-
-  if (action === 'request') {
-    const taskId = requireNumber(args, 'task_id');
-    const task = ctx.tasks.getById(taskId);
-    if (!task) throw new ValidationError(`Task ${taskId} not found.`);
-    const stage = optString(args, 'stage') ?? task.stage;
-    return ctx.approvals.request(taskId, stage, optString(args, 'reviewer'));
-  }
-
-  if (action === 'approve') {
-    return ctx.approvals.approve(
-      requireNumber(args, 'approval_id'),
-      sessionName(session),
-      optString(args, 'comment'),
-    );
-  }
-
-  if (action === 'reject') {
-    const approval = ctx.approvals.reject(
-      requireNumber(args, 'approval_id'),
-      sessionName(session),
-      requireString(args, 'comment'),
-    );
-    const regressTo = optString(args, 'regress_to');
-    if (regressTo) {
-      ctx.tasks.regress(approval.task_id, regressTo, requireString(args, 'comment'));
-    }
-    return approval;
-  }
-
-  if (action === 'list') {
-    return ctx.approvals.getPending(optString(args, 'reviewer'));
-  }
-
-  // action === 'review'
-  const taskId = requireNumber(args, 'task_id');
-  const decision = requireString(args, 'decision');
-  const task = ctx.tasks.getById(taskId);
-  if (!task) throw new ValidationError(`Task ${taskId} not found.`);
-
-  if (decision === 'approve') {
-    ctx.tasks.advance(taskId);
-    return { success: true, action: 'approved', task: ctx.tasks.getById(taskId) };
-  } else if (decision === 'reject') {
-    const reason = requireString(args, 'reason');
-    const regressTo = optString(args, 'regress_to') ?? 'implement';
-    ctx.tasks.regress(taskId, regressTo, reason);
-    return { success: true, action: 'rejected', task: ctx.tasks.getById(taskId) };
-  } else {
-    throw new ValidationError(`Invalid decision: ${decision}. Use "approve" or "reject".`);
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Dispatch map
 // ---------------------------------------------------------------------------
@@ -594,15 +522,9 @@ export const handlers: Record<string, HandlerFn> = {
   task_create: handleCreate,
   task_get: handleGet,
   task_list: handleList,
-  task_claim: handleClaim,
   task_update: handleUpdate,
   task_delete: handleDelete,
-  task_comment: handleComment,
   task_stage: handleStage,
-  task_query: handleQuery,
   task_artifact: handleArtifact,
   task_config: handleConfig,
-  task_dependency: handleDependency,
-  task_collaborator: handleCollaborator,
-  task_approval: handleApproval,
 };

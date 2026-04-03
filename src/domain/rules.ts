@@ -31,26 +31,23 @@ Tasks flow through stages: ${stages.filter((s) => s !== 'cancelled').join(' → 
 
 ## Rules
 
-1. **Always check for work first**: Call \`task_next\` to find available tasks
-2. **Claim before working**: Call \`task_claim\` before starting implementation
+1. **Always check for work first**: Call \`task_list(next: true)\` to find available tasks
+2. **Claim before working**: Call \`task_stage(action: "claim")\` before starting implementation
 3. **Advance through stages**: Use \`task_stage(action: "advance")\` — never skip stages
 4. **Attach artifacts**: Use \`task_artifact(type: "general")\` at each stage (specs, plans, test results, review notes)
-5. **Comment on decisions**: Use \`task_comment\` to record reasoning and tradeoffs
+5. **Comment on decisions**: Use \`task_artifact(type: "comment")\` to record reasoning and tradeoffs
 6. **Complete with results**: Use \`task_stage(action: "complete")\` with a summary of what was done
 7. **Create subtasks**: Break large tasks into subtasks with \`task_create\` using \`parent_id\`
 
 ## Available Tools
 
 - \`task_create\` — Create a task (title, description, priority, project, tags, parent_id)
-- \`task_list\` — List tasks (filter by status, stage, project, assignee)
-- \`task_claim\` — Claim and start working on a task
-- \`task_stage\` — Lifecycle transitions (advance, regress, complete, fail, cancel)
-- \`task_artifact\` — Attach artifacts (general, decision, learning)
-- \`task_query\` — Query subtasks, artifacts, comments
-- \`task_comment\` — Add discussion comment
-- \`task_search\` — Full-text search across tasks
-- \`task_next\` — Get highest-priority unblocked task
-- \`task_approval\` — Approve or reject during review
+- \`task_get\` — Get task details (use include for subtasks, artifacts, comments)
+- \`task_list\` — List/search/pick-next tasks (filter by status, stage, project, assignee)
+- \`task_update\` — Update metadata and dependencies
+- \`task_delete\` — Delete a task (cascading)
+- \`task_stage\` — Lifecycle transitions (claim, advance, regress, complete, fail, cancel)
+- \`task_artifact\` — Attach artifacts and comments (general, decision, learning, comment)
 - \`task_config\` — Pipeline config, session, cleanup, rules
 `;
 }
@@ -62,13 +59,13 @@ function generateClaudeMd(stages: string[], project?: string): string {
 Tasks flow through: ${stages.filter((s) => s !== 'cancelled').join(' → ')}
 
 ### Workflow
-1. Check \`task_next\` for available work
-2. \`task_claim\` before starting
+1. Check \`task_list(next: true)\` for available work
+2. \`task_stage(action: "claim")\` before starting
 3. \`task_stage(action: "advance")\` through stages — attach artifacts at each stage
-4. \`task_comment\` to record decisions
+4. \`task_artifact(type: "comment")\` to record decisions
 5. \`task_stage(action: "complete")\` with summary
 
 ### Key Tools
-\`task_create\`, \`task_list\`, \`task_claim\`, \`task_stage\`, \`task_artifact\`, \`task_query\`, \`task_comment\`, \`task_search\`, \`task_next\`, \`task_approval\`, \`task_config\`
+\`task_create\`, \`task_get\`, \`task_list\`, \`task_update\`, \`task_delete\`, \`task_stage\`, \`task_artifact\`, \`task_config\`
 `;
 }
