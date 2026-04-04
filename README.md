@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-378%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-355%20passing-brightgreen)]()
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-8-purple)]()
 [![REST Endpoints](https://img.shields.io/badge/REST-18%20endpoints-orange)]()
 
@@ -137,7 +137,7 @@ POST /api/cleanup                     Trigger manual cleanup
 ## Testing
 
 ```bash
-npm test              # 337 tests across 12 suites
+npm test              # 355 tests across 13 files
 npm run test:watch    # Watch mode
 npm run test:coverage # Coverage report
 npm run check         # Full CI: typecheck + lint + format + test

@@ -4,11 +4,11 @@
 // Stale Task Cleanup (SessionStart hook)
 //
 // On session start, finds tasks assigned to sessions that are no longer running
-// (no matching hub-session.*.json with a live PID) and auto-fails them.
+// (no online agent in agent-comm DB) and auto-fails them.
 // Catches tasks orphaned by crashes/kills where Stop hook never fired.
 // =============================================================================
 
-import { readFileSync, readdirSync, existsSync, writeFileSync } from 'fs';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import Database from 'better-sqlite3';
@@ -16,21 +16,16 @@ import Database from 'better-sqlite3';
 const DB_PATH = process.env.AGENT_TASKS_DB || join(homedir(), '.agent-tasks', 'agent-tasks.db');
 
 function getActiveSessions() {
-  const claudeDir = join(homedir(), '.claude');
+  const agentCommDb = join(homedir(), '.agent-comm', 'agent-comm.db');
   const active = new Set();
-  for (const dir of [join(claudeDir, 'sessions'), claudeDir]) {
-    try {
-      const files = readdirSync(dir).filter(
-        (f) => f.startsWith('hub-session.') && f.endsWith('.json'),
-      );
-      for (const f of files) {
-        try {
-          const info = JSON.parse(readFileSync(join(dir, f), 'utf-8'));
-          if (info.name) active.add(info.name);
-        } catch {}
-      }
-    } catch {}
-  }
+  try {
+    const db = new Database(agentCommDb, { readonly: true, fileMustExist: true });
+    const rows = db.prepare(`SELECT name FROM agents WHERE status = 'online'`).all();
+    db.close();
+    for (const row of rows) {
+      if (row.name) active.add(row.name);
+    }
+  } catch {}
   return active;
 }
 

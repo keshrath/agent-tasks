@@ -9,7 +9,7 @@
 // Attempt 2: Auto-fail all orphaned tasks directly in the DB, allow stop.
 // =============================================================================
 
-import { readFileSync, readdirSync, existsSync, writeFileSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import Database from 'better-sqlite3';
@@ -19,21 +19,17 @@ const COUNTER_FILE = join(homedir(), '.claude', 'task-cleanup-counter.json');
 const DB_PATH = process.env.AGENT_TASKS_DB || join(homedir(), '.agent-tasks', 'agent-tasks.db');
 
 function getSessionName() {
-  const claudeDir = join(homedir(), '.claude');
-  const ppid = process.ppid;
-  for (const dir of [join(claudeDir, 'sessions'), claudeDir]) {
-    try {
-      const files = readdirSync(dir).filter(
-        (f) => f.startsWith('hub-session.') && f.endsWith('.json'),
-      );
-      for (const f of files) {
-        try {
-          const info = JSON.parse(readFileSync(join(dir, f), 'utf-8'));
-          if (info.pid === ppid) return info.name;
-        } catch {}
-      }
-    } catch {}
-  }
+  const agentCommDb = join(homedir(), '.agent-comm', 'agent-comm.db');
+  try {
+    const db = new Database(agentCommDb, { readonly: true, fileMustExist: true });
+    const row = db
+      .prepare(
+        `SELECT name FROM agents WHERE status = 'online' ORDER BY last_heartbeat DESC LIMIT 1`,
+      )
+      .get();
+    db.close();
+    if (row && row.name) return row.name;
+  } catch {}
   return null;
 }
 

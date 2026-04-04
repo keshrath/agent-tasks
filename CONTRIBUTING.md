@@ -49,7 +49,7 @@ In a typical development session, run `npm run dev` in one terminal to watch Typ
 The test suite uses [Vitest](https://vitest.dev/) with in-memory SQLite databases. Each test gets a fresh context via `createTestContext()` from `tests/helpers.ts`.
 
 ```bash
-npm test              # Run all tests (337 across 12 suites)
+npm test              # Run all tests (355 across 13 files)
 npm run test:watch    # Watch mode — reruns on file changes
 npm run test:coverage # Coverage report (v8 provider)
 ```

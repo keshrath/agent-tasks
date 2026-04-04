@@ -5,9 +5,6 @@
 // map in mcp.ts. Validation helpers are co-located here.
 // =============================================================================
 
-import { writeFileSync, mkdirSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
 import type { AppContext } from '../context.js';
 import { ValidationError, type TaskRelationshipType } from '../types.js';
 import { generateRules } from '../domain/rules.js';
@@ -93,28 +90,6 @@ function optionalEnum<T extends string>(
   if (val === undefined || val === null) return defaultVal;
   if (!allowed.includes(val as T)) throw new ValidationError(`Invalid ${label}: ${val}`);
   return val as T;
-}
-
-// ---------------------------------------------------------------------------
-// Session file helper
-// ---------------------------------------------------------------------------
-
-function writeSessionFile(id: string, name: string): void {
-  try {
-    const claudeDir = join(homedir(), '.claude');
-    mkdirSync(claudeDir, { recursive: true });
-    const filePath = join(claudeDir, `hub-session.${id}.json`);
-    writeFileSync(
-      filePath,
-      JSON.stringify({ pid: process.pid, name, id, timestamp: new Date().toISOString() }),
-    );
-  } catch (err) {
-    process.stderr.write(
-      '[agent-tasks] writeSessionFile: ' +
-        (err instanceof Error ? err.message : String(err)) +
-        '\n',
-    );
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -424,7 +399,6 @@ export function handleConfig(
     const id = requireString(args, 'id');
     const sName = requireString(args, 'name');
     session.current = { id, name: sName };
-    writeSessionFile(id, sName);
     return { success: true, id, name: sName };
   }
 

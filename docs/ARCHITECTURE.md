@@ -6,6 +6,7 @@
 src/
 ├── types.ts              # Shared types, error hierarchy (TasksError -> NotFound/Conflict/Validation)
 ├── context.ts            # DI root — creates and wires all services, no global state
+├── package-meta.ts       # Reads name/version from package.json (MCP initialize, WebSocket state)
 ├── index.ts              # MCP entry point (stdio JSON-RPC) + dashboard auto-start
 ├── server.ts             # HTTP + WebSocket server (standalone or embedded)
 ├── domain/
@@ -20,7 +21,7 @@ src/
 ├── storage/
 │   └── database.ts       # SQLite (WAL mode, schema versioning, FK cascades, FTS5)
 ├── transport/
-│   ├── mcp.ts            # 13 MCP tool definitions + dispatch
+│   ├── mcp.ts            # 8 MCP tool definitions + dispatch (handlers: mcp-handlers.ts)
 │   ├── rest.ts           # 19 REST endpoints + static file serving
 │   └── ws.ts             # WebSocket event streaming + livereload
 └── ui/

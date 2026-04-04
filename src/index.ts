@@ -8,22 +8,15 @@
 // =============================================================================
 
 import { createInterface } from 'readline';
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { createContext } from './context.js';
+import { readPackageMeta } from './package-meta.js';
 import { tools, createToolHandler } from './transport/mcp.js';
 import { startDashboard, type DashboardServer } from './server.js';
 import type { JsonRpcRequest, JsonRpcResponse } from './types.js';
 
-const __dirname_index = dirname(fileURLToPath(import.meta.url));
-const pkgVersion: string = JSON.parse(
-  readFileSync(join(__dirname_index, '..', 'package.json'), 'utf8'),
-).version;
-
 const DASHBOARD_PORT = parseInt(process.env.AGENT_TASKS_PORT ?? '3422', 10);
 
-const SERVER_INFO = { name: 'agent-tasks', version: pkgVersion };
+const SERVER_INFO = readPackageMeta();
 const CAPABILITIES = { tools: {} };
 
 const INSTRUCTIONS =
@@ -33,22 +26,22 @@ const INSTRUCTIONS =
       'Use task_next to pick up unblocked work. Add comments (task_comment) to discuss decisions.'
     : '';
 
-function send(response: JsonRpcResponse): void {
+function writeJsonRpcResponse(response: JsonRpcResponse): void {
   process.stdout.write(JSON.stringify(response) + '\n');
 }
 
 function main() {
-  const ctx = createContext();
-  const handleTool = createToolHandler(ctx);
+  const appContext = createContext();
+  const handleTool = createToolHandler(appContext);
   let dashboard: DashboardServer | null = null;
   let dashboardStarted = false;
 
   function tryStartDashboard(): void {
     if (dashboardStarted) return;
     dashboardStarted = true;
-    startDashboard(ctx, DASHBOARD_PORT)
-      .then((d) => {
-        dashboard = d;
+    startDashboard(appContext, DASHBOARD_PORT)
+      .then((dashboardServer) => {
+        dashboard = dashboardServer;
       })
       .catch((err) => {
         process.stderr.write(
@@ -113,8 +106,8 @@ function main() {
           const result = handleTool(toolName, toolArgs);
           if (result && typeof result === 'object' && 'then' in result) {
             (result as Promise<unknown>)
-              .then((resolved) => send(makeToolResponse(id, resolved)))
-              .catch((err) => send(makeToolError(id, err)));
+              .then((resolved) => writeJsonRpcResponse(makeToolResponse(id, resolved)))
+              .catch((err) => writeJsonRpcResponse(makeToolError(id, err)));
             return null;
           }
           return makeToolResponse(id, result);
@@ -135,23 +128,27 @@ function main() {
     }
   }
 
-  const rl = createInterface({ input: process.stdin, terminal: false });
+  const stdioReadline = createInterface({ input: process.stdin, terminal: false });
 
-  rl.on('line', (line: string) => {
+  stdioReadline.on('line', (line: string) => {
     if (!line.trim()) return;
     try {
       const request = JSON.parse(line) as JsonRpcRequest;
       const response = handleRequest(request);
-      if (response) send(response);
+      if (response) writeJsonRpcResponse(response);
     } catch {
-      send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+      writeJsonRpcResponse({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32700, message: 'Parse error' },
+      });
     }
   });
 
   // --- Graceful shutdown ---
   function cleanup() {
     if (dashboard) dashboard.close();
-    ctx.close();
+    appContext.close();
   }
   process.on('SIGINT', () => {
     cleanup();

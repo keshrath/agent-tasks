@@ -293,7 +293,7 @@ Catches tasks orphaned by sessions that crashed, were killed, or otherwise ended
 
 On every session start:
 
-1. Finds all tasks assigned to sessions that no longer have a `hub-session.*.json` file
+1. Finds all tasks assigned to sessions that are no longer online in the agent-comm DB
 2. Auto-fails them with reason `"Session no longer running (stale task cleanup on session start)"`
 3. Logs the cleanup to stderr
 
@@ -593,7 +593,7 @@ The database uses schema versioning (currently V4) with automatic migrations. Mi
 ### Task cleanup hooks not working
 
 - Both cleanup hooks require `better-sqlite3` (included in agent-tasks dependencies — run `npm install` in the agent-tasks directory)
-- The stop hook identifies sessions via `hub-session.*.json` files written by `task_set_session` — ensure your session calls this tool on startup
+- The stop hook identifies sessions via the agent-comm DB — ensure your session calls `comm_register` on startup
 - Check stderr for `[task-cleanup-start]` messages on session start
 - The counter file at `~/.claude/task-cleanup-counter.json` can be deleted to reset block state
 
