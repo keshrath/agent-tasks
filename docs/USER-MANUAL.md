@@ -180,7 +180,7 @@ The dashboard connects via WebSocket. The server polls the SQLite database every
 
 ## 5. MCP Tools Reference
 
-agent-tasks exposes 14 MCP tools organized by function.
+agent-tasks exposes **8 action-based MCP tools**. Older releases had 14+ tools; the consolidation merged the per-action tools (`task_claim`, `task_advance`, `task_complete`, `task_fail`, `task_query`, `task_dependency`, `task_collaborator`, `task_approval`, `task_get_subtasks`, etc.) into the action-based tools below to keep prompt overhead minimal.
 
 ### task_create
 
@@ -210,19 +210,27 @@ task_create with title "Write unit tests", parent_id 42
 
 ### task_get
 
-Get a single task by ID with full details including artifact count, comment count, dependencies, and collaborators.
+Get a single task by ID with full details. Optionally include subtasks, artifacts, and comments in one call.
 
 **Parameters:**
 
-| Name      | Type   | Required | Description         |
-| --------- | ------ | -------- | ------------------- |
-| `task_id` | number | Yes      | Task ID to retrieve |
+| Name      | Type     | Required | Description                                                                     |
+| --------- | -------- | -------- | ------------------------------------------------------------------------------- |
+| `task_id` | number   | Yes      | Task ID to retrieve                                                             |
+| `include` | string[] | No       | Any combination of `"subtasks"`, `"artifacts"`, `"comments"`                    |
+| `stage`   | string   | No       | Filter artifacts by stage (only when `include` contains `"artifacts"`)          |
+| `limit`   | number   | No       | Max comments to return (only when `include` contains `"comments"`, default 100) |
 
-**Example:**
+**Examples:**
 
 ```
 task_get with task_id 42
+task_get with task_id 42, include ["subtasks", "artifacts"]
+task_get with task_id 42, include ["artifacts"], stage "implement"
+task_get with task_id 42, include ["comments"], limit 50
 ```
+
+> Replaces the former `task_get_subtasks`, `task_get_artifacts`, `task_get_comments`, and `task_query` tools.
 
 ---
 
@@ -258,46 +266,33 @@ task_list with next true, agent "my-agent"
 
 ---
 
-### task_claim
-
-Claim a pending task. Assigns it to you and advances from backlog to spec.
-
-**Parameters:**
-
-| Name      | Type   | Required | Description                                        |
-| --------- | ------ | -------- | -------------------------------------------------- |
-| `task_id` | number | Yes      | Task ID to claim                                   |
-| `claimer` | string | No       | Agent name claiming (uses session name if omitted) |
-
-**Example:**
-
-```
-task_claim with task_id 42
-```
-
----
-
 ### task_update
 
-Update task metadata. Does not change stage or status (use `task_stage` for that).
+Update task metadata. Also handles dependency add/remove inline. Does not change stage or status (use `task_stage` for that).
 
 **Parameters:**
 
-| Name          | Type     | Required | Description                             |
-| ------------- | -------- | -------- | --------------------------------------- |
-| `task_id`     | number   | Yes      | Task ID                                 |
-| `title`       | string   | No       | New title                               |
-| `description` | string   | No       | New description                         |
-| `priority`    | number   | No       | New priority                            |
-| `project`     | string   | No       | New project                             |
-| `tags`        | string[] | No       | New tags                                |
-| `assign_to`   | string   | No       | New assignee (empty string to unassign) |
+| Name          | Type     | Required | Description                                                                                                                                                              |
+| ------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `task_id`     | number   | Yes      | Task ID                                                                                                                                                                  |
+| `title`       | string   | No       | New title                                                                                                                                                                |
+| `description` | string   | No       | New description                                                                                                                                                          |
+| `priority`    | number   | No       | New priority                                                                                                                                                             |
+| `project`     | string   | No       | New project                                                                                                                                                              |
+| `tags`        | string[] | No       | New tags                                                                                                                                                                 |
+| `assign_to`   | string   | No       | New assignee (empty string to unassign)                                                                                                                                  |
+| `dependency`  | object   | No       | Add or remove a dependency inline: `{ action: "add"\|"remove", depends_on: <task_id>, relationship?: "blocks"\|"related"\|"duplicate" }` (relationship only used on add) |
 
-**Example:**
+**Examples:**
 
 ```
 task_update with task_id 42, priority 20, tags ["urgent", "security"]
+task_update with task_id 42, dependency { action: "add", depends_on: 41 }
+task_update with task_id 42, dependency { action: "add", depends_on: 43, relationship: "related" }
+task_update with task_id 42, dependency { action: "remove", depends_on: 41 }
 ```
+
+> Dependency management is part of `task_update`; the former `task_dependency`, `task_add_dependency`, and `task_remove_dependency` tools are gone.
 
 ---
 
@@ -313,36 +308,17 @@ Delete a task and all its artifacts, comments, and dependencies (cascading). Can
 
 ---
 
-### task_comment
-
-Add a comment to a task. Supports threading via `parent_comment_id`. Comments also satisfy stage-gate `require_comment` checks.
-
-**Parameters:**
-
-| Name                | Type   | Required | Description                       |
-| ------------------- | ------ | -------- | --------------------------------- |
-| `task_id`           | number | Yes      | Task ID                           |
-| `content`           | string | Yes      | Comment text                      |
-| `parent_comment_id` | number | No       | Reply to this comment (threading) |
-
-**Example:**
-
-```
-task_comment with task_id 42, content "Test coverage looks good, 94% on auth module"
-```
-
----
-
 ### task_stage
 
-Move a task through its lifecycle.
+Move a task through its lifecycle. All claim/advance/regress/complete/fail/cancel transitions live here.
 
 **Parameters:**
 
 | Name      | Type   | Required | Description                                                                      |
 | --------- | ------ | -------- | -------------------------------------------------------------------------------- |
-| `action`  | string | Yes      | One of: `advance`, `regress`, `complete`, `fail`, `cancel`                       |
+| `action`  | string | Yes      | One of: `claim`, `advance`, `regress`, `complete`, `fail`, `cancel`              |
 | `task_id` | number | Yes      | Task ID                                                                          |
+| `claimer` | string | No       | Agent name claiming (claim only, uses session name if omitted)                   |
 | `stage`   | string | No       | Target stage (advance: optional, advances to next if omitted; regress: required) |
 | `comment` | string | No       | Comment (advance: optional, satisfies stage-gate require_comment check)          |
 | `reason`  | string | No       | Reason for regression, failure, or cancellation                                  |
@@ -351,6 +327,7 @@ Move a task through its lifecycle.
 **Examples:**
 
 ```
+task_stage with action "claim", task_id 42
 task_stage with action "advance", task_id 42
 task_stage with action "advance", task_id 42, stage "implement", comment "Spec approved"
 task_stage with action "regress", task_id 42, stage "plan", reason "Missing error handling"
@@ -365,28 +342,7 @@ task_stage with action "cancel", task_id 42, reason "Requirements changed"
 - Stage gate requirements (artifacts, comments, approvals) must be satisfied.
 - Cannot advance past the last stage (use `complete` instead).
 
----
-
-### task_query
-
-Read task-related data.
-
-**Parameters:**
-
-| Name      | Type   | Required | Description                                                       |
-| --------- | ------ | -------- | ----------------------------------------------------------------- |
-| `type`    | string | Yes      | One of: `subtasks`, `artifacts`, `comments`                       |
-| `task_id` | number | Yes      | Task ID                                                           |
-| `stage`   | string | No       | Filter artifacts by stage (only with type: "artifacts")           |
-| `limit`   | number | No       | Max comments to return (only with type: "comments", default: 100) |
-
-**Examples:**
-
-```
-task_query with type "subtasks", task_id 42
-task_query with type "artifacts", task_id 42, stage "implement"
-task_query with type "comments", task_id 42
-```
+> Replaces the former `task_claim`, `task_advance`, `task_regress`, `task_complete`, `task_fail`, and `task_cancel` tools.
 
 ---
 
@@ -509,93 +465,7 @@ task_config with action "rules", format "mdc", project "backend"
 
 ---
 
-### task_dependency
-
-Manage task dependencies.
-
-**Parameters:**
-
-| Name           | Type   | Required | Description                                                  |
-| -------------- | ------ | -------- | ------------------------------------------------------------ |
-| `action`       | string | Yes      | One of: `add`, `remove`                                      |
-| `task_id`      | number | Yes      | Task that depends on another                                 |
-| `depends_on`   | number | Yes      | Task that must complete first (blocks) or related task       |
-| `relationship` | string | No       | `blocks`, `related`, `duplicate` (default: blocks, add only) |
-
-**Examples:**
-
-```
-task_dependency with action "add", task_id 42, depends_on 41
-task_dependency with action "add", task_id 42, depends_on 43, relationship "related"
-task_dependency with action "remove", task_id 42, depends_on 41
-```
-
-**Error cases:**
-
-- Circular dependency detected -- adding a dependency that would create a cycle is rejected.
-
----
-
-### task_collaborator
-
-Manage task collaborators.
-
-**Parameters:**
-
-| Name       | Type   | Required | Description                                                             |
-| ---------- | ------ | -------- | ----------------------------------------------------------------------- |
-| `action`   | string | Yes      | One of: `add`, `remove`                                                 |
-| `task_id`  | number | Yes      | Task ID                                                                 |
-| `agent_id` | string | Yes      | Agent name or ID                                                        |
-| `role`     | string | No       | `collaborator`, `reviewer`, `watcher` (default: collaborator, add only) |
-
-**Examples:**
-
-```
-task_collaborator with action "add", task_id 42, agent_id "reviewer-agent", role "reviewer"
-task_collaborator with action "remove", task_id 42, agent_id "reviewer-agent"
-```
-
----
-
-### task_approval
-
-Manage approval workflows for stage gates.
-
-**Parameters:**
-
-| Name          | Type   | Required | Description                                                  |
-| ------------- | ------ | -------- | ------------------------------------------------------------ |
-| `action`      | string | Yes      | One of: `request`, `approve`, `reject`, `list`, `review`     |
-| `task_id`     | number | Varies   | Task ID (required for request and review)                    |
-| `approval_id` | number | Varies   | Approval ID (required for approve and reject)                |
-| `stage`       | string | No       | Stage requiring approval (request only, defaults to current) |
-| `reviewer`    | string | No       | Reviewer to assign (request) or filter by (list)             |
-| `comment`     | string | No       | Comment (optional for approve, required for reject)          |
-| `decision`    | string | No       | `approve` or `reject` (review action)                        |
-| `reason`      | string | No       | Rejection reason (required for review+reject)                |
-| `regress_to`  | string | No       | Stage to regress to on rejection (default: implement)        |
-
-**Examples:**
-
-```
-# Request approval
-task_approval with action "request", task_id 42, reviewer "lead-dev"
-
-# Approve
-task_approval with action "approve", approval_id 1, comment "Looks good"
-
-# Reject with regression
-task_approval with action "reject", approval_id 1, comment "Needs error handling", regress_to "implement"
-
-# Convenience: review = approve+advance or reject+regress in one call
-task_approval with action "review", task_id 42, decision "approve"
-task_approval with action "review", task_id 42, decision "reject", reason "Missing tests", regress_to "implement"
-
-# List pending
-task_approval with action "list"
-task_approval with action "list", reviewer "lead-dev"
-```
+> **Note on removed tools:** earlier releases had separate `task_dependency`, `task_collaborator`, and `task_approval` tools. The dependency tool was folded into `task_update` (see above). The `task_collaborator` and `task_approval` tools were removed entirely — the workflows they covered (multi-reviewer approvals, role-based collaboration) proved unused. If you need them back, they're recoverable from git history but consider whether the simpler stage-gate model in `task_config { action: "pipeline" }` is enough.
 
 ---
 
@@ -702,7 +572,7 @@ Tasks have both a **status** and a **stage**:
 
 Status transitions:
 
-- `pending` -> `in_progress` (via `task_claim`)
+- `pending` -> `in_progress` (via `task_stage` action `claim`)
 - `in_progress` -> `completed` (via `task_stage(action: "complete")`)
 - `in_progress` -> `failed` (via `task_stage(action: "fail")`)
 - Any non-terminal -> `cancelled` (via `task_stage(action: "cancel")`)
@@ -777,9 +647,9 @@ Learnings attached via `task_artifact(type: "learning")` are automatically propa
 
 **Common causes:**
 
-- **Unmet dependencies**: A blocking task is not yet completed. Check dependencies with `task_query(type: "subtasks")` or `task_dependency`.
+- **Unmet dependencies**: A blocking task is not yet completed. Check dependencies with `task_get` (`include: ["subtasks"]`) or `task_update` with the `dependency` field.
 - **Stage gate requirements**: Required artifacts, comments, or approvals are missing. The error message lists unmet requirements.
-- **Task not in progress**: Only `in_progress` tasks can be advanced. Claim the task first with `task_claim`.
+- **Task not in progress**: Only `in_progress` tasks can be advanced. Claim the task first with `task_stage` action `claim`.
 
 ### Stale Tasks
 
@@ -837,11 +707,12 @@ When configured via hooks, agent-tasks intercepts Claude Code's built-in `TodoWr
 
 ### Can multiple agents work on the same task?
 
-Yes, via collaborators. Use `task_collaborator(action: "add")` to add agents with roles:
+Not formally — the dedicated `task_collaborator` tool was removed in the consolidation. Today you have two options:
 
-- **collaborator**: Can work on the task.
-- **reviewer**: Reviews artifacts.
-- **watcher**: Gets notifications but does not participate.
+- **Sequential handoff**: agent A does its piece, calls `task_stage` to advance, agent B claims it (`task_stage` action `claim` with a different `claimer` name).
+- **Parent + subtasks**: split the task into N subtasks via `task_create` with `parent_id`, and assign each subtask to a different agent. The pipeline view shows the parent and its children together.
+
+If you genuinely need multi-agent collaborator semantics, the schema still has `task_collaborators`; it just isn't exposed via MCP. File an issue if you want it back.
 
 ### How do I reset the pipeline?
 

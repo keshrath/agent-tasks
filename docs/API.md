@@ -2,58 +2,37 @@
 
 agent-tasks exposes three transport layers: MCP (stdio), REST (HTTP), and WebSocket (real-time events).
 
-## MCP Tools (16)
+## MCP Tools (8)
+
+agent-tasks consolidates everything into 8 action-based tools to keep per-prompt overhead minimal.
 
 ### Task CRUD
 
-| Tool          | Description                                                                                     |
-| ------------- | ----------------------------------------------------------------------------------------------- |
-| `task_create` | Create a pipeline task (title, description, priority, project, tags, parent_id)                 |
-| `task_list`   | List tasks with filters (status, stage, project, assignee, collaborator, root_only, pagination) |
-| `task_next`   | Get the highest-priority unassigned unblocked task (with agent affinity scoring)                |
-| `task_claim`  | Claim a pending task — assigns it and advances from backlog                                     |
-| `task_update` | Update metadata (title, description, priority, tags, assignee)                                  |
-| `task_delete` | Delete a task with cascading cleanup of subtasks, comments, artifacts                           |
-| `task_search` | Full-text search across task titles and descriptions                                            |
+| Tool          | Description                                                                                                                                         |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_create` | Create a pipeline task (title, description, priority, project, tags, parent_id, assign_to, stage)                                                   |
+| `task_get`    | Get a task with optional `include: ["subtasks", "artifacts", "comments"]`. Replaces the former `task_get_subtasks/artifacts/comments` family.       |
+| `task_list`   | List/search tasks (filters: query, status, stage, project, assign_to, collaborator, root_only, parent_id, pagination)                               |
+| `task_update` | Update metadata (title, description, priority, project, tags, assign_to). Inline `dependency: { action, depends_on, relationship }` for add/remove. |
+| `task_delete` | Delete a task with cascading cleanup of subtasks, comments, artifacts                                                                               |
 
-### Lifecycle stage changes
+### Lifecycle
 
-| Tool         | Description                                                                                                                         |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `task_stage` | Manage lifecycle transitions via `action`: `advance` (next/specific stage), `regress` (earlier stage), `complete`, `fail`, `cancel` |
+| Tool         | Description                                                                                                                                                                                                                  |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_stage` | All lifecycle transitions via `action`: `claim` (assign to caller, advance from backlog), `advance` (next stage or specific via `stage`), `regress`, `complete`, `fail`, `cancel`. Optional `comment` and `result`/`reason`. |
 
-### Subtasks & dependencies
+### Artifacts
 
-| Tool              | Description                                                   |
-| ----------------- | ------------------------------------------------------------- |
-| `task_expand`     | Break a task into subtasks (inherits project and priority)    |
-| `task_dependency` | Add or remove a dependency between tasks (action: add/remove) |
-
-### Artifacts & queries
-
-| Tool            | Description                                                                                                                      |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `task_artifact` | Create artifacts via `type`: `general` (attach document), `decision` (chose/over/because), `learning` (insight, auto-propagated) |
-| `task_query`    | Query task data via `type`: `subtasks`, `artifacts` (filter by stage), `comments` (with limit)                                   |
-
-### Comments & collaboration
-
-| Tool                | Description                                                                               |
-| ------------------- | ----------------------------------------------------------------------------------------- |
-| `task_comment`      | Add a threaded comment to a task                                                          |
-| `task_collaborator` | Add or remove a collaborator (action: add/remove, roles: collaborator, reviewer, watcher) |
-
-### Approvals
-
-| Tool            | Description                                                   |
-| --------------- | ------------------------------------------------------------- |
-| `task_approval` | Manage approvals (action: request/approve/reject/list/review) |
+| Tool            | Description                                                                                                                                                                                     |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_artifact` | All artifact operations: attach a `general` document, record a `decision` (chose/over/because), capture a `learning` (auto-propagated to siblings on completion), or post a threaded `comment`. |
 
 ### Configuration & utilities
 
-| Tool          | Description                                                                                                                                                   |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `task_config` | Configuration via `action`: `pipeline` (get/set stages and gates), `session` (set identity), `cleanup` (retention/stale agents), `rules` (generate IDE rules) |
+| Tool          | Description                                                                                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_config` | Configuration via `action`: `pipeline` (get/set stages and gates), `session` (set agent identity), `cleanup` (retention/stale agents), `rules` (generate IDE rules) |
 
 ---
 

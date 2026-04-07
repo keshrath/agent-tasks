@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.18] - 2026-04-07
+
+### Documentation
+
+- **Major rewrite of `docs/USER-MANUAL.md`, `docs/API.md`, and `docs/SETUP.md`** to reflect the post-consolidation MCP tool surface (8 action-based tools, not 14+). The README and CLAUDE.md were already correct; this brings the deeper docs into alignment.
+- Removed standalone sections for tools that no longer exist as separate MCP entries: `task_query`, `task_claim`, `task_advance`, `task_complete`, `task_fail`, `task_dependency`, `task_collaborator`, `task_approval`, `task_get_subtasks`, `task_get_artifacts`, `task_get_comments`, `task_add_dependency`, `task_remove_dependency`, `task_request_approval`, `task_approve`, `task_reject`, `task_pending_approvals`, `task_review_cycle`, `task_next`, `task_search`, `task_expand`, `task_comment`, `task_learn`. Their behavior is now documented as actions on the surviving tools (`task_get` with `include`, `task_stage` actions, `task_artifact` types, `task_update.dependency`).
+- Added migration notes ("Replaces the former …") under each consolidated tool so readers landing from old docs / cached search results can find the new form.
+- FAQ entry on multi-agent collaboration rewritten — `task_collaborator` was removed, the workflow now uses sequential handoff or parent+subtasks.
+- Setup `task_complete` / `task_fail` / `task_advance` / `task_claim` references rewritten to the action-based forms.
+
+### Fixed
+
+- All three version files re-aligned to **1.9.18** (`package.json` was 1.9.17, `server.json` was 1.9.16, `agent-desk-plugin.json` was 1.9.16, plus the inner npm package version inside `server.json` had drifted to 1.9.15).
+
 ## [1.9.0] - 2026-03-30
 
 ### Removed

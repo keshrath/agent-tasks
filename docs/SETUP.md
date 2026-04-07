@@ -264,7 +264,7 @@ Replace `/path/to/agent-tasks` with the actual path (or use `npx` paths if insta
 
 Prevents sessions from ending with incomplete tasks. Runs on both `Stop` (main session) and `SubagentStop` (spawned agents).
 
-1. **First stop attempt**: Blocks and lists all incomplete tasks assigned to the session. Tells Claude to call `task_complete` or `task_fail` for each.
+1. **First stop attempt**: Blocks and lists all incomplete tasks assigned to the session. Tells Claude to call `task_stage` (action `complete` or `fail`) for each.
 2. **Second stop attempt**: Auto-fails all remaining tasks with reason `"Session ended without completing this task (auto-cleanup)"` and allows stop.
 
 ```mermaid
@@ -393,10 +393,10 @@ Pipeline stages: **backlog → spec → plan → implement → test → review �
 
 1. **Check for work first** — call `task_list` to see what's in flight
 2. **Create tasks** — `task_create` with title, description, priority, project
-3. **Claim it** — `task_claim` assigns it to your session
-4. **Do the work** — advance through stages with `task_advance`
-5. **Attach artifacts** — at each stage, use `task_add_artifact` (specs, plans, code summaries, test results)
-6. **Complete** — `task_complete` when done, `task_fail` if abandoned
+3. **Claim it** — `task_stage` with `action: "claim"` assigns it to your session and advances from backlog
+4. **Do the work** — advance through stages with `task_stage` (`action: "advance"`)
+5. **Attach artifacts** — at each stage, use `task_artifact` (specs, plans, code summaries, test results)
+6. **Complete** — `task_stage` with `action: "complete"` when done, or `action: "fail"` if abandoned
 
 ### Rules
 
@@ -404,7 +404,7 @@ Pipeline stages: **backlog → spec → plan → implement → test → review �
 - **Never skip stages** — move through spec → plan → implement → test → review
 - **Attach artifacts at each stage** — the pipeline is only useful if it shows what was decided/built/tested
 - **Always complete or fail your tasks before stopping**
-- Break large work into sub-tasks with `task_expand` or dependencies via `task_add_dependency`
+- Break large work into sub-tasks with `task_create` (`parent_id`) or dependencies via `task_update` (`dependency` field)
 
 ### Communicate around tasks (requires agent-comm)
 
@@ -535,7 +535,7 @@ This translates to:
 | `require_comment`       | `boolean`  | At least one comment must exist on the task           |
 | `require_approval`      | `boolean`  | An approved approval must exist for the current stage |
 
-If a gate check fails, `task_advance` returns an error explaining what's missing.
+If a gate check fails, `task_stage` (with `action: "advance"`) returns an error explaining what's missing.
 
 ---
 
