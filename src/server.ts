@@ -6,9 +6,15 @@
 // Standalone web server for the pipeline dashboard and REST API.
 // Can be started manually: node dist/server.js [--port 3422]
 // Or auto-started from the MCP server via leader election.
+// Built on agent-common's startDashboard for the leader-election + EADDRINUSE
+// handling boilerplate. The UI file watcher is wired in onListen.
 // =============================================================================
 
-import { createServer, type Server } from 'http';
+import {
+  startDashboard as startKitDashboard,
+  type DashboardServer as KitDashboard,
+} from 'agent-common';
+import type { Server } from 'http';
 import { watch } from 'fs';
 import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -25,44 +31,40 @@ export interface DashboardServer {
   close(): void;
 }
 
-/** Returns the argv element immediately after `flag`, or `undefined` if missing. */
 function getCliArgAfterFlag(argv: string[], flag: string): string | undefined {
   const i = argv.indexOf(flag);
   if (i === -1 || i + 1 >= argv.length) return undefined;
   return argv[i + 1];
 }
 
-export function startDashboard(ctx: AppContext, port = 3422): Promise<DashboardServer> {
-  return new Promise((resolve, reject) => {
-    const router = createRouter(ctx);
-    const httpServer = createServer(router);
+export async function startDashboard(ctx: AppContext, port = 3422): Promise<DashboardServer> {
+  const router = createRouter(ctx);
+  let wsHandle: WebSocketHandle | null = null;
+  let fileWatcher: ReturnType<typeof startFileWatcher> | null = null;
 
-    let wsHandle: WebSocketHandle | null = null;
-    let fileWatcher: ReturnType<typeof startFileWatcher> | null = null;
-
-    httpServer.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        reject(new Error(`Port ${port} in use`));
-      } else {
-        reject(err);
-      }
-    });
-
-    httpServer.listen(port, () => {
+  const kit: KitDashboard = await startKitDashboard({
+    port,
+    handler: router,
+    onListen: (httpServer) => {
       wsHandle = setupWebSocket(httpServer, ctx);
       fileWatcher = startFileWatcher(wsHandle);
-      process.stderr.write(`agent-tasks dashboard: http://localhost:${port}\n`);
-      resolve({
-        httpServer,
-        port,
+      return {
         close() {
           if (fileWatcher) fileWatcher.close();
           if (wsHandle) wsHandle.close();
-          httpServer.close();
         },
-      });
-    });
+      };
+    },
+    banner: (p) => `agent-tasks dashboard: http://localhost:${p}`,
   });
+
+  return {
+    httpServer: kit.httpServer,
+    port: kit.port,
+    close() {
+      kit.close();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
