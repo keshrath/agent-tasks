@@ -4,20 +4,20 @@
 // agent-tasks — MCP server entry point
 //
 // Pipeline-driven task management for AI coding agents.
-// Communicates via JSON-RPC 2.0 over stdio (Model Context Protocol).
+// Communicates via JSON-RPC 2.0 over stdio (Model Context Protocol) through
+// agent-common's startMcpServer. formatResult appends a pipeline-instructions
+// footer so AI clients are reminded of the stage lifecycle.
 // =============================================================================
 
-import { createInterface } from 'readline';
+import { startMcpServer } from 'agent-common';
 import { createContext } from './context.js';
 import { readPackageMeta } from './package-meta.js';
 import { tools, createToolHandler } from './transport/mcp.js';
 import { startDashboard, type DashboardServer } from './server.js';
-import type { JsonRpcRequest, JsonRpcResponse } from './types.js';
 
 const DASHBOARD_PORT = parseInt(process.env.AGENT_TASKS_PORT ?? '3422', 10);
 
 const SERVER_INFO = readPackageMeta();
-const CAPABILITIES = { tools: {} };
 
 const INSTRUCTIONS =
   process.env.AGENT_TASKS_INSTRUCTIONS !== '0'
@@ -26,139 +26,47 @@ const INSTRUCTIONS =
       'Use task_next to pick up unblocked work. Add comments (task_comment) to discuss decisions.'
     : '';
 
-function writeJsonRpcResponse(response: JsonRpcResponse): void {
-  process.stdout.write(JSON.stringify(response) + '\n');
+const appContext = createContext();
+const handleTool = createToolHandler(appContext);
+
+let dashboard: DashboardServer | null = null;
+let dashboardStarted = false;
+
+function tryStartDashboard(): void {
+  if (dashboardStarted) return;
+  dashboardStarted = true;
+  startDashboard(appContext, DASHBOARD_PORT)
+    .then((dashboardServer) => {
+      dashboard = dashboardServer;
+    })
+    .catch((err) => {
+      process.stderr.write(
+        '[agent-tasks] Dashboard start failed: ' +
+          (err instanceof Error ? err.message : String(err)) +
+          '\n',
+      );
+    });
 }
 
-function main() {
-  const appContext = createContext();
-  const handleTool = createToolHandler(appContext);
-  let dashboard: DashboardServer | null = null;
-  let dashboardStarted = false;
+startMcpServer({
+  serverInfo: SERVER_INFO,
+  tools,
+  handleTool,
+  onInitialize: tryStartDashboard,
+  formatResult: (result) => JSON.stringify(result, null, 2) + INSTRUCTIONS,
+  logLabel: 'agent-tasks',
+});
 
-  function tryStartDashboard(): void {
-    if (dashboardStarted) return;
-    dashboardStarted = true;
-    startDashboard(appContext, DASHBOARD_PORT)
-      .then((dashboardServer) => {
-        dashboard = dashboardServer;
-      })
-      .catch((err) => {
-        process.stderr.write(
-          '[agent-tasks] Dashboard start failed: ' +
-            (err instanceof Error ? err.message : String(err)) +
-            '\n',
-        );
-      });
-  }
-
-  function makeToolResponse(id: number | string, result: unknown): JsonRpcResponse {
-    const text = JSON.stringify(result, null, 2) + INSTRUCTIONS;
-    return {
-      jsonrpc: '2.0',
-      id,
-      result: { content: [{ type: 'text', text }] },
-    };
-  }
-
-  function makeToolError(id: number | string, err: unknown): JsonRpcResponse {
-    return {
-      jsonrpc: '2.0',
-      id,
-      result: {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
-          },
-        ],
-        isError: true,
-      },
-    };
-  }
-
-  function handleRequest(request: JsonRpcRequest): JsonRpcResponse | null {
-    const { method, params, id } = request;
-
-    switch (method) {
-      case 'initialize':
-        tryStartDashboard();
-        return {
-          jsonrpc: '2.0',
-          id,
-          result: {
-            protocolVersion: '2024-11-05',
-            serverInfo: SERVER_INFO,
-            capabilities: CAPABILITIES,
-          },
-        };
-
-      case 'notifications/initialized':
-        return null;
-
-      case 'tools/list':
-        return { jsonrpc: '2.0', id, result: { tools } };
-
-      case 'tools/call': {
-        const toolName = (params as { name: string }).name;
-        const toolArgs = (params as { arguments?: Record<string, unknown> }).arguments || {};
-        try {
-          const result = handleTool(toolName, toolArgs);
-          if (result && typeof result === 'object' && 'then' in result) {
-            (result as Promise<unknown>)
-              .then((resolved) => writeJsonRpcResponse(makeToolResponse(id, resolved)))
-              .catch((err) => writeJsonRpcResponse(makeToolError(id, err)));
-            return null;
-          }
-          return makeToolResponse(id, result);
-        } catch (err) {
-          return makeToolError(id, err);
-        }
-      }
-
-      case 'ping':
-        return { jsonrpc: '2.0', id, result: {} };
-
-      default:
-        return {
-          jsonrpc: '2.0',
-          id,
-          error: { code: -32601, message: `Method not found: ${method}` },
-        };
-    }
-  }
-
-  const stdioReadline = createInterface({ input: process.stdin, terminal: false });
-
-  stdioReadline.on('line', (line: string) => {
-    if (!line.trim()) return;
-    try {
-      const request = JSON.parse(line) as JsonRpcRequest;
-      const response = handleRequest(request);
-      if (response) writeJsonRpcResponse(response);
-    } catch {
-      writeJsonRpcResponse({
-        jsonrpc: '2.0',
-        id: null,
-        error: { code: -32700, message: 'Parse error' },
-      });
-    }
-  });
-
-  // --- Graceful shutdown ---
-  function cleanup() {
-    if (dashboard) dashboard.close();
-    appContext.close();
-  }
-  process.on('SIGINT', () => {
-    cleanup();
-    process.exit(0);
-  });
-  process.on('SIGTERM', () => {
-    cleanup();
-    process.exit(0);
-  });
-  process.on('exit', cleanup);
+function cleanup(): void {
+  if (dashboard) dashboard.close();
+  appContext.close();
 }
-
-main();
+process.on('SIGINT', () => {
+  cleanup();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  cleanup();
+  process.exit(0);
+});
+process.on('exit', cleanup);

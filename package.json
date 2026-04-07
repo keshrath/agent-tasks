@@ -1,6 +1,6 @@
 {
   "name": "agent-tasks",
-  "version": "1.9.22",
+  "version": "1.9.23",
   "description": "Pipeline-driven task management for AI coding agents — stages, dependencies, artifacts, and multi-agent claiming",
   "type": "module",
   "main": "dist/index.js",
@@ -48,7 +48,7 @@
     ]
   },
   "dependencies": {
-    "agent-common": "^1.0.2",
+    "agent-common": "^1.0.3",
     "better-sqlite3": "^12.8.0",
     "morphdom": "^2.7.8",
     "ws": "^8.20.0"
