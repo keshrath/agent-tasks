@@ -1,34 +1,24 @@
 // =============================================================================
 // agent-tasks — WebSocket transport
 //
-// Real-time event streaming to connected UI clients.
-// Full state sent on connect. Uses DB polling (2s) to detect changes
-// from other MCP processes, since each has its own in-memory EventBus.
+// Thin wrapper around agent-common's setupWebSocket. Streams full state on
+// any DB change (single scalar fingerprint over tasks + comments + artifacts).
+// Custom `subscribe` message type is handled via the onMessage callback;
+// per-client subscribed-event filters are stored in a side Map keyed by
+// WebSocket. The underlying broadcast() method is re-exposed for the UI
+// file watcher (hot reload).
 // =============================================================================
 
-import { WebSocketServer, WebSocket } from 'ws';
+import { setupWebSocket as setupKitWebSocket, type WsHandle } from 'agent-common';
 import type { Server } from 'http';
+import { WebSocket } from 'ws';
 import type { AppContext } from '../context.js';
 import type { EventType } from '../types.js';
 import { readPackageMeta } from '../package-meta.js';
 
 const packageMeta = readPackageMeta();
 
-const MAX_WS_MESSAGE_SIZE = 4096;
-const MAX_WS_CONNECTIONS = 50;
-const PING_INTERVAL_MS = 30_000;
-const DB_POLL_INTERVAL_MS = 2_000;
-
-export interface WebSocketHandle {
-  wss: WebSocketServer;
-  broadcast(message: string): void;
-  close(): void;
-}
-
-interface ClientState {
-  alive: boolean;
-  subscribedEvents: Set<EventType | '*'>;
-}
+export type WebSocketHandle = WsHandle;
 
 const VALID_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
   '*',
@@ -54,111 +44,11 @@ const VALID_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
 ]);
 
 export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHandle {
-  const wss = new WebSocketServer({ server: httpServer, maxPayload: MAX_WS_MESSAGE_SIZE });
-  const clients = new Map<WebSocket, ClientState>();
+  const subscribedByClient = new WeakMap<WebSocket, Set<EventType | '*'>>();
 
-  wss.on('connection', (ws: WebSocket) => {
-    if (wss.clients.size > MAX_WS_CONNECTIONS) {
-      ws.close(1013, 'Too many connections');
-      return;
-    }
-
-    const state: ClientState = {
-      alive: true,
-      subscribedEvents: new Set(),
-    };
-    clients.set(ws, state);
-
-    sendFullState(ws, ctx);
-
-    ws.on('pong', () => {
-      state.alive = true;
-    });
-
-    ws.on('message', (raw: Buffer) => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw.toString());
-      } catch {
-        ws.send(JSON.stringify({ type: 'error', message: 'Invalid JSON' }));
-        return;
-      }
-
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Message must be a JSON object' }));
-        return;
-      }
-
-      const msg = parsed as { type: string; [key: string]: unknown };
-
-      if (typeof msg.type !== 'string') {
-        ws.send(JSON.stringify({ type: 'error', message: 'Missing type field' }));
-        return;
-      }
-
-      switch (msg.type) {
-        case 'refresh':
-          sendFullState(ws, ctx);
-          break;
-
-        case 'subscribe': {
-          const events = msg.events;
-          if (!Array.isArray(events)) {
-            ws.send(
-              JSON.stringify({
-                type: 'error',
-                message: '"events" must be an array of event type strings',
-              }),
-            );
-            break;
-          }
-          state.subscribedEvents.clear();
-          for (const e of events) {
-            if (typeof e === 'string' && VALID_EVENT_TYPES.has(e)) {
-              state.subscribedEvents.add(e as EventType | '*');
-            }
-          }
-          ws.send(JSON.stringify({ type: 'subscribed', events: [...state.subscribedEvents] }));
-          break;
-        }
-
-        default: {
-          const safeType = String(msg.type)
-            .slice(0, 64)
-            .replace(/[<>&"']/g, '');
-          ws.send(JSON.stringify({ type: 'error', message: `Unknown message type: ${safeType}` }));
-        }
-      }
-    });
-
-    ws.on('error', () => {
-      clients.delete(ws);
-    });
-
-    ws.on('close', () => {
-      clients.delete(ws);
-    });
-  });
-
-  const pingInterval = setInterval(() => {
-    for (const [ws, state] of clients) {
-      if (!state.alive) {
-        ws.terminate();
-        clients.delete(ws);
-        continue;
-      }
-      state.alive = false;
-      ws.ping();
-    }
-  }, PING_INTERVAL_MS);
-  pingInterval.unref();
-
-  // Poll DB for changes from other processes (MCP stdio servers write directly).
-  // Computes a lightweight fingerprint of tasks and pushes full state on change.
-  let lastFingerprint = '';
-  const dbPollInterval = setInterval(() => {
-    if (clients.size === 0) return;
-    try {
+  return setupKitWebSocket({
+    httpServer,
+    getFingerprints: () => {
       const row = ctx.db.queryOne<{ fp: string }>(
         `SELECT
            (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at),'') || ':' || COALESCE(MAX(id),0) FROM tasks)
@@ -166,67 +56,50 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
            (SELECT COALESCE(MAX(id),0) FROM task_comments)
            || '|' ||
            (SELECT COALESCE(MAX(id),0) FROM task_artifacts)
-         as fp`,
+         AS fp`,
       );
-      const fp = row?.fp ?? '';
-      if (fp !== lastFingerprint) {
-        lastFingerprint = fp;
-        for (const [ws] of clients) {
-          if (ws.readyState === WebSocket.OPEN) {
-            sendFullState(ws, ctx);
-          }
+      return { pipeline: row?.fp ?? '' };
+    },
+    getCategoryData: () => buildStatePayload(ctx),
+    getFullState: () => ({ version: packageMeta.version, ...buildStatePayload(ctx) }),
+    onMessage: (ws, msg) => {
+      if (msg.type !== 'subscribe') return false;
+      const events = msg.events;
+      if (!Array.isArray(events)) {
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            message: '"events" must be an array of event type strings',
+          }),
+        );
+        return true;
+      }
+      const subs = new Set<EventType | '*'>();
+      for (const e of events) {
+        if (typeof e === 'string' && VALID_EVENT_TYPES.has(e)) {
+          subs.add(e as EventType | '*');
         }
       }
-    } catch (err) {
+      subscribedByClient.set(ws, subs);
+      ws.send(JSON.stringify({ type: 'subscribed', events: [...subs] }));
+      return true;
+    },
+    logError: (err) =>
       process.stderr.write(
-        '[agent-tasks] DB poll error: ' + (err instanceof Error ? err.message : String(err)) + '\n',
-      );
-    }
-  }, DB_POLL_INTERVAL_MS);
-  dbPollInterval.unref();
-
-  return {
-    wss,
-    broadcast(message: string): void {
-      for (const [ws] of clients) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(message);
-        }
-      }
-    },
-    close() {
-      clearInterval(pingInterval);
-      clearInterval(dbPollInterval);
-      for (const [ws] of clients) {
-        ws.close(1001, 'Server shutting down');
-      }
-      clients.clear();
-      wss.close();
-    },
-  };
+        '[agent-tasks] WS error: ' + (err instanceof Error ? err.message : String(err)) + '\n',
+      ),
+  });
 }
 
-function sendFullState(ws: WebSocket, ctx: AppContext): void {
-  try {
-    ws.send(
-      JSON.stringify({
-        type: 'state',
-        version: packageMeta.version,
-        tasks: ctx.tasks.list(),
-        dependencies: ctx.tasks.getAllDependencies(),
-        artifactCounts: ctx.tasks.getArtifactCounts(),
-        commentCounts: ctx.comments.countByTask(),
-        subtaskProgress: ctx.tasks.getAllSubtaskProgress(),
-        stages: ctx.tasks.getPipelineStages(),
-        gateConfigs: ctx.tasks.getAllGateConfigs(),
-        collaborators: ctx.collaborators.listAllByTask(),
-      }),
-    );
-  } catch (err) {
-    process.stderr.write(
-      '[agent-tasks] sendFullState error: ' +
-        (err instanceof Error ? err.message : String(err)) +
-        '\n',
-    );
-  }
+function buildStatePayload(ctx: AppContext): Record<string, unknown> {
+  return {
+    tasks: ctx.tasks.list(),
+    dependencies: ctx.tasks.getAllDependencies(),
+    artifactCounts: ctx.tasks.getArtifactCounts(),
+    commentCounts: ctx.comments.countByTask(),
+    subtaskProgress: ctx.tasks.getAllSubtaskProgress(),
+    stages: ctx.tasks.getPipelineStages(),
+    gateConfigs: ctx.tasks.getAllGateConfigs(),
+    collaborators: ctx.collaborators.listAllByTask(),
+  };
 }
