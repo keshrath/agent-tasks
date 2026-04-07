@@ -6,9 +6,15 @@
 // =============================================================================
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { readFileSync, realpathSync, existsSync } from 'fs';
-import { join, extname, resolve, dirname } from 'path';
+import { readFileSync, existsSync } from 'fs';
+import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import {
+  json as kitJson,
+  readBody as kitReadBody,
+  serveStatic as kitServeStatic,
+  ValidationError as KitValidationError,
+} from 'agent-common';
 import type { AppContext } from '../context.js';
 import { TasksError, ValidationError } from '../types.js';
 
@@ -77,54 +83,18 @@ const SECURITY_HEADERS = {
 const CSP_HEADER =
   "default-src 'self'; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net 'unsafe-inline'; font-src https://fonts.gstatic.com; script-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' ws: wss:";
 
-function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_BODY_SIZE) {
-        req.destroy();
-        reject(new ValidationError('Request body too large (max 128KB).'));
-        return;
-      }
-      chunks.push(chunk);
-    });
-
-    req.on('end', () => {
-      try {
-        const raw = Buffer.concat(chunks).toString('utf-8');
-        if (!raw.trim()) {
-          resolve({});
-          return;
-        }
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-          reject(new ValidationError('Request body must be a JSON object.'));
-          return;
-        }
-        resolve(parsed as Record<string, unknown>);
-      } catch {
-        reject(new ValidationError('Invalid JSON in request body.'));
-      }
-    });
-
-    req.on('error', reject);
-  });
+async function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  try {
+    return await kitReadBody(req, MAX_BODY_SIZE);
+  } catch (err) {
+    if (err instanceof KitValidationError) {
+      throw new ValidationError(err.message);
+    }
+    throw err;
+  }
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-const MIME_TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-};
 
 type RouteHandler = (
   req: IncomingMessage,
@@ -160,13 +130,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   }
 
   function json(res: ServerResponse, data: unknown, status = 200): void {
-    res.writeHead(status, {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'X-Content-Type-Options': 'nosniff',
-      ...SECURITY_HEADERS,
-    });
-    res.end(JSON.stringify(data));
+    kitJson(res, data, status, { extraHeaders: SECURITY_HEADERS });
   }
 
   // -----------------------------------------------------------------------
@@ -517,61 +481,19 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   // -----------------------------------------------------------------------
 
   function serveStatic(req: IncomingMessage, res: ServerResponse): void {
-    let pathname = new URL(req.url!, `http://${req.headers.host}`).pathname;
-
-    if (pathname === '/' || pathname === '') pathname = '/index.html';
-
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(pathname);
-    } catch {
-      res.writeHead(400);
-      res.end('Bad request');
-      return;
-    }
-
-    if (decoded.includes('\0') || decoded.includes('..')) {
-      res.writeHead(403);
-      res.end('Forbidden');
-      return;
-    }
-
-    const filePath = join(uiDir, decoded);
-
-    let realPath: string;
-    try {
-      realPath = realpathSync(filePath);
-    } catch {
-      res.writeHead(404);
-      res.end('Not found');
-      return;
-    }
-
-    const realUiDir = realpathSync(uiDir);
-    if (!realPath.startsWith(realUiDir)) {
-      res.writeHead(403);
-      res.end('Forbidden');
-      return;
-    }
-
-    try {
-      const content = readFileSync(realPath);
-      const ext = extname(realPath);
-      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-      res.writeHead(200, {
-        'Content-Type': contentType,
+    const pathname = new URL(req.url!, `http://${req.headers.host}`).pathname;
+    const target = pathname === '/' || pathname === '' ? '/index.html' : pathname;
+    kitServeStatic(res, uiDir, target, {
+      spaFallback: false,
+      extraHeaders: {
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy': CSP_HEADER,
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         Pragma: 'no-cache',
         Expires: '0',
         ...SECURITY_HEADERS,
-      });
-      res.end(content);
-    } catch {
-      res.writeHead(500);
-      res.end('Internal error');
-    }
+      },
+    });
   }
 
   // -----------------------------------------------------------------------
