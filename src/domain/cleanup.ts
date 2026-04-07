@@ -1,43 +1,48 @@
-// Cleanup service — purges old completed/cancelled tasks and stale data
+// =============================================================================
+// agent-tasks — Cleanup service
+//
+// Extends agent-common's CleanupService base for timer scheduling. Adds:
+//   - agent-bridge integration (fails in-progress tasks whose agent is stale)
+//   - purgeAll() / purgeEverything() variants with different scope
+//   - start()/stop() wrapper methods (the agent-common base uses
+//     startTimer/stopTimer, but context.ts wires cleanup.start()/stop())
+// =============================================================================
+
+import { CleanupService as KitCleanupService } from 'agent-common';
 import type { Db } from '../storage/database.js';
 import type { AgentBridge } from './agent-bridge.js';
 import type { Task } from '../types.js';
 
 const AGENT_COMM_TIMEOUT_MS = parseInt(process.env.AGENT_TASKS_COMM_TIMEOUT_MS ?? '5000', 10);
 
-export class CleanupService {
-  private timer: ReturnType<typeof setInterval> | null = null;
+export interface TasksCleanupStats extends Record<string, number> {
+  purgedTasks: number;
+  purgedComments: number;
+  purgedArtifacts: number;
+  purgedApprovals: number;
+}
 
+export class CleanupService extends KitCleanupService<TasksCleanupStats> {
   constructor(
-    private readonly db: Db,
-    private readonly retentionDays: number = 30,
+    db: Db,
+    retentionDays: number = 30,
     private readonly agentBridge?: AgentBridge,
-  ) {}
+  ) {
+    super(db, { retentionDays, autoStart: false });
+  }
 
   start(): void {
-    // Run cleanup every hour
-    this.timer = setInterval(() => this.run(), 60 * 60 * 1000);
-    this.timer.unref();
-    // Run once on start (delayed 10s)
+    this.startTimer();
     setTimeout(() => {
-      this.run();
       this.failStaleAgentTasks().catch(() => {});
     }, 10_000).unref();
   }
 
   stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+    this.stopTimer();
   }
 
-  run(): {
-    purgedTasks: number;
-    purgedComments: number;
-    purgedArtifacts: number;
-    purgedApprovals: number;
-  } {
+  run(): TasksCleanupStats {
     const cutoff = new Date(Date.now() - this.retentionDays * 24 * 60 * 60 * 1000)
       .toISOString()
       .replace('T', ' ')
@@ -48,17 +53,14 @@ export class CleanupService {
       [cutoff],
     );
 
-    // Orphaned comments (task deleted via CASCADE should handle this, but just in case)
     const comments = this.db.run(
       `DELETE FROM task_comments WHERE task_id NOT IN (SELECT id FROM tasks)`,
     );
 
-    // Orphaned artifacts (defensive — CASCADE should handle this)
     const artifacts = this.db.run(
       `DELETE FROM task_artifacts WHERE task_id NOT IN (SELECT id FROM tasks)`,
     );
 
-    // Resolved approvals older than retention
     const approvals = this.db.run(
       `DELETE FROM task_approvals WHERE status != 'pending' AND resolved_at < ?`,
       [cutoff],
@@ -72,13 +74,7 @@ export class CleanupService {
     };
   }
 
-  purgeAll(): {
-    purgedTasks: number;
-    purgedComments: number;
-    purgedArtifacts: number;
-    purgedApprovals: number;
-  } {
-    // Purge completed/cancelled by status OR tasks in done/cancelled stage
+  override purgeAll(): TasksCleanupStats {
     const tasks = this.db.run(
       `DELETE FROM tasks WHERE status IN ('completed', 'cancelled') OR stage IN ('done', 'cancelled')`,
     );
@@ -89,6 +85,19 @@ export class CleanupService {
       `DELETE FROM task_artifacts WHERE task_id NOT IN (SELECT id FROM tasks)`,
     );
     const approvals = this.db.run(`DELETE FROM task_approvals WHERE status != 'pending'`);
+    return {
+      purgedTasks: tasks.changes,
+      purgedComments: comments.changes,
+      purgedArtifacts: artifacts.changes,
+      purgedApprovals: approvals.changes,
+    };
+  }
+
+  purgeEverything(): TasksCleanupStats {
+    const tasks = this.db.run(`DELETE FROM tasks`);
+    const comments = this.db.run(`DELETE FROM task_comments`);
+    const artifacts = this.db.run(`DELETE FROM task_artifacts`);
+    const approvals = this.db.run(`DELETE FROM task_approvals`);
     return {
       purgedTasks: tasks.changes,
       purgedComments: comments.changes,
@@ -209,24 +218,5 @@ export class CleanupService {
     } finally {
       clearTimeout(timer);
     }
-  }
-
-  purgeEverything(): {
-    purgedTasks: number;
-    purgedComments: number;
-    purgedArtifacts: number;
-    purgedApprovals: number;
-  } {
-    // Nuclear option — delete ALL tasks regardless of status/stage
-    const tasks = this.db.run(`DELETE FROM tasks`);
-    const comments = this.db.run(`DELETE FROM task_comments`);
-    const artifacts = this.db.run(`DELETE FROM task_artifacts`);
-    const approvals = this.db.run(`DELETE FROM task_approvals`);
-    return {
-      purgedTasks: tasks.changes,
-      purgedComments: comments.changes,
-      purgedArtifacts: artifacts.changes,
-      purgedApprovals: approvals.changes,
-    };
   }
 }
