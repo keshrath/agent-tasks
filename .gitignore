@@ -9,3 +9,5 @@ coverage/
 *.tgz
 .worktrees/
 .claude/worktrees/
+test-results/
+playwright-report/
