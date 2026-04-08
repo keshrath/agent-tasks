@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.29] - 2026-04-08
+
+### Documentation
+
+- Self-documenting release: documents this version + retroactively records the 1.9.28 release whose payload was the 1.9.19 – 1.9.27 backfill.
+
 ## [1.9.27] - 2026-04-08
 
 ### Changed
