@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.10.0] - 2026-04-09
+
+### Added (from c237c69 — original commit being amended)
+
+- **`scoreTaskConfidence`** (src/domain/confidence.ts): pure heuristic 0-100 score over title + description (length, lists, headers, file refs, acceptance language). No LLM calls.
+- **`GateConfig.min_confidence_for_claim`**: optional per-project threshold; `TaskService.claim` throws `ValidationError` with reasons when a vague task is claimed. Backward compat — disabled by default.
+- **`GateConfig.stage_instructions`**: optional per-stage prompt strings; `TaskService.getStageInstructions` exposes them, MCP `task_stage` handler augments claim/advance responses with a `stage_instructions` field when configured.
+- 6 unit tests (confidence), 9 integration tests (gate + instructions), 2 e2e tests (full pipeline run with both features).
+- `docs/API.md` documents both new GateConfig fields with examples.
+
+### Added — bench harness
+
+- **`bench/`** — quantitative bench harness for the pipeline coordination layer, mirroring the agent-comm bench. Pure metric calculators (`metrics.ts`) with 20 unit tests, mock + real Claude CLI driver (`drivers/cli.ts`) that pre-seeds tasks via `TaskService` into a shared SQLite DB injected per-agent through `AGENT_TASKS_DB`, runner with `--real` / `--pilot` / `--n-runs=N` selection, and persisted results in `bench/_results/`.
+- **Throughput pilots** — 4 fixtures testing `task_stage claim` against naive parallel agents at varying work-unit sizes:
+  - `task-claim-race` (6 tiny TODO functions, $0.50/agent) — N=3 result: **MARGINAL** (4.3/6 vs 3.7/6, identical units/$ ~2.84). The atomic claim primitive prevents some collisions but the fixture is too small for the gain to justify the cost.
+  - `dependency-graph` (6 files in a real DAG, 3 conditions: naive / flat-claim / dep-aware) — N=3 result: **INCONCLUSIVE**. At $0.50 every condition hits the 5/6 ceiling; at $0.25 the MCP-based conditions floor at 0/6 because protocol overhead consumes the entire budget. Fixture cannot measure what it claims to measure.
+  - `cross-session-pipeline` (2 sequential agents handing off via SQLite, $0.30/agent) — N=3 result: **INCONCLUSIVE**. Naive 6.0/6 vs claim 1.0/6 — protocol overhead exceeds the per-agent budget. Fixture too small.
+  - **`realistic-funcs`** (3 parallel agents, 4 non-trivial 50-150 LOC functions: parseCsv, stringifyCsv, diffObjects, renderTemplate, $1.50/agent) — N=3 result: **WIN ⭐**. agent-tasks-claim hit **4/4 deterministically every run** vs naive 3.3/4. +20% units/$, 6% faster wall, identical cost, 100% individual pass rate vs naive 67%. First fixture where agent-tasks's structured pipeline measurably wins on throughput.
+- **Cross-cutting throughput finding**: MCP protocol overhead (~$0.15 per task = ~3 roundtrips × $0.05) dominates on small work units. agent-tasks's pipeline only pays off when work-per-task ≥ ~$0.30; below that, naive wins. Documented in `bench/README.md` with a break-even table and explicit production guidance: use agent-tasks for multi-stage durable work, not for tiny throwaway TODOs.
+
+### Added — visibility bench (the headline result)
+
+- **`bench/visibility/`** — a structurally different bench that measures **manager visibility**, not throughput. Builds a frozen mid-feature project state and asks a single "manager" agent (with no prior context) 10 standardized questions about it. Two conditions: (a) **naive** — the manager has only the file system; (b) **agent-tasks** — the manager has `task_list` / `task_get` with artifacts and comments. Auto-graded against a known answer key.
+- **Two scenarios** in a registry (`bench/visibility/scenarios/`):
+  - **`csv-export`** — 6 tasks, mid-build snapshot (3 workers adding CSV export to a TODO app, minute 8 of an estimated 15-minute build). Tests **live state visibility**: who's working on what, what's blocked, what's idle, what's left, why was X chosen.
+  - **`audit-recall`** — 8 tasks, all done. A "30-day-old" completed feature build (rate-limit added to auth endpoint), with full spec/decision/test-results/review-notes artifacts. Tests **historical provenance**: who wrote the spec, why was sliding window chosen over token bucket, how many tests passed, what concern did the reviewer raise.
+- **N=2 result, both scenarios:**
+  - csv-export: **naive 3.0/10, agent-tasks 10.0/10 ⭐** (perfect across both runs)
+  - audit-recall: **naive 2.0/10, agent-tasks 10.0/10 ⭐** (perfect across both runs)
+  - Cross-scenario aggregate: naive **2.5/10 (25%)** vs agent-tasks **10.0/10 (100%)** — **+7.5 score delta, 4× advantage** at ~$0.37 per query.
+  - Total visibility-bench spend: **~$2.40 for 8 manager invocations** — produced the strongest evidence in the entire v1.10 cycle for one tenth the cost of the throughput sweep.
+- **What this proves**: agent-tasks's value is **management visibility for humans running fleets of agents**, not raw agent throughput. The naive manager cannot answer questions whose answers live in artifacts (specs, decisions, test results, review notes) or in task metadata (blocked, idle, count, backlog). agent-tasks captures all of these. The bench validates the LinkedIn pitch directly.
+
+### Changed
+
+- **`bench/README.md`** — full methodology with the throughput break-even table, both visibility-scenario results, the production-feedback section, an explicit negative-results policy, and a section on why naive wins on tiny workloads but agent-tasks wins on management questions.
+- **Production guidance** added: **DO** use agent-tasks for multi-stage durable work, multi-session features, work needing audit trails or human review at gates. **DON'T** use it for tiny throwaway TODOs in a single session — naive parallelism is cheaper.
+- **`tsx`** added as a devDep for running `bench:run` and `bench:visibility`.
+
+### Notes
+
+- v1.10.0 ships as the consolidated bench-evaluation release. CHANGELOG covers the original c237c69 feature work + the entire bench harness + the throughput pilots + the visibility bench v2 in a single entry. Total bench spend during evaluation: ~$33.
+
 ## [1.9.29] - 2026-04-08
 
 ### Documentation

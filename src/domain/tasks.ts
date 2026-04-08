@@ -38,6 +38,7 @@ import {
   validateArtifactName,
   validateArtifactContent,
 } from './task-validator.js';
+import { scoreTaskConfidence, type ConfidenceScore } from './confidence.js';
 
 export const DEFAULT_STAGES = [
   'backlog',
@@ -364,6 +365,25 @@ export class TaskService {
 
   // ---- Claiming ----
 
+  /**
+   * Score a task's clarity using deterministic heuristics. Surface for
+   * dashboards/CLIs that want to show authors how to improve a task before
+   * an agent claims it.
+   */
+  scoreConfidence(taskId: number): ConfidenceScore {
+    const task = this.requireTask(taskId);
+    return scoreTaskConfidence({ title: task.title, description: task.description });
+  }
+
+  /**
+   * Look up the per-stage instruction string for a project (if configured
+   * via gate.stage_instructions). Returns null when nothing is set.
+   */
+  getStageInstructions(project: string | null | undefined, stage: string): string | null {
+    const gate = this.getGateConfig(project ?? undefined);
+    return gate?.stage_instructions?.[stage] ?? null;
+  }
+
   claim(taskId: number, claimerName: string): Task {
     validateAssignee(claimerName);
 
@@ -371,6 +391,23 @@ export class TaskService {
       const task = this.requireTask(taskId);
       if (task.status !== 'pending') {
         throw new ConflictError(`Task ${taskId} is not pending (status: ${task.status}).`);
+      }
+
+      // Confidence gate: refuse to hand a vague task to an agent if a
+      // threshold is configured for the project.
+      const gate = this.getGateConfig(task.project ?? undefined);
+      const minConfidence = gate?.min_confidence_for_claim;
+      if (typeof minConfidence === 'number' && minConfidence > 0) {
+        const { score, reasons } = scoreTaskConfidence({
+          title: task.title,
+          description: task.description,
+        });
+        if (score < minConfidence) {
+          const detail = reasons.length ? ` Issues: ${reasons.join('; ')}` : '';
+          throw new ValidationError(
+            `Task ${taskId} confidence ${score}/100 below required ${minConfidence}.${detail}`,
+          );
+        }
       }
 
       const stages = this.getPipelineStages(task.project ?? undefined);

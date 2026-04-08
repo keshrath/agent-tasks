@@ -6,8 +6,23 @@
 // =============================================================================
 
 import type { AppContext } from '../context.js';
-import { ValidationError, type TaskRelationshipType } from '../types.js';
+import { ValidationError, type Task, type TaskRelationshipType } from '../types.js';
 import { generateRules } from '../domain/rules.js';
+
+/**
+ * Augment a task with the per-stage instruction string (if any) so callers
+ * of `task_stage` get just-in-time guidance for the stage they just entered.
+ * Returns the task verbatim when nothing is configured, so it stays a
+ * drop-in replacement.
+ */
+function withStageInstructions(
+  ctx: AppContext,
+  task: Task,
+): Task | (Task & { stage_instructions: string }) {
+  const instructions = ctx.tasks.getStageInstructions(task.project, task.stage);
+  if (!instructions) return task;
+  return { ...task, stage_instructions: instructions };
+}
 
 // ---------------------------------------------------------------------------
 // Session state (per-connection)
@@ -286,7 +301,8 @@ export function handleStage(
 
   if (action === 'claim') {
     const claimer = optString(args, 'claimer') ?? sessionName(session);
-    return ctx.tasks.claim(taskId, claimer);
+    const claimed = ctx.tasks.claim(taskId, claimer);
+    return withStageInstructions(ctx, claimed);
   }
 
   if (action === 'advance') {
@@ -295,7 +311,7 @@ export function handleStage(
     if (advanceComment) {
       ctx.comments.add(taskId, sessionName(session), advanceComment);
     }
-    return advanced;
+    return withStageInstructions(ctx, advanced);
   }
 
   if (action === 'regress') {

@@ -153,6 +153,19 @@ export interface GateConfig {
   require_artifact?: boolean;
   exempt_stages?: string[];
   gates?: Record<string, StageGate>;
+  /**
+   * Minimum task confidence score (0–100) required at claim time. Computed
+   * by `scoreTaskConfidence` from title + description. Below this threshold,
+   * `claim` throws ValidationError. Omit/null to disable.
+   */
+  min_confidence_for_claim?: number;
+  /**
+   * Optional per-stage instruction strings surfaced to agents on claim and
+   * advance. Keyed by stage name. Lets a project author one-time guidance
+   * ("at 'spec' stage, write the acceptance criteria as a checklist") that
+   * the harness can show without re-reading CLAUDE.md.
+   */
+  stage_instructions?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------

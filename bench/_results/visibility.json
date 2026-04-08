@@ -1,0 +1,743 @@
+{
+  "generated_at": "2026-04-09T10:02:08.444Z",
+  "scenarios": [
+    {
+      "scenario": "csv-export",
+      "description": "6 tasks, mid-build snapshot. 3 worker agents adding CSV export to a TODO app at minute 8 of an estimated 15-minute build. Tests LIVE STATE visibility.",
+      "n_runs": 2,
+      "naive": [
+        {
+          "condition": "naive",
+          "wall_seconds": 27.075,
+          "cost_usd": 0.17703475,
+          "tokens": 745,
+          "total_score": 4,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "Per README: worker-2 is implementing `exportCsv()` and worker-3 is implementing `parseImport()`. Worker-1 previously spec'd the format.",
+              "score": 1,
+              "matched_groups": 4,
+              "total_groups": 4,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 2,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 3,
+              "answer": "Yes — worker-1 finalized the CSV format spec.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 4,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 5,
+              "answer": "NO — the spec says include archived by default, but export.js calls `listItems({ includeArchived: false })`, filtering them out.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 6,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 7,
+              "answer": "Worker-3 was implementing `parseImport()`; the next agent should first read the CSV format spec artifact authored by worker-1 (location unknown — stored in the agents coordination layer, not the filesystem).",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 9,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 10,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            }
+          ]
+        },
+        {
+          "condition": "naive",
+          "wall_seconds": 26.135,
+          "cost_usd": 0.18033824999999998,
+          "tokens": 790,
+          "total_score": 2,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "cannot determine from available information. README indicates worker-2 is implementing exportCsv() and worker-3 is implementing parseImport(), but no task titles or progress records are on the file system.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 4,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 2,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 3,
+              "answer": "cannot determine from available information. README says worker-1 spec'd the format but the spec itself is not in the file system.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 4,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 5,
+              "answer": "NO. The spec (per the in-file comment) says archived items should be included by default, but export.js calls listItems({ includeArchived: false }), filtering them out.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 6,
+              "answer": "cannot determine from available information; no per-worker timestamps or activity logs exist on disk.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 7,
+              "answer": "Worker-3 was implementing parseImport() (in import.js). The next agent should FIRST read the CSV format spec authored by worker-1 (not on the local filesystem — must be fetched from the agents' coordination layer) before resuming.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 9,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 10,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            }
+          ]
+        }
+      ],
+      "agent-tasks": [
+        {
+          "condition": "agent-tasks",
+          "wall_seconds": 48.88,
+          "cost_usd": 0.44492175,
+          "tokens": 2081,
+          "total_score": 10,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "Task #3 \"Implement exportCsv() in export.js\" is being worked by worker-2, and Task #4 \"Implement parseImport() in import.js\" is being worked by worker-3. (Task tool marks them failed due to session cleanup, but at this snapshot they are the in-flight implementation tasks.)",
+              "score": 1,
+              "matched_groups": 4,
+              "total_groups": 4,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 2,
+              "answer": "Nothing is hard-blocked by dependencies — the spec (#1) and format decision (#2) are done, unblocking #3 and #4; however worker-3 on #4 is effectively stalled because it hasn't yet read the spec artifact on task #1.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 3,
+              "answer": "Yes — finalized by worker-1 on task #1, result: \"RFC 4180 dialect, headers id/title/status/created_at/archived\".",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 4,
+              "answer": "CSV was chosen because the user base lives in Excel and CSV is the simplest format Excel imports without quirks; JSON would require a separate viewer, XLSX needs a binary library dependency, and TSV is less universally recognized.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 5,
+              "answer": "NO — the spec requires including ALL items including archived by default, but export.js line 8 calls `listItems({ includeArchived: false })`, filtering archived items out, which contradicts the spec.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 6,
+              "answer": "Task #4 (parseImport() by worker-3) — claimed ~5 minutes ago and has produced no code yet, while worker-2 on #3 started ~3 minutes ago and has already written the header row and row builder.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 7,
+              "answer": "Worker-3 was on task #4 \"Implement parseImport() in import.js\"; the next agent must FIRST read the `spec` artifact on task #1 (\"Spec the CSV export format\") before resuming, since parseImport must round-trip against the RFC 4180 spec and worker-3's own comment noted it hadn't read that spec yet.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "Four tasks remain: #3 exportCsv, #4 parseImport, #5 round-trip tests, and #6 the `todo export` CLI subcommand.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 9,
+              "answer": "Tasks #1 (spec) and #2 (CSV-vs-JSON decision) are both marked done with identical timestamps; #1 \"Spec the CSV export format\" finalized the RFC 4180 dialect with headers id/title/status/created_at/archived.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 10,
+              "answer": "Backlog (pending) tasks: #5 \"Tests for export round-trip\" and #6 \"CLI subcommand: `todo export`\".",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            }
+          ]
+        },
+        {
+          "condition": "agent-tasks",
+          "wall_seconds": 45.762,
+          "cost_usd": 0.38498024999999997,
+          "tokens": 2001,
+          "total_score": 10,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "Task #3 \"Implement exportCsv() in export.js\" — worker-2; Task #4 \"Implement parseImport() in import.js\" — worker-3. (Shown as failed only due to stale-session cleanup on session start, but they are the active in-flight items.)",
+              "score": 1,
+              "matched_groups": 4,
+              "total_groups": 4,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 2,
+              "answer": "No task is blocked by dependencies — the spec blocker (#1) is done. Worker-3 is effectively idle pending reading the spec artifact, but that's not a formal block.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 3,
+              "answer": "Yes — finalized by worker-1 as artifact \"spec\" on task #1 (RFC 4180, headers id/title/status/created_at/archived).",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 4,
+              "answer": "The user base works in Excel; CSV imports into Excel without quirks, whereas JSON would need a separate viewer, XLSX requires a binary library dependency, and TSV is less universally recognized by spreadsheet tools.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 5,
+              "answer": "NO — export.js calls `listItems({ includeArchived: false })`, filtering archived out, but the spec explicitly says the default must include ALL items including archived ones.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 6,
+              "answer": "Task #4 (parseImport, worker-3) — claimed ~5 minutes ago with zero code produced, versus worker-2 who started ~3 minutes ago and has header + row builder committed.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 7,
+              "answer": "Worker-3 was on Task #4 \"Implement parseImport() in import.js\"; the next agent must FIRST read the spec artifact named \"spec\" on task #1 (CSV format / archived-default rules) before writing any parser code.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "Four tasks remain: #3 exportCsv, #4 parseImport, #5 round-trip tests, #6 CLI `todo export` subcommand.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 9,
+              "answer": "Tasks #1 (spec) and #2 (CSV-vs-JSON decision) completed at the same timestamp; the decision task's outcome: CSV (RFC 4180) was chosen over JSON/XLSX/TSV for Excel compatibility.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 10,
+              "answer": "#5 \"Tests for export round-trip\" and #6 \"CLI subcommand: `todo export`\".",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "audit-recall",
+      "description": "8 tasks, all DONE. A 30-day-old completed feature build. Tests AUDIT TRAIL recall: why was X chosen, who reviewed Y, what were the test results.",
+      "n_runs": 2,
+      "naive": [
+        {
+          "condition": "naive",
+          "wall_seconds": 30.609,
+          "cost_usd": 0.19767925,
+          "tokens": 842,
+          "total_score": 2,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 2,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 3,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 4,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 5,
+              "answer": "Per IP; the shouldAllow method keys requests by IP, but the rationale is not recorded in the repo.",
+              "score": 0.5,
+              "matched_groups": 1,
+              "total_groups": 2,
+              "reason": "matched 1 of 2 groups"
+            },
+            {
+              "id": 6,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 7,
+              "answer": "10 requests per 60000ms (1 minute) window per IP, per the RateLimiter defaults in src/rate-limiter.js.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "cannot determine from available information; the limiter returns a retryAfter value in seconds but the HTTP status/header wiring is not present in this repo.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 9,
+              "answer": "Yes — an allowlist is passed as a constructor argument (array of IPs) to RateLimiter and checked via a Set in shouldAllow.",
+              "score": 0.5,
+              "matched_groups": 1,
+              "total_groups": 2,
+              "reason": "matched 1 of 2 groups"
+            },
+            {
+              "id": 10,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 8,
+              "reason": "no answer or \"cannot determine\""
+            }
+          ]
+        },
+        {
+          "condition": "naive",
+          "wall_seconds": 26.951,
+          "cost_usd": 0.1761515,
+          "tokens": 743,
+          "total_score": 2,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 2,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 3,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 4,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 5,
+              "answer": "Per IP — the `shouldAllow` method keys on `ip` and the allowlist is an IP set; rationale is not recorded in the repo.",
+              "score": 0.5,
+              "matched_groups": 1,
+              "total_groups": 2,
+              "reason": "matched 1 of 2 groups"
+            },
+            {
+              "id": 6,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 7,
+              "answer": "Default 10 requests per 60000 ms (60s) window per IP, using a sliding window algorithm.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "cannot determine from available information — the limiter returns a `retryAfter` value in seconds (suggesting a `Retry-After` header) but no HTTP status code is set in this repo.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 9,
+              "answer": "Yes — an allowlist of IPs passed to the `RateLimiter` constructor as an array, stored in a Set and checked first in `shouldAllow`.",
+              "score": 0.5,
+              "matched_groups": 1,
+              "total_groups": 2,
+              "reason": "matched 1 of 2 groups"
+            },
+            {
+              "id": 10,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 8,
+              "reason": "no answer or \"cannot determine\""
+            }
+          ]
+        }
+      ],
+      "agent-tasks": [
+        {
+          "condition": "agent-tasks",
+          "wall_seconds": 37.173,
+          "cost_usd": 0.33608425000000003,
+          "tokens": 1538,
+          "total_score": 10,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "The spec was written by worker-spec (artifact created_by bench-driver in task #1) and was reviewed and approved by worker-reviewer on 2026-03-10 with no revisions requested.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 2,
+              "answer": "Sliding window was chosen because token bucket's burst tolerance would let an attacker exhaust the bucket in one burst, and fixed window has the edge-of-window doubling problem (10 reqs at 0:59 + 10 at 1:00 = 20/sec); sliding window gives smooth enforcement without burst tolerance.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 3,
+              "answer": "14 unit tests were written for the RateLimiter, and all passed.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 4,
+              "answer": "6 integration tests were written, and all passed.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 5,
+              "answer": "Per source IP, not per authenticated user, because the limit must apply to pre-auth requests too — \"otherwise an attacker can exhaust the auth endpoint by trying many usernames.\"",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 6,
+              "answer": "The reviewer raised a concern about whether in-memory storage would cause production issues; it was resolved when worker-impl confirmed it was acceptable per spec (\"acceptable to lose state on restart\").",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 7,
+              "answer": "10 requests per second per source IP, enforced as a sliding 60-second window with a 10-request cap.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "HTTP 429, with the Retry-After header set to the remaining window seconds.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 9,
+              "answer": "Yes — an allowlist for monitoring IPs, configured via an environment variable.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 10,
+              "answer": "Spec the rate limit policy, Decide algorithm: token bucket vs sliding window vs fixed window, Implement RateLimiter class, Wire RateLimiter into auth middleware, Unit tests for RateLimiter, Integration tests for auth + rate limit, Code review & approval, Merge to main",
+              "score": 1,
+              "matched_groups": 8,
+              "total_groups": 8,
+              "reason": "all groups matched"
+            }
+          ]
+        },
+        {
+          "condition": "agent-tasks",
+          "wall_seconds": 29.247,
+          "cost_usd": 0.3082205,
+          "tokens": 1198,
+          "total_score": 10,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "The spec was written by worker-spec (artifact on task 1) and was reviewed and approved by worker-reviewer on 2026-03-10 with no revisions requested.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 2,
+              "answer": "Sliding window was chosen because token bucket's burst tolerance would let an attacker exhaust the bucket in one burst, and fixed window has the edge-of-window doubling problem (10 reqs at 0:59 + 10 at 1:00 = 20 in 1s); sliding window gives smooth enforcement with no burst tolerance.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 3,
+              "answer": "14 unit tests were written for the RateLimiter, and all 14 passed.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 4,
+              "answer": "6 integration tests were written for auth + rate limit, and all 6 passed.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 5,
+              "answer": "Per source IP, not per authenticated user. Rationale quoted from spec: \"the limit must apply to pre-auth requests too, otherwise an attacker can exhaust the auth endpoint by trying many usernames.\"",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 6,
+              "answer": "The reviewer questioned whether in-memory storage would cause production issues; it was resolved when worker-impl confirmed it was acceptable per spec (\"In-memory ring buffer. Acceptable to lose state on restart\").",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 7,
+              "answer": "10 requests per second per source IP, enforced via a 60-second sliding window with a 10-request cap.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "HTTP 429 is returned, with the Retry-After header set to the remaining window seconds.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 9,
+              "answer": "Yes, an allowlist exists for monitoring IPs, configured via an environment variable.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 10,
+              "answer": "Spec the rate limit policy, Decide algorithm: token bucket vs sliding window vs fixed window, Implement RateLimiter class, Wire RateLimiter into auth middleware, Unit tests for RateLimiter, Integration tests for auth + rate limit, Code review & approval, Merge to main",
+              "score": 1,
+              "matched_groups": 8,
+              "total_groups": 8,
+              "reason": "all groups matched"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

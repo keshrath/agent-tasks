@@ -34,6 +34,26 @@ agent-tasks consolidates everything into 8 action-based tools to keep per-prompt
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `task_config` | Configuration via `action`: `pipeline` (get/set stages and gates), `session` (set agent identity), `cleanup` (retention/stale agents), `rules` (generate IDE rules) |
 
+### Stage gates: confidence threshold and per-stage instructions
+
+`GateConfig` (set per-project via `task_config(action: "pipeline", project, gate_config)`) supports two extra fields beyond the existing `require_comment` / `require_artifact` / `gates`:
+
+- **`min_confidence_for_claim`** (number, 0–100, optional) — Before a `task_stage(action: "claim")` succeeds, the task's title and description are scored by a deterministic heuristic (`scoreTaskConfidence`). If the score is below this threshold, the claim is rejected with a `ValidationError` listing what is missing (e.g. _"Title has only 1 word"_, _"No file path referenced"_, _"No acceptance language"_). No LLM calls — purely structural checks. Omit/null/0 to disable. Backward-compatible: existing projects without a gate are unaffected.
+- **`stage_instructions`** (`Record<stage, string>`, optional) — Per-stage prompt text surfaced to agents on `task_stage(action: "claim" | "advance")`. When set, the JSON returned by those calls includes a `stage_instructions` field with the string for the new stage. Lets a project author one-time guidance ("at 'spec' stage, write the acceptance criteria as a checklist") without each agent re-deriving it from CLAUDE.md.
+
+Example `gate_config`:
+
+```json
+{
+  "min_confidence_for_claim": 50,
+  "stage_instructions": {
+    "spec": "Write the acceptance criteria as a checklist before advancing.",
+    "plan": "List the files you intend to touch and any new dependencies.",
+    "test": "Run npm test and attach the output as an artifact."
+  }
+}
+```
+
 ---
 
 ## REST API (19 endpoints)
