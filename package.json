@@ -1,6 +1,6 @@
 {
   "name": "agent-tasks",
-  "version": "1.9.24",
+  "version": "1.9.25",
   "description": "Pipeline-driven task management for AI coding agents — stages, dependencies, artifacts, and multi-agent claiming",
   "type": "module",
   "main": "dist/index.js",
@@ -48,13 +48,14 @@
     ]
   },
   "dependencies": {
-    "agent-common": "^1.0.3",
+    "agent-common": "^1.1.0",
     "better-sqlite3": "^12.8.0",
     "morphdom": "^2.7.8",
     "ws": "^8.20.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.59.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",

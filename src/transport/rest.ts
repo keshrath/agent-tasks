@@ -13,6 +13,7 @@ import {
   json as kitJson,
   readBody as kitReadBody,
   serveStatic as kitServeStatic,
+  createRateLimiter,
   ValidationError as KitValidationError,
 } from 'agent-common';
 import type { AppContext } from '../context.js';
@@ -24,50 +25,22 @@ const MAX_BODY_SIZE = 131_072;
 // Rate limiting
 // ---------------------------------------------------------------------------
 
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX = 100;
-const RATE_LIMIT_CLEANUP_INTERVAL_MS = 5 * 60_000;
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-
-let lastRateLimitCleanup = Date.now();
-
-function cleanupRateLimitMap(): void {
-  const now = Date.now();
-  if (now - lastRateLimitCleanup < RATE_LIMIT_CLEANUP_INTERVAL_MS) return;
-  lastRateLimitCleanup = now;
-  for (const [ip, entry] of rateLimitMap) {
-    if (now >= entry.resetAt) {
-      rateLimitMap.delete(ip);
-    }
-  }
-}
+const rateLimiter = createRateLimiter({
+  windows: { default: { max: 100, windowMs: 60_000 } },
+});
 
 function checkRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
-  const ip = req.socket.remoteAddress ?? 'unknown';
-  const now = Date.now();
-
-  cleanupRateLimitMap();
-
-  let entry = rateLimitMap.get(ip);
-
-  if (!entry || now >= entry.resetAt) {
-    entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
-    rateLimitMap.set(ip, entry);
-  }
-
-  entry.count++;
-
-  if (entry.count > RATE_LIMIT_MAX) {
+  const result = rateLimiter.check(req);
+  if (!result.allowed) {
     res.writeHead(429, {
       'Content-Type': 'application/json',
-      'Retry-After': String(Math.ceil((entry.resetAt - now) / 1000)),
+      'Retry-After': String(Math.ceil((result.resetAt - Date.now()) / 1000)),
       'Access-Control-Allow-Origin': '*',
       ...SECURITY_HEADERS,
     });
     res.end(JSON.stringify({ error: 'Too many requests. Try again later.' }));
     return false;
   }
-
   return true;
 }
 
