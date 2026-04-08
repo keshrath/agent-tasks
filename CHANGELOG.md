@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.27] - 2026-04-08
+
+### Changed
+
+- Tidied `.gitignore` with section headers and added `test-results/` + `playwright-report/`.
+
+## [1.9.26] - 2026-04-08
+
+### Added
+
+- **Playwright E2E dashboard test suite** at `tests/e2e-ui/dashboard.pw.ts`. Boots the standalone HTTP+WS server against a temp SQLite DB on a free port, seeds one task per stage, drives the kanban with chromium, and verifies: page loads with no errors, websocket upgrade, every stage column renders with its seeded card, REST `/api/tasks/:id/stage` advance moves a card to the next column. Runnable via `npm run test:e2e:ui`. Devdep `@playwright/test`. Vitest count unchanged at 355.
+
+## [1.9.25] - 2026-04-08
+
+### Changed
+
+- Adopted `createRateLimiter` from agent-common 1.1.0 in place of the local rate-limiter implementation.
+
+## [1.9.24] - 2026-04-08
+
+### Changed
+
+- `CleanupService` now extends `agent-common`'s `CleanupService` base, with thin `start()` / `stop()` wrappers over the inherited `startTimer` / `stopTimer`.
+
+## [1.9.23] - 2026-04-08
+
+### Changed
+
+- `index.ts` MCP dispatcher delegated to `agent-common`'s `startMcpServer` with a `formatResult` footer hook.
+
+## [1.9.22] - 2026-04-08
+
+### Changed
+
+- `transport/ws.ts` delegated to `agent-common`'s `setupWebSocket` with `onMessage` + `broadcast` hooks.
+
+## [1.9.21] - 2026-04-08
+
+### Changed
+
+- `transport/rest.ts` helpers delegated to `agent-common`'s `json.extraHeaders` + `serveStatic.spaFallback`.
+
+## [1.9.20] - 2026-04-08
+
+### Changed
+
+- `storage/database.ts` delegated to `agent-common`'s `createDb` + `Migration[]` runner.
+
+## [1.9.19] - 2026-04-08
+
+### Changed
+
+- Added `agent-common` as a runtime dependency for events, package metadata, and the dashboard server primitives.
+
 ## [1.9.18] - 2026-04-07
 
 ### Documentation
