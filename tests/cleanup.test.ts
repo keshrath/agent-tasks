@@ -104,6 +104,83 @@ describe('cleanup service', () => {
   });
 });
 
+describe('orphan reaper', () => {
+  it('cancels in_progress tasks with no assignee older than threshold', () => {
+    const task = ctx.tasks.create({ title: 'Orphan' }, 'agent-1');
+    ctx.db.run(
+      `UPDATE tasks SET status = 'in_progress', assigned_to = NULL, updated_at = datetime('now', '-7 hours') WHERE id = ?`,
+      [task.id],
+    );
+
+    const cancelled = ctx.cleanup.cancelOrphanedTasks(360);
+    expect(cancelled).toBe(1);
+
+    const updated = ctx.tasks.getById(task.id);
+    expect(updated?.status).toBe('cancelled');
+    expect(updated?.result).toMatch(/orphan reaper/);
+  });
+
+  it('keeps recent orphaned in_progress tasks', () => {
+    const task = ctx.tasks.create({ title: 'Recent orphan' }, 'agent-1');
+    ctx.db.run(`UPDATE tasks SET status = 'in_progress', assigned_to = NULL WHERE id = ?`, [
+      task.id,
+    ]);
+
+    expect(ctx.cleanup.cancelOrphanedTasks(360)).toBe(0);
+    expect(ctx.tasks.getById(task.id)?.status).toBe('in_progress');
+  });
+
+  it('does not touch in_progress tasks that have an assignee', () => {
+    const task = ctx.tasks.create({ title: 'Assigned' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    ctx.db.run(`UPDATE tasks SET updated_at = datetime('now', '-7 hours') WHERE id = ?`, [task.id]);
+
+    expect(ctx.cleanup.cancelOrphanedTasks(360)).toBe(0);
+  });
+});
+
+describe('per-status retention', () => {
+  it('purges completed tasks older than 7 days', () => {
+    const task = ctx.tasks.create({ title: 'C' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    ctx.tasks.complete(task.id, 'done');
+    ctx.db.run(`UPDATE tasks SET updated_at = datetime('now', '-8 days') WHERE id = ?`, [task.id]);
+    expect(ctx.cleanup.run().purgedTasks).toBe(1);
+  });
+
+  it('keeps completed tasks younger than 7 days', () => {
+    const task = ctx.tasks.create({ title: 'C' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    ctx.tasks.complete(task.id, 'done');
+    ctx.db.run(`UPDATE tasks SET updated_at = datetime('now', '-3 days') WHERE id = ?`, [task.id]);
+    expect(ctx.cleanup.run().purgedTasks).toBe(0);
+  });
+
+  it('purges cancelled tasks older than 1 day', () => {
+    const task = ctx.tasks.create({ title: 'X' }, 'agent-1');
+    ctx.tasks.cancel(task.id, 'nope');
+    ctx.db.run(`UPDATE tasks SET updated_at = datetime('now', '-2 days') WHERE id = ?`, [task.id]);
+    expect(ctx.cleanup.run().purgedTasks).toBe(1);
+  });
+
+  it('keeps cancelled tasks younger than 1 day', () => {
+    const task = ctx.tasks.create({ title: 'X' }, 'agent-1');
+    ctx.tasks.cancel(task.id, 'nope');
+    ctx.db.run(`UPDATE tasks SET updated_at = datetime('now', '-12 hours') WHERE id = ?`, [
+      task.id,
+    ]);
+    expect(ctx.cleanup.run().purgedTasks).toBe(0);
+  });
+
+  it('purges failed tasks older than 7 days', () => {
+    const task = ctx.tasks.create({ title: 'F' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    ctx.tasks.fail(task.id, 'boom');
+    ctx.db.run(`UPDATE tasks SET updated_at = datetime('now', '-8 days') WHERE id = ?`, [task.id]);
+    expect(ctx.cleanup.run().purgedTasks).toBe(1);
+  });
+});
+
 describe('stale agent cleanup', () => {
   it('returns empty when no agent bridge', async () => {
     const result = await ctx.cleanup.failStaleAgentTasks();

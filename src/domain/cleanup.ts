@@ -14,6 +14,17 @@ import type { AgentBridge } from './agent-bridge.js';
 import type { Task } from '../types.js';
 
 const AGENT_COMM_TIMEOUT_MS = parseInt(process.env.AGENT_TASKS_COMM_TIMEOUT_MS ?? '5000', 10);
+const ORPHAN_TIMEOUT_MINUTES = parseInt(
+  process.env.AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES ?? '360', // 6 hours
+  10,
+);
+const COMPLETED_RETENTION_DAYS = parseFloat(
+  process.env.AGENT_TASKS_COMPLETED_RETENTION_DAYS ?? '7',
+);
+const CANCELLED_RETENTION_DAYS = parseFloat(
+  process.env.AGENT_TASKS_CANCELLED_RETENTION_DAYS ?? '1',
+);
+const FAILED_RETENTION_DAYS = parseFloat(process.env.AGENT_TASKS_FAILED_RETENTION_DAYS ?? '7');
 
 export interface TasksCleanupStats extends Record<string, number> {
   purgedTasks: number;
@@ -33,6 +44,7 @@ export class CleanupService extends KitCleanupService<TasksCleanupStats> {
 
   start(): void {
     this.startTimer();
+    this.cancelOrphanedTasks();
     setTimeout(() => {
       this.failStaleAgentTasks().catch(() => {});
     }, 10_000).unref();
@@ -43,14 +55,25 @@ export class CleanupService extends KitCleanupService<TasksCleanupStats> {
   }
 
   run(): TasksCleanupStats {
-    const cutoff = new Date(Date.now() - this.retentionDays * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .replace('T', ' ')
-      .slice(0, 19);
+    const isoCutoff = (days: number) =>
+      new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .replace('T', ' ')
+        .slice(0, 19);
+
+    const completedCutoff = isoCutoff(COMPLETED_RETENTION_DAYS);
+    const cancelledCutoff = isoCutoff(CANCELLED_RETENTION_DAYS);
+    const failedCutoff = isoCutoff(FAILED_RETENTION_DAYS);
+    const approvalCutoff = isoCutoff(this.retentionDays);
+
+    this.cancelOrphanedTasks();
 
     const tasks = this.db.run(
-      `DELETE FROM tasks WHERE status IN ('completed', 'cancelled') AND updated_at < ?`,
-      [cutoff],
+      `DELETE FROM tasks
+        WHERE (status = 'completed' AND updated_at < ?)
+           OR (status = 'cancelled' AND updated_at < ?)
+           OR (status = 'failed'    AND updated_at < ?)`,
+      [completedCutoff, cancelledCutoff, failedCutoff],
     );
 
     const comments = this.db.run(
@@ -63,7 +86,7 @@ export class CleanupService extends KitCleanupService<TasksCleanupStats> {
 
     const approvals = this.db.run(
       `DELETE FROM task_approvals WHERE status != 'pending' AND resolved_at < ?`,
-      [cutoff],
+      [approvalCutoff],
     );
 
     return {
@@ -104,6 +127,26 @@ export class CleanupService extends KitCleanupService<TasksCleanupStats> {
       purgedArtifacts: artifacts.changes,
       purgedApprovals: approvals.changes,
     };
+  }
+
+  /**
+   * Cancel tasks that are stuck in_progress with no assignee for longer than
+   * ORPHAN_TIMEOUT_MINUTES. These never get caught by failStaleAgentTasks
+   * (which requires assigned_to) or by the SessionStart hook (which only
+   * reaps tasks tied to a dead session). Returns the number of tasks cancelled.
+   */
+  cancelOrphanedTasks(timeoutMinutes: number = ORPHAN_TIMEOUT_MINUTES): number {
+    const result = this.db.run(
+      `UPDATE tasks
+          SET status = 'cancelled',
+              result = 'Auto-cancelled: in_progress with no assignee for ' || ? || ' minutes (orphan reaper)',
+              updated_at = datetime('now')
+        WHERE status = 'in_progress'
+          AND assigned_to IS NULL
+          AND updated_at < datetime('now', '-' || ? || ' minutes')`,
+      [timeoutMinutes, timeoutMinutes],
+    );
+    return result.changes;
   }
 
   async failStaleAgentTasks(

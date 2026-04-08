@@ -1,6 +1,6 @@
 {
   "name": "agent-tasks",
-  "version": "1.9.29",
+  "version": "1.9.30",
   "description": "Pipeline-driven task management for AI coding agents — stages, dependencies, artifacts, and multi-agent claiming",
   "type": "module",
   "main": "dist/index.js",
@@ -36,6 +36,8 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "bench:metrics": "vitest run bench/metrics.test.ts",
+    "bench:run": "tsx bench/runner.ts",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -64,6 +66,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.57.2",
     "vitest": "^3.0.0"
