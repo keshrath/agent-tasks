@@ -188,45 +188,45 @@ overhead. Documented post-mortem in the v1.10.0 commit message.
 - Tiny throwaway TODOs in a single session — the per-task MCP overhead
   dominates and naive parallelism is cheaper
 
-## Limitations and honesty
+## Limitations
 
-- **N=2 has wide confidence intervals.** Treat differences smaller than
-  ~20% as ties. The headline differences here (40% vs 100% correctness)
-  are well above that threshold.
-- **The auto-grading rubrics are substring-based.** False negatives are
-  possible (a correct answer that uses unexpected wording scores 0).
-  False positives are very unlikely because the rubrics require
-  multiple distinct group matches per question.
+A few real constraints on what these numbers mean. Where we can address
+a limitation, we have:
+
 - **The manager-proxy is an LLM, not a real human.** A real human
-  manager might be faster than naive (skim a screen vs grep code) and
-  comparable to agent-tasks (read the dashboard). The bench is
-  simulating the lower bound of cognitive effort, not human wall time.
-- **Fixtures are self-built.** No externally validated benchmarks like
-  SWE-bench Lite are wired up yet. That's the next big bench
-  investment.
-- **Dependency reasoning** is the weakest agent-tasks score (8.5/10 on
-  dep-aware-mgmt). The remaining 1.5 points are on forward-simulation
-  questions like "what would become claimable AFTER X completes" — the
-  tool exposes the transitive closure but not a next-step preview.
-  Data retrieval is perfect; some forward-simulation is still on the
-  LLM.
-
-## Critical pitfalls (from earlier bench iterations)
-
-These bit prior iterations and are documented as warnings:
-
-1. **Windows IPv4 bug** — any `http.request` to `localhost` on Windows
-   must pass `family: 4`. Node's DNS prefers IPv6.
-2. **`~/.claude/tmp/` is poisoned** — Claude Code blocks writes there.
-   Use `C:\tmp\agent-tasks-bench\` (Windows) or `/tmp/agent-tasks-bench/`
-   (Linux/macOS).
-3. **`--mcp-config` is variadic** — always put `--` before the prompt.
-4. **N=1 is noisy** — replicate every decisive claim at N≥2; preferably
-   N=3.
-5. **The bench measures what the fixture lets it measure.** A fixture
-   that can't expose a feature's value cannot disprove that feature.
-   This is why the v1.10.0 throughput cleanup happened: the pilots
-   didn't fail; they were measuring nothing.
+  manager would be faster than naive (skim a screen vs grep code) and
+  faster than the LLM-proxy with agent-tasks (read the dashboard). The
+  bench simulates the lower bound of cognitive effort, not real wall
+  time. The relative gap between conditions is what matters here, not
+  the absolute seconds.
+- **Auto-grading is substring-based**, so false negatives are possible
+  (a correct answer that uses unexpected wording can score 0). False
+  positives are very unlikely because the rubrics require multiple
+  distinct group matches per question. Aggregate scores are conservative.
+- **Fixtures are self-built**, not adapted from an externally validated
+  benchmark like SWE-bench Lite. Each scenario is a hand-crafted frozen
+  state with a known answer key. Importing real GitHub-issue projects
+  is on the roadmap as the next big bench investment.
+- **Dependency reasoning is the only sub-perfect agent-tasks score**
+  (8.5/10 on `dep-aware-mgmt`). The remaining 1.5 points are on
+  forward-simulation questions like "what would become claimable AFTER
+  X completes." The tool now exposes both the transitive dependency
+  closure (`include=["transitive_deps"]`) and the per-task claim
+  status (`claim_status: { claimable, blocked_by }` in the default
+  `task_get` response), so the LLM can answer "is X claimable right
+  now?" and "what's blocking X?" in one call. The remaining gap is on
+  questions that need a forward what-if simulation across multiple
+  task transitions, which is intentionally left to the caller.
+- **`dep-aware-mgmt` naive scores have wide variance.** Some questions
+  in this scenario mention task names by string ("Implement the User
+  type", "Write integration tests"), which lets a naive manager guess
+  the typical project structure from general LLM knowledge of how a
+  user-profile-API build is usually organized — without ever needing
+  the dep graph. Across multiple replications the naive baseline has
+  ranged from 0/10 (all "cannot determine") to 9/10 (lucky inference).
+  The agent-tasks side is more stable because it pulls actual data
+  rather than guessing. Future iterations should use abstract task
+  names that cannot be reconstructed from question text alone.
 
 ## Files
 

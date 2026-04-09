@@ -413,6 +413,71 @@ describe('getDependencyClosure (transitive)', () => {
   });
 });
 
+describe('getClaimStatus', () => {
+  let ctx: ReturnType<typeof createTestContext>;
+  beforeEach(() => {
+    ctx = createTestContext();
+  });
+  afterEach(() => ctx.close());
+
+  it('returns claimable=true for an isolated task', () => {
+    const t = ctx.tasks.create({ title: 'solo' }, 'agent-1');
+    const s = ctx.tasks.getClaimStatus(t.id);
+    expect(s.claimable).toBe(true);
+    expect(s.blocked_by).toHaveLength(0);
+    expect(s.status).toBe('pending');
+  });
+
+  it('returns claimable=false with the specific blocker when a dep is incomplete', () => {
+    const dep = ctx.tasks.create({ title: 'must finish first' }, 'agent-1');
+    const task = ctx.tasks.create({ title: 'depends on it' }, 'agent-1');
+    ctx.tasks.addDependency(task.id, dep.id);
+    const s = ctx.tasks.getClaimStatus(task.id);
+    expect(s.claimable).toBe(false);
+    expect(s.blocked_by).toHaveLength(1);
+    expect(s.blocked_by[0].id).toBe(dep.id);
+    expect(s.blocked_by[0].title).toBe('must finish first');
+  });
+
+  it('returns claimable=true once the blocker is completed', () => {
+    const dep = ctx.tasks.create({ title: 'dep' }, 'agent-1');
+    const task = ctx.tasks.create({ title: 'task' }, 'agent-1');
+    ctx.tasks.addDependency(task.id, dep.id);
+    ctx.tasks.claim(dep.id, 'worker-1');
+    ctx.tasks.complete(dep.id, 'done');
+    const s = ctx.tasks.getClaimStatus(task.id);
+    expect(s.claimable).toBe(true);
+    expect(s.blocked_by).toHaveLength(0);
+  });
+
+  it('lists multiple incomplete blockers', () => {
+    const a = ctx.tasks.create({ title: 'A' }, 'agent-1');
+    const b = ctx.tasks.create({ title: 'B' }, 'agent-1');
+    const c = ctx.tasks.create({ title: 'C' }, 'agent-1');
+    ctx.tasks.addDependency(c.id, a.id);
+    ctx.tasks.addDependency(c.id, b.id);
+    const s = ctx.tasks.getClaimStatus(c.id);
+    expect(s.claimable).toBe(false);
+    expect(s.blocked_by.map((b) => b.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it('treats cancelled and failed dependencies as resolved (not blocking)', () => {
+    const dep = ctx.tasks.create({ title: 'dep' }, 'agent-1');
+    const task = ctx.tasks.create({ title: 'task' }, 'agent-1');
+    ctx.tasks.addDependency(task.id, dep.id);
+    ctx.tasks.cancel(dep.id, 'no longer needed');
+    const s = ctx.tasks.getClaimStatus(task.id);
+    expect(s.claimable).toBe(true);
+  });
+
+  it('reports the current status of the task itself', () => {
+    const t = ctx.tasks.create({ title: 'in progress' }, 'agent-1');
+    ctx.tasks.claim(t.id, 'worker-1');
+    const s = ctx.tasks.getClaimStatus(t.id);
+    expect(s.status).toBe('in_progress');
+  });
+});
+
 describe('next task', () => {
   it('returns highest-priority unassigned task', () => {
     ctx.tasks.create({ title: 'Low', priority: 1 }, 'agent-1');

@@ -957,6 +957,42 @@ export class TaskService {
     );
   }
 
+  /**
+   * Returns whether a task can be claimed RIGHT NOW (its direct `blocks`
+   * dependencies are all done) and, if not, lists the specific incomplete
+   * blocker tasks. A pre-computed view of what `claim()` would either
+   * accept or reject — so callers can show "claimable" or "blocked by X, Y"
+   * in a UI without trying claim and catching the exception.
+   *
+   * `claimable` is true iff every direct blocker has status in
+   * (completed, cancelled, failed). Tasks that are already in_progress
+   * or completed themselves are still reported with their current status,
+   * so the caller can also use this to answer "could a fresh worker pick
+   * this up?" — answer is `claimable && status === 'pending'`.
+   */
+  getClaimStatus(taskId: number): {
+    status: string;
+    claimable: boolean;
+    blocked_by: Array<{ id: number; title: string; status: string; stage: string }>;
+  } {
+    const task = this.requireTask(taskId);
+    const blockers = this.db.queryAll<Task>(
+      `SELECT t.* FROM tasks t JOIN task_dependencies d ON t.id = d.depends_on
+       WHERE d.task_id = ? AND d.relationship = 'blocks' AND t.status NOT IN ('completed', 'cancelled', 'failed')`,
+      [taskId],
+    );
+    return {
+      status: task.status,
+      claimable: blockers.length === 0,
+      blocked_by: blockers.map((b) => ({
+        id: b.id,
+        title: b.title,
+        status: b.status,
+        stage: b.stage,
+      })),
+    };
+  }
+
   // ---- Artifacts ----
 
   addArtifact(

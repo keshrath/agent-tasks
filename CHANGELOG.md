@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.10.3] - 2026-04-09
+
+### Added
+
+- **`task_get` default response now includes `claim_status`** — `{ status, claimable, blocked_by: [{id, title, status, stage}] }`. Lets a caller answer "is this task claimable right now?" and "what's blocking it?" without trying claim and catching the exception. Backed by a new `TaskService.getClaimStatus(taskId)` method.
+- 6 unit tests covering isolated, single-blocker, completed-blocker, multiple-blockers, cancelled-as-resolved, and in-progress-status cases.
+
+### Changed
+
+- **`bench/README.md`** — removed the "Critical pitfalls" section. Reframed the "Limitations" section: now documents what we've actually addressed (the new transitive_deps + claim_status capabilities) and notes the dep-aware-mgmt naive-baseline variance issue (questions leak task names, letting the LLM occasionally guess the project structure).
+
 ## [1.10.2] - 2026-04-09
 
 ### Added

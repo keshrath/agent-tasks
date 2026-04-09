@@ -150,10 +150,12 @@ export function handleGet(ctx: AppContext, args: Record<string, unknown>): unkno
   const commentCounts = ctx.comments.countByTaskIds([taskId]);
 
   const include = optStringArray(args, 'include') ?? [];
+  const claimStatus = ctx.tasks.getClaimStatus(taskId);
   const result: Record<string, unknown> = {
     ...task,
     comments_count: commentCounts[taskId] ?? 0,
     dependencies: deps,
+    claim_status: claimStatus,
     collaborators,
   };
 

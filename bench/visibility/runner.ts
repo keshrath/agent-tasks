@@ -147,7 +147,11 @@ function buildManagerPrompt(scenario: Scenario, condition: 'naive' | 'agent-task
     `  - mcp__agent-tasks__task_list({ project: "${scenario.project}" }) — see all tasks ` +
     `with status, stage, assignee, and DIRECT dependencies\n` +
     `  - mcp__agent-tasks__task_get({ task_id: <id>, include: ["artifacts", "comments"] }) ` +
-    `— read a single task with its spec/decision artifacts AND any comments\n` +
+    `— read a single task with its spec/decision artifacts AND any comments. ` +
+    `The default response also includes a "claim_status" field with ` +
+    `\`{ claimable: bool, blocked_by: [{id, title, status, stage}] }\` — use ` +
+    `this to answer "could a worker start task X right now?" and "what is X ` +
+    `waiting on?" without traversing the graph yourself.\n` +
     `  - mcp__agent-tasks__task_get({ task_id: <id>, include: ["transitive_deps"] }) ` +
     `— get the FULL upstream + downstream dependency closure for a task in ONE call. ` +
     `Returns { blockers_transitive: [...], blocking_transitive: [...], depth_blockers: N, ` +
