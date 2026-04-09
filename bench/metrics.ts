@@ -35,7 +35,7 @@ export interface AgentRun {
 export interface MultiAgentRun {
   run_id: string;
   workload: string;
-  condition: 'control' | 'pipeline-claim' | 'agent-tasks-claim' | 'flat-claim' | 'dep-aware';
+  condition: 'control' | 'agent-tasks-claim';
   agents: AgentRun[];
   // Total wall-clock for the whole multi-agent run (max, not sum).
   total_wall_ms: number;

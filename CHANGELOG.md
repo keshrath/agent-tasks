@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.10.1] - 2026-04-09
+
+### Changed
+
+- **bench: focused, LinkedIn-claim-aligned bench.** The bench now ships with one scenario per LinkedIn product claim plus the throughput pilot. Three v1.10.0 throughput pilots that produced no signal (`task-claim-race`, `dependency-graph`, `cross-session-pipeline`) were removed; their workload fixtures and runner functions are gone. The bench keeps only `realistic-funcs` for throughput.
+- **bench/visibility: two new scenarios** that test the LinkedIn features the v1.10.0 bench did not directly cover:
+  - **`dep-aware-mgmt`** — 8-task DAG (user profile API). Tests **Dependencies**. Manager questions about who's blocked, what becomes claimable when worker-B finishes, the critical path, transitive impact. **N=2 result: naive 0.0/10 (literal zero across both runs), agent-tasks 7.5/10.** The dependency graph data physically does not exist in the file system — only agent-tasks can answer these questions at all.
+  - **`gates-and-approvals`** — 6-task pricing rules build with two tasks at the review stage (one approved by alice with a "LGTM ship it" comment, one pending bob). Tests **Approvals**. Manager questions about reviewer verdicts, pending approval state, latency, what to do to unblock the project. **N=2 result: naive 0.5/10, agent-tasks 9.75/10.**
+- **bench/README.md** completely rewritten. Leads with a single bottom-line table mapping each of the five LinkedIn claims (Visibility, Stages, Dependencies, Approvals, Artifacts, plus parallel coordination) to its corresponding bench scenario and N=2 result. Aggregate across all 4 visibility scenarios: naive 1.83/10 (18%), agent-tasks 9.31/10 (93%) — **5.1× advantage on management correctness**.
+- **bench/runner.ts** — slimmed to a single throughput pilot (`runRealisticFuncs`). Removed `runTaskClaimRace`, `runDependencyGraph`, `runCrossSessionPipeline` and the `--pilot` flag (only one pilot exists now). Mock driver simplified.
+- **bench/drivers/cli.ts** — removed unused `dependencyEdges` option (only `taskDescriptions` remains, used by realistic-funcs and the seeded visibility scenarios).
+- **bench/metrics.ts** — narrowed `MultiAgentRun.condition` union to `'control' | 'agent-tasks-claim'`. Other condition labels were dead.
+- **bench/workloads/** — deleted `task-claim-race/` and `dependency-graph/`. Only `realistic-funcs/` remains.
+
+### Cumulative bench evaluation cost across v1.10.x: ~$10.
+
 ## [1.10.0] - 2026-04-09
 
 ### Added (from c237c69 — original commit being amended)

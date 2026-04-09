@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-09T10:02:08.444Z",
+  "generated_at": "2026-04-09T11:25:34.921Z",
   "scenarios": [
     {
       "scenario": "csv-export",
@@ -8,15 +8,15 @@
       "naive": [
         {
           "condition": "naive",
-          "wall_seconds": 27.075,
-          "cost_usd": 0.17703475,
-          "tokens": 745,
-          "total_score": 4,
+          "wall_seconds": 26.844,
+          "cost_usd": 0.179333,
+          "tokens": 750,
+          "total_score": 5,
           "max_score": 10,
           "per_question": [
             {
               "id": 1,
-              "answer": "Per README: worker-2 is implementing `exportCsv()` and worker-3 is implementing `parseImport()`. Worker-1 previously spec'd the format.",
+              "answer": "Worker-2 is implementing exportCsv() (in export.js); worker-3 is implementing parseImport(). Worker-1's spec task appears finished.",
               "score": 1,
               "matched_groups": 4,
               "total_groups": 4,
@@ -32,7 +32,7 @@
             },
             {
               "id": 3,
-              "answer": "Yes — worker-1 finalized the CSV format spec.",
+              "answer": "Yes — worker-1 spec'd the CSV format per the README.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -48,7 +48,7 @@
             },
             {
               "id": 5,
-              "answer": "NO — the spec says include archived by default, but export.js calls `listItems({ includeArchived: false })`, filtering them out.",
+              "answer": "NO — the spec says archived items should be included by default, but export.js passes includeArchived:false, filtering them out.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -64,7 +64,7 @@
             },
             {
               "id": 7,
-              "answer": "Worker-3 was implementing `parseImport()`; the next agent should first read the CSV format spec artifact authored by worker-1 (location unknown — stored in the agents coordination layer, not the filesystem).",
+              "answer": "Worker-3 was implementing parseImport(); the next agent would first need to read worker-1's CSV format spec (recorded in the agents coordination layer, not on disk here) before resuming.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -80,11 +80,11 @@
             },
             {
               "id": 9,
-              "answer": "cannot determine from available information.",
-              "score": 0,
-              "matched_groups": 0,
+              "answer": "Most likely the format-spec task by worker-1, whose outcome was a finalized CSV export format spec.",
+              "score": 1,
+              "matched_groups": 1,
               "total_groups": 1,
-              "reason": "no answer or \"cannot determine\""
+              "reason": "all groups matched"
             },
             {
               "id": 10,
@@ -98,15 +98,15 @@
         },
         {
           "condition": "naive",
-          "wall_seconds": 26.135,
-          "cost_usd": 0.18033824999999998,
-          "tokens": 790,
-          "total_score": 2,
+          "wall_seconds": 24.573,
+          "cost_usd": 0.1776405,
+          "tokens": 770,
+          "total_score": 3,
           "max_score": 10,
           "per_question": [
             {
               "id": 1,
-              "answer": "cannot determine from available information. README indicates worker-2 is implementing exportCsv() and worker-3 is implementing parseImport(), but no task titles or progress records are on the file system.",
+              "answer": "cannot determine from available information. README indicates worker-2 is implementing exportCsv() and worker-3 is implementing parseImport(), but no live task tracker is present.",
               "score": 0,
               "matched_groups": 0,
               "total_groups": 4,
@@ -122,15 +122,15 @@
             },
             {
               "id": 3,
-              "answer": "cannot determine from available information. README says worker-1 spec'd the format but the spec itself is not in the file system.",
-              "score": 0,
-              "matched_groups": 0,
+              "answer": "Yes — worker-1 spec'd the CSV format, per README.",
+              "score": 1,
+              "matched_groups": 2,
               "total_groups": 2,
-              "reason": "no answer or \"cannot determine\""
+              "reason": "all groups matched"
             },
             {
               "id": 4,
-              "answer": "cannot determine from available information.",
+              "answer": "cannot determine from available information. The rationale is recorded in the agents' coordination layer, not in any file in this directory.",
               "score": 0,
               "matched_groups": 0,
               "total_groups": 2,
@@ -138,7 +138,7 @@
             },
             {
               "id": 5,
-              "answer": "NO. The spec (per the in-file comment) says archived items should be included by default, but export.js calls listItems({ includeArchived: false }), filtering them out.",
+              "answer": "NO — the spec says archived items should be included by default, but export.js calls listItems({ includeArchived: false }), filtering them out.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -146,7 +146,7 @@
             },
             {
               "id": 6,
-              "answer": "cannot determine from available information; no per-worker timestamps or activity logs exist on disk.",
+              "answer": "cannot determine from available information.",
               "score": 0,
               "matched_groups": 0,
               "total_groups": 1,
@@ -154,7 +154,7 @@
             },
             {
               "id": 7,
-              "answer": "Worker-3 was implementing parseImport() (in import.js). The next agent should FIRST read the CSV format spec authored by worker-1 (not on the local filesystem — must be fetched from the agents' coordination layer) before resuming.",
+              "answer": "Worker-3 was implementing parseImport() (the import.js side); the next agent should FIRST read worker-1's CSV format spec (recorded in the agents' coordination layer) before resuming.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -170,7 +170,7 @@
             },
             {
               "id": 9,
-              "answer": "cannot determine from available information.",
+              "answer": "cannot determine from available information. The only completed item visible is worker-1's format spec.",
               "score": 0,
               "matched_groups": 0,
               "total_groups": 1,
@@ -190,15 +190,15 @@
       "agent-tasks": [
         {
           "condition": "agent-tasks",
-          "wall_seconds": 48.88,
-          "cost_usd": 0.44492175,
-          "tokens": 2081,
+          "wall_seconds": 45.714,
+          "cost_usd": 0.44990675,
+          "tokens": 1995,
           "total_score": 10,
           "max_score": 10,
           "per_question": [
             {
               "id": 1,
-              "answer": "Task #3 \"Implement exportCsv() in export.js\" is being worked by worker-2, and Task #4 \"Implement parseImport() in import.js\" is being worked by worker-3. (Task tool marks them failed due to session cleanup, but at this snapshot they are the in-flight implementation tasks.)",
+              "answer": "Task #3 \"Implement exportCsv() in export.js\" is assigned to worker-2, and Task #4 \"Implement parseImport() in import.js\" is assigned to worker-3 (both currently marked failed by stale-session cleanup, but these are the in-flight implement-stage items).",
               "score": 1,
               "matched_groups": 4,
               "total_groups": 4,
@@ -206,7 +206,7 @@
             },
             {
               "id": 2,
-              "answer": "Nothing is hard-blocked by dependencies — the spec (#1) and format decision (#2) are done, unblocking #3 and #4; however worker-3 on #4 is effectively stalled because it hasn't yet read the spec artifact on task #1.",
+              "answer": "Nothing is formally blocked — spec (task #1) is done, unblocking both implement tasks; however worker-3 is effectively stalled waiting to read the spec artifact before writing any code.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -214,7 +214,7 @@
             },
             {
               "id": 3,
-              "answer": "Yes — finalized by worker-1 on task #1, result: \"RFC 4180 dialect, headers id/title/status/created_at/archived\".",
+              "answer": "Yes — finalized by worker-1 on task #1, RFC 4180 dialect with headers id/title/status/created_at/archived.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -222,7 +222,7 @@
             },
             {
               "id": 4,
-              "answer": "CSV was chosen because the user base lives in Excel and CSV is the simplest format Excel imports without quirks; JSON would require a separate viewer, XLSX needs a binary library dependency, and TSV is less universally recognized.",
+              "answer": "CSV was chosen because the user base lives in Excel and CSV imports there without quirks; JSON would need a separate viewer, XLSX requires a binary library dependency, and TSV is less universally recognized by spreadsheet tools.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -230,7 +230,7 @@
             },
             {
               "id": 5,
-              "answer": "NO — the spec requires including ALL items including archived by default, but export.js line 8 calls `listItems({ includeArchived: false })`, filtering archived items out, which contradicts the spec.",
+              "answer": "NO — the spec says archived items must be included by default, but export.js calls listItems({ includeArchived: false }), filtering them out (explicitly flagged as a TRAP in the code comment).",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -238,7 +238,7 @@
             },
             {
               "id": 6,
-              "answer": "Task #4 (parseImport() by worker-3) — claimed ~5 minutes ago and has produced no code yet, while worker-2 on #3 started ~3 minutes ago and has already written the header row and row builder.",
+              "answer": "Task #4 (parseImport, worker-3) — claimed ~5 minutes ago with no code produced yet, versus task #3 which has header row and a row builder written ~3 minutes ago.",
               "score": 1,
               "matched_groups": 1,
               "total_groups": 1,
@@ -246,7 +246,7 @@
             },
             {
               "id": 7,
-              "answer": "Worker-3 was on task #4 \"Implement parseImport() in import.js\"; the next agent must FIRST read the `spec` artifact on task #1 (\"Spec the CSV export format\") before resuming, since parseImport must round-trip against the RFC 4180 spec and worker-3's own comment noted it hadn't read that spec yet.",
+              "answer": "Worker-3 was on task #4 \"Implement parseImport() in import.js\"; the next agent must FIRST read the spec artifact named \"spec\" on task #1 (\"Spec the CSV export format\") before resuming.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -254,7 +254,7 @@
             },
             {
               "id": 8,
-              "answer": "Four tasks remain: #3 exportCsv, #4 parseImport, #5 round-trip tests, and #6 the `todo export` CLI subcommand.",
+              "answer": "Four tasks remain before ship: #3 exportCsv, #4 parseImport, #5 round-trip tests, and #6 CLI subcommand.",
               "score": 1,
               "matched_groups": 1,
               "total_groups": 1,
@@ -262,7 +262,7 @@
             },
             {
               "id": 9,
-              "answer": "Tasks #1 (spec) and #2 (CSV-vs-JSON decision) are both marked done with identical timestamps; #1 \"Spec the CSV export format\" finalized the RFC 4180 dialect with headers id/title/status/created_at/archived.",
+              "answer": "Tasks #1 (spec) and #2 (CSV-vs-JSON decision) were completed at the same timestamp; task #1's outcome was a finalized RFC 4180 spec with id/title/status/created_at/archived headers and archived-included-by-default behavior.",
               "score": 1,
               "matched_groups": 1,
               "total_groups": 1,
@@ -270,7 +270,7 @@
             },
             {
               "id": 10,
-              "answer": "Backlog (pending) tasks: #5 \"Tests for export round-trip\" and #6 \"CLI subcommand: `todo export`\".",
+              "answer": "Backlog (pending, unassigned): #5 \"Tests for export round-trip\" and #6 \"CLI subcommand: `todo export`\".",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -280,15 +280,15 @@
         },
         {
           "condition": "agent-tasks",
-          "wall_seconds": 45.762,
-          "cost_usd": 0.38498024999999997,
-          "tokens": 2001,
+          "wall_seconds": 40.411,
+          "cost_usd": 0.332812,
+          "tokens": 1731,
           "total_score": 10,
           "max_score": 10,
           "per_question": [
             {
               "id": 1,
-              "answer": "Task #3 \"Implement exportCsv() in export.js\" — worker-2; Task #4 \"Implement parseImport() in import.js\" — worker-3. (Shown as failed only due to stale-session cleanup on session start, but they are the active in-flight items.)",
+              "answer": "Task #3 \"Implement exportCsv() in export.js\" — worker-2; Task #4 \"Implement parseImport() in import.js\" — worker-3.",
               "score": 1,
               "matched_groups": 4,
               "total_groups": 4,
@@ -296,7 +296,7 @@
             },
             {
               "id": 2,
-              "answer": "No task is blocked by dependencies — the spec blocker (#1) is done. Worker-3 is effectively idle pending reading the spec artifact, but that's not a formal block.",
+              "answer": "Nothing is blocked by dependencies — both in-flight implementation tasks have their spec blocker (task #1) satisfied; worker-3 is self-reportedly waiting to read the spec but not formally blocked.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -304,7 +304,7 @@
             },
             {
               "id": 3,
-              "answer": "Yes — finalized by worker-1 as artifact \"spec\" on task #1 (RFC 4180, headers id/title/status/created_at/archived).",
+              "answer": "Yes — finalized by worker-1 on task #1, as an RFC 4180 spec artifact (headers: id/title/status/created_at/archived).",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -312,7 +312,7 @@
             },
             {
               "id": 4,
-              "answer": "The user base works in Excel; CSV imports into Excel without quirks, whereas JSON would need a separate viewer, XLSX requires a binary library dependency, and TSV is less universally recognized by spreadsheet tools.",
+              "answer": "The user base works in Excel, and CSV is the simplest format Excel imports without quirks; JSON needs a separate viewer, XLSX needs a binary library, and TSV is less universally recognized.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -320,7 +320,7 @@
             },
             {
               "id": 5,
-              "answer": "NO — export.js calls `listItems({ includeArchived: false })`, filtering archived out, but the spec explicitly says the default must include ALL items including archived ones.",
+              "answer": "NO — the spec says archived items must be included by default, but export.js calls listItems({ includeArchived: false }), filtering them out.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -328,7 +328,7 @@
             },
             {
               "id": 6,
-              "answer": "Task #4 (parseImport, worker-3) — claimed ~5 minutes ago with zero code produced, versus worker-2 who started ~3 minutes ago and has header + row builder committed.",
+              "answer": "Task #4 (parseImport, worker-3) — claimed ~5 minutes ago with zero code produced, vs task #3 which has header row and row-builder progress from ~3 minutes ago.",
               "score": 1,
               "matched_groups": 1,
               "total_groups": 1,
@@ -336,7 +336,7 @@
             },
             {
               "id": 7,
-              "answer": "Worker-3 was on Task #4 \"Implement parseImport() in import.js\"; the next agent must FIRST read the spec artifact named \"spec\" on task #1 (CSV format / archived-default rules) before writing any parser code.",
+              "answer": "Worker-3 was on task #4 (parseImport in import.js); the next agent must FIRST read the spec artifact named \"spec\" on task #1 (the RFC 4180 CSV format spec) before writing any parser code.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -352,7 +352,7 @@
             },
             {
               "id": 9,
-              "answer": "Tasks #1 (spec) and #2 (CSV-vs-JSON decision) completed at the same timestamp; the decision task's outcome: CSV (RFC 4180) was chosen over JSON/XLSX/TSV for Excel compatibility.",
+              "answer": "Tasks #1 (spec) and #2 (CSV-vs-JSON decision) both completed at the same timestamp; task #2's outcome: CSV (RFC 4180) was chosen over JSON/XLSX/TSV for Excel compatibility.",
               "score": 1,
               "matched_groups": 1,
               "total_groups": 1,
@@ -377,9 +377,9 @@
       "naive": [
         {
           "condition": "naive",
-          "wall_seconds": 30.609,
-          "cost_usd": 0.19767925,
-          "tokens": 842,
+          "wall_seconds": 28.633,
+          "cost_usd": 0.19895174999999998,
+          "tokens": 862,
           "total_score": 2,
           "max_score": 10,
           "per_question": [
@@ -417,7 +417,7 @@
             },
             {
               "id": 5,
-              "answer": "Per IP; the shouldAllow method keys requests by IP, but the rationale is not recorded in the repo.",
+              "answer": "Per IP (shouldAllow takes an ip and the file comment says \"per IP\"); rationale is not recorded in the repo.",
               "score": 0.5,
               "matched_groups": 1,
               "total_groups": 2,
@@ -433,7 +433,7 @@
             },
             {
               "id": 7,
-              "answer": "10 requests per 60000ms (1 minute) window per IP, per the RateLimiter defaults in src/rate-limiter.js.",
+              "answer": "Sliding window, 10 requests per 60000 ms (60s) window per IP, as set by the RateLimiter defaults.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -441,7 +441,7 @@
             },
             {
               "id": 8,
-              "answer": "cannot determine from available information; the limiter returns a retryAfter value in seconds but the HTTP status/header wiring is not present in this repo.",
+              "answer": "cannot determine from available information (the RateLimiter returns a retryAfter value in seconds but no HTTP status or header is set in this repo).",
               "score": 0,
               "matched_groups": 0,
               "total_groups": 2,
@@ -449,7 +449,7 @@
             },
             {
               "id": 9,
-              "answer": "Yes — an allowlist is passed as a constructor argument (array of IPs) to RateLimiter and checked via a Set in shouldAllow.",
+              "answer": "Yes — an allowlist is passed as the third constructor argument to RateLimiter and stored as a Set; allowlisted IPs are always allowed.",
               "score": 0.5,
               "matched_groups": 1,
               "total_groups": 2,
@@ -467,10 +467,10 @@
         },
         {
           "condition": "naive",
-          "wall_seconds": 26.951,
-          "cost_usd": 0.1761515,
-          "tokens": 743,
-          "total_score": 2,
+          "wall_seconds": 32.655,
+          "cost_usd": 0.22232449999999998,
+          "tokens": 1003,
+          "total_score": 3.5,
           "max_score": 10,
           "per_question": [
             {
@@ -507,7 +507,7 @@
             },
             {
               "id": 5,
-              "answer": "Per IP — the `shouldAllow` method keys on `ip` and the allowlist is an IP set; rationale is not recorded in the repo.",
+              "answer": "Per IP — the limiter keys requests by `req.ip` in src/auth.js and src/rate-limiter.js; no spec rationale is recorded in the repo.",
               "score": 0.5,
               "matched_groups": 1,
               "total_groups": 2,
@@ -523,7 +523,7 @@
             },
             {
               "id": 7,
-              "answer": "Default 10 requests per 60000 ms (60s) window per IP, using a sliding window algorithm.",
+              "answer": "10 requests per 60000 ms (1 minute) sliding window, per IP (defaults in src/rate-limiter.js).",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -531,19 +531,19 @@
             },
             {
               "id": 8,
-              "answer": "cannot determine from available information — the limiter returns a `retryAfter` value in seconds (suggesting a `Retry-After` header) but no HTTP status code is set in this repo.",
-              "score": 0,
-              "matched_groups": 0,
+              "answer": "HTTP 429 with a `Retry-After` header carrying the retry hint (src/auth.js).",
+              "score": 1,
+              "matched_groups": 2,
               "total_groups": 2,
-              "reason": "no answer or \"cannot determine\""
+              "reason": "all groups matched"
             },
             {
               "id": 9,
-              "answer": "Yes — an allowlist of IPs passed to the `RateLimiter` constructor as an array, stored in a Set and checked first in `shouldAllow`.",
-              "score": 0.5,
-              "matched_groups": 1,
+              "answer": "Yes — an allowlist is passed to the RateLimiter constructor; in src/auth.js it is configured via the `RATE_LIMIT_ALLOWLIST` environment variable as a comma-separated list of IPs.",
+              "score": 1,
+              "matched_groups": 2,
               "total_groups": 2,
-              "reason": "matched 1 of 2 groups"
+              "reason": "all groups matched"
             },
             {
               "id": 10,
@@ -559,15 +559,15 @@
       "agent-tasks": [
         {
           "condition": "agent-tasks",
-          "wall_seconds": 37.173,
-          "cost_usd": 0.33608425000000003,
-          "tokens": 1538,
+          "wall_seconds": 27.344,
+          "cost_usd": 0.305115,
+          "tokens": 1151,
           "total_score": 10,
           "max_score": 10,
           "per_question": [
             {
               "id": 1,
-              "answer": "The spec was written by worker-spec (artifact created_by bench-driver in task #1) and was reviewed and approved by worker-reviewer on 2026-03-10 with no revisions requested.",
+              "answer": "The spec was written by worker-spec (artifact created by bench-driver on task 1); it was reviewed and approved by worker-reviewer on 2026-03-10 with no revisions requested.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -575,7 +575,7 @@
             },
             {
               "id": 2,
-              "answer": "Sliding window was chosen because token bucket's burst tolerance would let an attacker exhaust the bucket in one burst, and fixed window has the edge-of-window doubling problem (10 reqs at 0:59 + 10 at 1:00 = 20/sec); sliding window gives smooth enforcement without burst tolerance.",
+              "answer": "Sliding window was chosen over token bucket because token bucket has burst tolerance that's explicitly undesired for the auth endpoint — an attacker could exhaust the bucket in one burst; fixed window was rejected for the edge-of-window doubling problem.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -599,7 +599,7 @@
             },
             {
               "id": 5,
-              "answer": "Per source IP, not per authenticated user, because the limit must apply to pre-auth requests too — \"otherwise an attacker can exhaust the auth endpoint by trying many usernames.\"",
+              "answer": "Per source IP, NOT per authenticated user. Rationale quoted: \"the limit must apply to pre-auth requests too, otherwise an attacker can exhaust the auth endpoint by trying many usernames.\"",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -607,7 +607,7 @@
             },
             {
               "id": 6,
-              "answer": "The reviewer raised a concern about whether in-memory storage would cause production issues; it was resolved when worker-impl confirmed it was acceptable per spec (\"acceptable to lose state on restart\").",
+              "answer": "The reviewer questioned whether in-memory storage would cause production issues; it was resolved when worker-impl confirmed it was acceptable per spec (\"Acceptable to lose state on restart\").",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -615,7 +615,7 @@
             },
             {
               "id": 7,
-              "answer": "10 requests per second per source IP, enforced as a sliding 60-second window with a 10-request cap.",
+              "answer": "10 requests per second per source IP, enforced with a sliding 60-second window capped at 10 requests.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -623,7 +623,7 @@
             },
             {
               "id": 8,
-              "answer": "HTTP 429, with the Retry-After header set to the remaining window seconds.",
+              "answer": "HTTP 429 is returned, with the Retry-After header set to the remaining window seconds.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -649,15 +649,15 @@
         },
         {
           "condition": "agent-tasks",
-          "wall_seconds": 29.247,
-          "cost_usd": 0.3082205,
-          "tokens": 1198,
+          "wall_seconds": 28.913,
+          "cost_usd": 0.32190925000000004,
+          "tokens": 1313,
           "total_score": 10,
           "max_score": 10,
           "per_question": [
             {
               "id": 1,
-              "answer": "The spec was written by worker-spec (artifact on task 1) and was reviewed and approved by worker-reviewer on 2026-03-10 with no revisions requested.",
+              "answer": "worker-spec wrote the spec; it was reviewed and approved by worker-reviewer on 2026-03-10 with no revisions requested.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -665,7 +665,7 @@
             },
             {
               "id": 2,
-              "answer": "Sliding window was chosen because token bucket's burst tolerance would let an attacker exhaust the bucket in one burst, and fixed window has the edge-of-window doubling problem (10 reqs at 0:59 + 10 at 1:00 = 20 in 1s); sliding window gives smooth enforcement with no burst tolerance.",
+              "answer": "Sliding window was chosen because token bucket's burst tolerance would let an attacker exhaust the auth endpoint in one burst, and fixed window suffers the edge-of-window doubling problem (10 reqs at 0:59 + 10 at 1:00 = 20/sec); sliding window gives smooth enforcement without burst tolerance.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -673,7 +673,7 @@
             },
             {
               "id": 3,
-              "answer": "14 unit tests were written for the RateLimiter, and all 14 passed.",
+              "answer": "14 unit tests were written for the RateLimiter, and all passed.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -681,7 +681,7 @@
             },
             {
               "id": 4,
-              "answer": "6 integration tests were written for auth + rate limit, and all 6 passed.",
+              "answer": "6 integration tests were written, and all passed.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -713,7 +713,7 @@
             },
             {
               "id": 8,
-              "answer": "HTTP 429 is returned, with the Retry-After header set to the remaining window seconds.",
+              "answer": "HTTP 429, with the Retry-After header set to the remaining window seconds.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -721,7 +721,7 @@
             },
             {
               "id": 9,
-              "answer": "Yes, an allowlist exists for monitoring IPs, configured via an environment variable.",
+              "answer": "Yes — an allowlist for monitoring IPs, configured via an environment variable.",
               "score": 1,
               "matched_groups": 2,
               "total_groups": 2,
@@ -733,6 +733,744 @@
               "score": 1,
               "matched_groups": 8,
               "total_groups": 8,
+              "reason": "all groups matched"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "dep-aware-mgmt",
+      "description": "8 tasks in a real DAG (user profile API build). Tests the DEPENDENCIES feature: manager questions about who's blocked on whom, what's unblockable now, critical path, etc.",
+      "n_runs": 2,
+      "naive": [
+        {
+          "condition": "naive",
+          "wall_seconds": 28.498,
+          "cost_usd": 0.17559699999999995,
+          "tokens": 790,
+          "total_score": 0,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 2,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 3,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 3,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 4,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 3,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 5,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 6,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 7,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 8,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 9,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 10,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 5,
+              "reason": "no answer or \"cannot determine\""
+            }
+          ]
+        },
+        {
+          "condition": "naive",
+          "wall_seconds": 22.551,
+          "cost_usd": 0.17819325,
+          "tokens": 674,
+          "total_score": 0,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 2,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 3,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 3,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 4,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 3,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 5,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 6,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 7,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 8,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 9,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 10,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 5,
+              "reason": "no answer or \"cannot determine\""
+            }
+          ]
+        }
+      ],
+      "agent-tasks": [
+        {
+          "condition": "agent-tasks",
+          "wall_seconds": 35.829,
+          "cost_usd": 0.3423845,
+          "tokens": 1529,
+          "total_score": 6,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "Tasks 4, 5, 6 are blocked on task 3 (Implement the User type). Tasks 7 and 8 are blocked on 4, 5, and 6 (and transitively on 3).",
+              "score": 0.5,
+              "matched_groups": 1,
+              "total_groups": 2,
+              "reason": "matched 1 of 2 groups"
+            },
+            {
+              "id": 2,
+              "answer": "Tasks 4, 5, and 6 (GET, PUT, DELETE endpoints) would immediately become claimable.",
+              "score": 0,
+              "matched_groups": 1,
+              "total_groups": 3,
+              "reason": "matched 1 of 3 groups"
+            },
+            {
+              "id": 3,
+              "answer": "No — task 7 is blocked on tasks 4, 5, and 6, none of which are complete (and those in turn wait on task 3).",
+              "score": 0.5,
+              "matched_groups": 1,
+              "total_groups": 2,
+              "reason": "matched 1 of 2 groups"
+            },
+            {
+              "id": 4,
+              "answer": "1 → 3 → 4 (or 5 or 6) → 7 (or 8), a chain of 4 tasks.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 3,
+              "reason": "matched 0 of 3 groups"
+            },
+            {
+              "id": 5,
+              "answer": "Zero — every unfinished task is either assigned/failed (task 3) or blocked on an incomplete dependency.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 6,
+              "answer": "Tasks 1 (Spec the User type) and 2 (Spec the API endpoints) have no dependencies.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 7,
+              "answer": "Five downstream tasks would be impacted: 4, 5, 6, 7, and 8.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "Three workers can work in parallel on tasks 4, 5, and 6 (GET, PUT, DELETE endpoints).",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 9,
+              "answer": "5 out of 8 tasks (62.5%) are currently blocked waiting on another task — tasks 4, 5, 6, 7, 8.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 10,
+              "answer": "Tasks 4, 5, 6, 7, and 8 all depend (directly or transitively) on task 3.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 5,
+              "reason": "matched 0 of 5 groups"
+            }
+          ]
+        },
+        {
+          "condition": "agent-tasks",
+          "wall_seconds": 36.744,
+          "cost_usd": 0.3461725,
+          "tokens": 1680,
+          "total_score": 9,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "Tasks 4,5,6 (GET/PUT/DELETE endpoints) are blocked on task 3 (Implement User type); tasks 7 (integration tests) and 8 (API docs) are blocked on tasks 4, 5, and 6 (and transitively on 3).",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 2,
+              "answer": "Tasks 4, 5, and 6 (GET, PUT, DELETE /user/:id endpoints) would immediately become claimable, since their other blocker (task 2, Spec API endpoints) is already completed.",
+              "score": 0,
+              "matched_groups": 1,
+              "total_groups": 3,
+              "reason": "matched 1 of 3 groups"
+            },
+            {
+              "id": 3,
+              "answer": "No — task 7 is blocked on tasks 4, 5, and 6 (the three endpoint implementations), none of which are complete yet.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 4,
+              "answer": "Length 4: Spec the User type (1) → Implement User type (3) → Implement an endpoint (4/5/6) → Write integration tests (7) [or Write API documentation (8)].",
+              "score": 1,
+              "matched_groups": 3,
+              "total_groups": 3,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 5,
+              "answer": "Zero — every unassigned task (4–8) is still blocked by an incomplete dependency.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 6,
+              "answer": "Tasks 1 (Spec the User type) and 2 (Spec the API endpoints) have no blockers.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 7,
+              "answer": "Five downstream tasks would be impacted: 4, 5, 6 (directly) and 7, 8 (transitively).",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "Three workers — tasks 4, 5, and 6 can all run in parallel once task 3 completes; tasks 7 and 8 remain blocked until those three finish.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 9,
+              "answer": "5 out of 8 tasks (62.5%) are currently blocked waiting on at least one other task (tasks 4, 5, 6, 7, 8).",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 10,
+              "answer": "Tasks 4 (GET), 5 (PUT), and 6 (DELETE) depend directly; tasks 7 (integration tests) and 8 (API documentation) depend transitively via 4/5/6.",
+              "score": 1,
+              "matched_groups": 5,
+              "total_groups": 5,
+              "reason": "all groups matched"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "gates-and-approvals",
+      "description": "6-task workflow with two tasks at the review stage — one approved, one pending. Tests the APPROVALS feature: who reviewed what, what is still waiting on a human verdict.",
+      "n_runs": 2,
+      "naive": [
+        {
+          "condition": "naive",
+          "wall_seconds": 26.798,
+          "cost_usd": 0.19179274999999998,
+          "tokens": 761,
+          "total_score": 0,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 4,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 2,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 3,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 4,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 5,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 6,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 7,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 8,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 9,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 10,
+              "answer": "cannot determine from available information — the README explicitly states approval status is tracked in the agents system, not in this repo, so the manager should query that system (task_list / task_get) to see which review tasks are pending reviewer comments and ping the assigned reviewers.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            }
+          ]
+        },
+        {
+          "condition": "naive",
+          "wall_seconds": 28.161,
+          "cost_usd": 0.17631899999999998,
+          "tokens": 740,
+          "total_score": 1,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 4,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 2,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 3,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 4,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 5,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 6,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 7,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 8,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 2,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 9,
+              "answer": "cannot determine from available information.",
+              "score": 0,
+              "matched_groups": 0,
+              "total_groups": 1,
+              "reason": "no answer or \"cannot determine\""
+            },
+            {
+              "id": 10,
+              "answer": "Query the agent-tasks pipeline (http://localhost:3422 / task_list) to retrieve review-stage status and reviewer comments, since the README explicitly states approvals are tracked there and not in the repo.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            }
+          ]
+        }
+      ],
+      "agent-tasks": [
+        {
+          "condition": "agent-tasks",
+          "wall_seconds": 33.57,
+          "cost_usd": 0.32595825000000006,
+          "tokens": 1386,
+          "total_score": 10,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "Task #2 \"Implement RuleEngine class\" is APPROVED (by alice); Task #3 \"Implement match predicate parser\" is PENDING (awaiting bob).",
+              "score": 1,
+              "matched_groups": 4,
+              "total_groups": 4,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 2,
+              "answer": "Reviewer is alice. Verdict: APPROVED — \"LGTM, priority resolution looks correct, ship it.\" (left 2026-04-08, no changes requested).",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 3,
+              "answer": "Bob is assigned to review the match predicate parser task, and he has not yet responded with a verdict comment.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 4,
+              "answer": "Task #3 was advanced to review on 2026-04-08 and has been waiting on bob for approximately 6 hours (per the progress comment, as of 2026-04-09).",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 5,
+              "answer": "Not cleanly — although the review verdict is APPROVED, task #2's status is \"failed\" (stale session cleanup), so it would need to be reassigned/reopened before a worker could advance it from review to done.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 6,
+              "answer": "No — bob has not left a review verdict yet, and additionally the task's status is \"failed\" due to stale session cleanup, so it cannot be advanced.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 7,
+              "answer": "Task #6 \"Tests for match predicate parser\" is blocked by task #3.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "Yes — the pricing rules engine spec (task #1) was reviewed and approved by alice on 2026-04-05.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 9,
+              "answer": "Two distinct human reviewers: alice and bob.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 10,
+              "answer": "Ping bob to deliver his review verdict on task #3 (match predicate parser), since it is the sole blocker holding up the parser's test task and is the critical path; simultaneously reopen/reassign task #2 so its approved work can advance.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            }
+          ]
+        },
+        {
+          "condition": "agent-tasks",
+          "wall_seconds": 31.529,
+          "cost_usd": 0.31572325,
+          "tokens": 1249,
+          "total_score": 9.5,
+          "max_score": 10,
+          "per_question": [
+            {
+              "id": 1,
+              "answer": "Tasks at review stage: #2 \"Implement RuleEngine class\" — APPROVED (by alice); #3 \"Implement match predicate parser\" — PENDING (awaiting bob).",
+              "score": 1,
+              "matched_groups": 4,
+              "total_groups": 4,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 2,
+              "answer": "Reviewer is alice; verdict APPROVED: \"LGTM, priority resolution looks correct, ship it.\" No changes requested.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 3,
+              "answer": "Bob is assigned to review the match predicate parser task (#3); he has not yet responded with a verdict.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 4,
+              "answer": "It has been waiting on bob for approximately 6 hours (advanced to review on 2026-04-08).",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 5,
+              "answer": "No — although approved, task #2 has status=failed (stale session cleanup from worker-impl-1), so it must be reassigned/reopened before it can be advanced.",
+              "score": 0.5,
+              "matched_groups": 1,
+              "total_groups": 2,
+              "reason": "matched 1 of 2 groups"
+            },
+            {
+              "id": 6,
+              "answer": "No — task #3 has no reviewer verdict yet (bob pending) and is also in status=failed from stale session cleanup, so it cannot advance.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 7,
+              "answer": "Task #4 \"Wire RuleEngine into the checkout endpoint\" and #5 \"Tests for RuleEngine priority resolution\" are blocked by #2; task #6 \"Tests for match predicate parser\" is blocked by #3.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 8,
+              "answer": "Yes — the pricing rules engine spec (task #1) was reviewed and approved by alice on 2026-04-05.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 9,
+              "answer": "Two distinct human reviewers: alice and bob.",
+              "score": 1,
+              "matched_groups": 1,
+              "total_groups": 1,
+              "reason": "all groups matched"
+            },
+            {
+              "id": 10,
+              "answer": "Ping bob to complete his review of task #3 (match predicate parser), and reopen/reassign the failed-but-approved task #2 so the downstream checkout wiring and tests can proceed.",
+              "score": 1,
+              "matched_groups": 2,
+              "total_groups": 2,
               "reason": "all groups matched"
             }
           ]

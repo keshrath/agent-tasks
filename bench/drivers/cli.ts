@@ -43,11 +43,6 @@ export interface CliDriverOptions {
    * pre-seeded backlog tasks use these descriptions instead of the generic
    * "Implement <file>" template. */
   taskDescriptions?: string[];
-  /** Optional dependency edges for the pre-seeded tasks. Each pair `[i, j]` means
-   * "the task created for `expectedFiles[i]` depends on the task created for
-   * `expectedFiles[j]`" (i.e. j must complete before i can be claimed). Only
-   * applied in the `dep-aware` condition. */
-  dependencyEdges?: Array<[number, number]>;
 }
 
 const SUBGOAL_INSTRUCTION = `
@@ -161,16 +156,12 @@ export function makeCliDriver(opts: CliDriverOptions): AgentDriver {
       const runRoot = path.join(TMP_ROOT, `bench-${runId}`);
       await fs.mkdir(runRoot, { recursive: true });
 
-      const seededConditions = new Set(['agent-tasks-claim', 'flat-claim', 'dep-aware']);
-      const withMcp = seededConditions.has(condition);
+      const withMcp = condition === 'agent-tasks-claim';
       const dbPath = path.join(runRoot, 'agent-tasks.sqlite');
 
-      // For seeded conditions: pre-create one task per expected file via the
-      // shared DB. For `dep-aware`, also wire up `task_dependencies` edges so
-      // claim() blocks until parent tasks are complete.
       let seedCtx: AppContext | null = null;
       const taskIds: number[] = [];
-      if (seededConditions.has(condition)) {
+      if (condition === 'agent-tasks-claim') {
         seedCtx = createContext({ path: dbPath });
         for (let i = 0; i < opts.expectedFiles.length; i++) {
           const file = opts.expectedFiles[i];
@@ -187,11 +178,6 @@ export function makeCliDriver(opts: CliDriverOptions): AgentDriver {
             'bench-driver',
           );
           taskIds.push(t.id);
-        }
-        if (condition === 'dep-aware' && opts.dependencyEdges) {
-          for (const [child, parent] of opts.dependencyEdges) {
-            seedCtx.tasks.addDependency(taskIds[child], taskIds[parent], 'blocks');
-          }
         }
       }
 
