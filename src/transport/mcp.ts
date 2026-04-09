@@ -46,16 +46,16 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_get',
     description:
-      'Get a single task by ID. By default returns task with artifact count, comment count, dependencies, and collaborators. Use "include" to inline full subtasks, artifacts (filterable by stage), or comments (with limit).',
+      'Get a single task by ID. By default returns task with artifact count, comment count, dependencies, and collaborators. Use "include" to inline full subtasks, artifacts (filterable by stage), comments (with limit), or transitive_deps (full upstream + downstream closure of the dependency graph in one call — answers questions like "what depends on this task transitively?" and "what is its critical path depth?" without forcing the caller to BFS the graph).',
     inputSchema: {
       type: 'object',
       properties: {
         task_id: { type: 'number', description: 'Task ID to retrieve' },
         include: {
           type: 'array',
-          items: { type: 'string', enum: ['subtasks', 'artifacts', 'comments'] },
+          items: { type: 'string', enum: ['subtasks', 'artifacts', 'comments', 'transitive_deps'] },
           description:
-            'Inline related data: "subtasks" → child tasks, "artifacts" → full artifact list (use stage to filter), "comments" → discussion threads (use limit to cap)',
+            'Inline related data: "subtasks" → child tasks, "artifacts" → full artifact list (use stage to filter), "comments" → discussion threads (use limit to cap), "transitive_deps" → full upstream + downstream dependency closure with depth (one call answers transitive-impact questions)',
         },
         stage: {
           type: 'string',

@@ -18,8 +18,8 @@
 // before workers could produce useful output. realistic-funcs uses 50-150
 // LOC tasks (~$0.30-0.60 each of work) so the overhead is amortized.
 //
-// For the visibility / management dimension of agent-tasks (the actual
-// product claim from the LinkedIn post), see bench/visibility/.
+// For the visibility / management dimension of agent-tasks (the primary
+// product value), see bench/visibility/.
 
 import * as path from 'node:path';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';

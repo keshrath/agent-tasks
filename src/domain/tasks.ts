@@ -872,6 +872,91 @@ export class TaskService {
     );
   }
 
+  /**
+   * Walks the `blocks` dependency graph in both directions from `taskId` and
+   * returns the FULL transitive closure: every task that this task depends
+   * on (directly or via a chain), and every task that depends on this task.
+   *
+   * Used by callers that need to answer questions like "what's the critical
+   * path?", "what's the downstream impact if X fails?", "list every task
+   * that transitively depends on X". Doing those queries via repeated
+   * `getDependencies` calls forces the caller to implement BFS themselves
+   * — which LLMs are bad at. This is one round-trip and the answer is
+   * directly usable.
+   */
+  getDependencyClosure(taskId: number): {
+    blockers_transitive: Task[];
+    blocking_transitive: Task[];
+    depth_blockers: number;
+    depth_blocking: number;
+  } {
+    this.requireTask(taskId);
+
+    // Walk upstream (everything this task depends on, transitively).
+    const blockerIds = new Set<number>();
+    const blockerStack: Array<{ id: number; depth: number }> = [];
+    let maxDepthBlockers = 0;
+    {
+      const direct = this.db.queryAll<TaskDependency>(
+        `SELECT * FROM task_dependencies WHERE task_id = ? AND relationship = 'blocks'`,
+        [taskId],
+      );
+      for (const d of direct) blockerStack.push({ id: d.depends_on, depth: 1 });
+    }
+    while (blockerStack.length) {
+      const { id, depth } = blockerStack.pop()!;
+      if (blockerIds.has(id)) continue;
+      blockerIds.add(id);
+      if (depth > maxDepthBlockers) maxDepthBlockers = depth;
+      const next = this.db.queryAll<TaskDependency>(
+        `SELECT * FROM task_dependencies WHERE task_id = ? AND relationship = 'blocks'`,
+        [id],
+      );
+      for (const d of next) blockerStack.push({ id: d.depends_on, depth: depth + 1 });
+    }
+
+    // Walk downstream (everything that depends on this task, transitively).
+    const blockingIds = new Set<number>();
+    const blockingStack: Array<{ id: number; depth: number }> = [];
+    let maxDepthBlocking = 0;
+    {
+      const direct = this.db.queryAll<TaskDependency>(
+        `SELECT * FROM task_dependencies WHERE depends_on = ? AND relationship = 'blocks'`,
+        [taskId],
+      );
+      for (const d of direct) blockingStack.push({ id: d.task_id, depth: 1 });
+    }
+    while (blockingStack.length) {
+      const { id, depth } = blockingStack.pop()!;
+      if (blockingIds.has(id)) continue;
+      blockingIds.add(id);
+      if (depth > maxDepthBlocking) maxDepthBlocking = depth;
+      const next = this.db.queryAll<TaskDependency>(
+        `SELECT * FROM task_dependencies WHERE depends_on = ? AND relationship = 'blocks'`,
+        [id],
+      );
+      for (const d of next) blockingStack.push({ id: d.task_id, depth: depth + 1 });
+    }
+
+    const blockers_transitive = this.fetchTasksByIds([...blockerIds]);
+    const blocking_transitive = this.fetchTasksByIds([...blockingIds]);
+    return {
+      blockers_transitive,
+      blocking_transitive,
+      depth_blockers: maxDepthBlockers,
+      depth_blocking: maxDepthBlocking,
+    };
+  }
+
+  private fetchTasksByIds(ids: number[]): Task[] {
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => '?').join(',');
+    return this.db.queryAll<Task>(
+      `SELECT * FROM tasks WHERE id IN (${placeholders}) ORDER BY id ASC`,
+      ids,
+    );
+  }
+
   // ---- Artifacts ----
 
   addArtifact(

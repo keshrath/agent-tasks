@@ -2,34 +2,32 @@
 
 ## Bottom line
 
-agent-tasks ships five product claims: **Visibility ("at a glance"),
+agent-tasks ships five product features: **Visibility ("at a glance"),
 Stages, Dependencies, Approvals, Artifacts.** The bench tests each one
 directly with a manager-in-the-loop scenario and a known answer key.
 
-**Result across all five claims, N=2 per scenario:**
+**Result across all five features, N=2 per scenario:**
 
-| LinkedIn claim                          | Bench scenario                 | naive              | agent-tasks           |
-| --------------------------------------- | ------------------------------ | ------------------ | --------------------- |
-| "At a glance" / Visibility              | `csv-export`                   | 4.0 / 10           | **10.0 / 10** ⭐      |
-| **Artifacts**                           | `audit-recall`                 | 2.8 / 10           | **10.0 / 10** ⭐      |
-| **Dependencies**                        | `dep-aware-mgmt`               | **0.0 / 10**       | **7.5 / 10**          |
-| **Approvals**                           | `gates-and-approvals`          | **0.5 / 10**       | **9.75 / 10** ⭐      |
-| Parallel coordination                   | `realistic-funcs` (throughput) | 3.3 / 4 (83%)      | **4.0 / 4 (100%)** ⭐ |
-| **AGGREGATE (visibility, 4 scenarios)** |                                | **1.8 / 10 (18%)** | **9.3 / 10 (93%)**    |
+| Feature                                 | Bench scenario                 | naive               | agent-tasks           |
+| --------------------------------------- | ------------------------------ | ------------------- | --------------------- |
+| Visibility ("at a glance")              | `csv-export`                   | 4.0 / 10            | **10.0 / 10** ⭐      |
+| **Artifacts**                           | `audit-recall`                 | 2.8 / 10            | **10.0 / 10** ⭐      |
+| **Dependencies**                        | `dep-aware-mgmt`               | **0.5 / 10**        | **8.5 / 10** ⭐       |
+| **Approvals**                           | `gates-and-approvals`          | **0.5 / 10**        | **9.75 / 10** ⭐      |
+| Parallel coordination                   | `realistic-funcs` (throughput) | 3.3 / 4 (83%)       | **4.0 / 4 (100%)** ⭐ |
+| **AGGREGATE (visibility, 4 scenarios)** |                                | **1.95 / 10 (20%)** | **9.56 / 10 (96%)**   |
 
-**agent-tasks gives a manager observing a fleet of agents 5× better
+**agent-tasks gives a manager observing a fleet of agents ~5× better
 answer correctness on standard "what's going on?" questions, and is the
 ONLY way to answer questions about Dependencies or Approvals at all** —
 naive file-system inspection scores literal zero on those dimensions
 because the data physically does not exist where it can read.
 
-Total bench spend across the v1.10 evaluation cycle: ~$10.
-
 ## Why this is the right framing
 
-agent-tasks is a **Kanban dashboard for AI agent fleets** (per the
-LinkedIn post). The value is what the human manager can see across N
-parallel terminals, not how fast the workers individually run.
+agent-tasks is a **Kanban dashboard for AI agent fleets**. The value is
+what the human manager can see across N parallel terminals, not how fast
+the workers individually run.
 
 The bench measures this directly: a single "manager" agent (no prior
 context) is asked 10 standardized questions about a frozen project state,
@@ -46,10 +44,10 @@ dimensions.
 ## How to run
 
 ```bash
-# Mock driver (no API spend, harness sanity check)
+# Mock driver (no API calls, harness sanity check)
 npm run bench:visibility
 
-# All 4 visibility scenarios, N=2 each (~$4 in API spend)
+# All 4 visibility scenarios, N=2 each
 npm run bench:visibility -- --real --n-runs=2
 
 # A single scenario
@@ -206,10 +204,12 @@ overhead. Documented post-mortem in the v1.10.0 commit message.
 - **Fixtures are self-built.** No externally validated benchmarks like
   SWE-bench Lite are wired up yet. That's the next big bench
   investment.
-- **Dependency reasoning** is the weakest agent-tasks score (7.5/10 on
-  dep-aware-mgmt) because some questions require multi-step graph
-  traversal that the LLM doesn't always get right even with the data
-  in hand. Data retrieval is perfect; pure reasoning is weaker.
+- **Dependency reasoning** is the weakest agent-tasks score (8.5/10 on
+  dep-aware-mgmt). The remaining 1.5 points are on forward-simulation
+  questions like "what would become claimable AFTER X completes" — the
+  tool exposes the transitive closure but not a next-step preview.
+  Data retrieval is perfect; some forward-simulation is still on the
+  LLM.
 
 ## Critical pitfalls (from earlier bench iterations)
 

@@ -171,6 +171,10 @@ export function handleGet(ctx: AppContext, args: Record<string, unknown>): unkno
     result.comments = ctx.comments.list(taskId, optNumber(args, 'limit'));
   }
 
+  if (include.includes('transitive_deps')) {
+    result.transitive_deps = ctx.tasks.getDependencyClosure(taskId);
+  }
+
   return result;
 }
 

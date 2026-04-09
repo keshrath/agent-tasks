@@ -2,15 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.10.2] - 2026-04-09
+
+### Added
+
+- **`task_get include=["transitive_deps"]`** — new include option that returns the full upstream + downstream dependency closure for a task in one call. Backed by a new `TaskService.getDependencyClosure(taskId)` method (BFS over the `blocks` edge table, dedupes on diamond DAGs, ignores `related`/`duplicate` edges). Returns `{ blockers_transitive, blocking_transitive, depth_blockers, depth_blocking }`.
+- 5 unit tests covering isolated, chain, diamond, edge-type filtering, and not-found cases.
+
+### Changed
+
+- **`bench/README.md`** — neutral framing, no external references. Refreshed `dep-aware-mgmt` headline numbers (now 8.5/10 thanks to the new transitive_deps capability).
+
 ## [1.10.1] - 2026-04-09
 
 ### Changed
 
-- **bench: focused, LinkedIn-claim-aligned bench.** The bench now ships with one scenario per LinkedIn product claim plus the throughput pilot. Three v1.10.0 throughput pilots that produced no signal (`task-claim-race`, `dependency-graph`, `cross-session-pipeline`) were removed; their workload fixtures and runner functions are gone. The bench keeps only `realistic-funcs` for throughput.
-- **bench/visibility: two new scenarios** that test the LinkedIn features the v1.10.0 bench did not directly cover:
+- **bench: focused on the five product features.** The bench now ships with one scenario per product feature (Visibility, Stages, Dependencies, Approvals, Artifacts) plus the throughput pilot. Three v1.10.0 throughput pilots that produced no signal (`task-claim-race`, `dependency-graph`, `cross-session-pipeline`) were removed; their workload fixtures and runner functions are gone. The bench keeps only `realistic-funcs` for throughput.
+- **bench/visibility: two new scenarios** that directly test the features the v1.10.0 bench did not cover:
   - **`dep-aware-mgmt`** — 8-task DAG (user profile API). Tests **Dependencies**. Manager questions about who's blocked, what becomes claimable when worker-B finishes, the critical path, transitive impact. **N=2 result: naive 0.0/10 (literal zero across both runs), agent-tasks 7.5/10.** The dependency graph data physically does not exist in the file system — only agent-tasks can answer these questions at all.
   - **`gates-and-approvals`** — 6-task pricing rules build with two tasks at the review stage (one approved by alice with a "LGTM ship it" comment, one pending bob). Tests **Approvals**. Manager questions about reviewer verdicts, pending approval state, latency, what to do to unblock the project. **N=2 result: naive 0.5/10, agent-tasks 9.75/10.**
-- **bench/README.md** completely rewritten. Leads with a single bottom-line table mapping each of the five LinkedIn claims (Visibility, Stages, Dependencies, Approvals, Artifacts, plus parallel coordination) to its corresponding bench scenario and N=2 result. Aggregate across all 4 visibility scenarios: naive 1.83/10 (18%), agent-tasks 9.31/10 (93%) — **5.1× advantage on management correctness**.
+- **bench/README.md** completely rewritten. Leads with a single bottom-line table mapping each of the five product features (Visibility, Stages, Dependencies, Approvals, Artifacts, plus parallel coordination) to its corresponding bench scenario and N=2 result. Aggregate across all 4 visibility scenarios: naive 1.83/10 (18%), agent-tasks 9.31/10 (93%) — **5.1× advantage on management correctness**.
 - **bench/runner.ts** — slimmed to a single throughput pilot (`runRealisticFuncs`). Removed `runTaskClaimRace`, `runDependencyGraph`, `runCrossSessionPipeline` and the `--pilot` flag (only one pilot exists now). Mock driver simplified.
 - **bench/drivers/cli.ts** — removed unused `dependencyEdges` option (only `taskDescriptions` remains, used by realistic-funcs and the seeded visibility scenarios).
 - **bench/metrics.ts** — narrowed `MultiAgentRun.condition` union to `'control' | 'agent-tasks-claim'`. Other condition labels were dead.
@@ -49,7 +60,7 @@ All notable changes to this project will be documented in this file.
   - audit-recall: **naive 2.0/10, agent-tasks 10.0/10 ⭐** (perfect across both runs)
   - Cross-scenario aggregate: naive **2.5/10 (25%)** vs agent-tasks **10.0/10 (100%)** — **+7.5 score delta, 4× advantage** at ~$0.37 per query.
   - Total visibility-bench spend: **~$2.40 for 8 manager invocations** — produced the strongest evidence in the entire v1.10 cycle for one tenth the cost of the throughput sweep.
-- **What this proves**: agent-tasks's value is **management visibility for humans running fleets of agents**, not raw agent throughput. The naive manager cannot answer questions whose answers live in artifacts (specs, decisions, test results, review notes) or in task metadata (blocked, idle, count, backlog). agent-tasks captures all of these. The bench validates the LinkedIn pitch directly.
+- **What this proves**: agent-tasks's value is **management visibility for humans running fleets of agents**, not raw agent throughput. The naive manager cannot answer questions whose answers live in artifacts (specs, decisions, test results, review notes) or in task metadata (blocked, idle, count, backlog). agent-tasks captures all of these.
 
 ### Changed
 

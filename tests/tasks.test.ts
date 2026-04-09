@@ -337,6 +337,82 @@ describe('dependencies', () => {
   });
 });
 
+describe('getDependencyClosure (transitive)', () => {
+  let ctx: ReturnType<typeof createTestContext>;
+  beforeEach(() => {
+    ctx = createTestContext();
+  });
+  afterEach(() => ctx.close());
+
+  it('returns empty closure for an isolated task', () => {
+    const t = ctx.tasks.create({ title: 'solo' }, 'agent-1');
+    const c = ctx.tasks.getDependencyClosure(t.id);
+    expect(c.blockers_transitive).toHaveLength(0);
+    expect(c.blocking_transitive).toHaveLength(0);
+    expect(c.depth_blockers).toBe(0);
+    expect(c.depth_blocking).toBe(0);
+  });
+
+  it('walks the full upstream + downstream closure on a 4-level chain', () => {
+    const a = ctx.tasks.create({ title: 'A' }, 'agent-1');
+    const b = ctx.tasks.create({ title: 'B' }, 'agent-1');
+    const c = ctx.tasks.create({ title: 'C' }, 'agent-1');
+    const d = ctx.tasks.create({ title: 'D' }, 'agent-1');
+    ctx.tasks.addDependency(b.id, a.id);
+    ctx.tasks.addDependency(c.id, b.id);
+    ctx.tasks.addDependency(d.id, c.id);
+
+    const fromB = ctx.tasks.getDependencyClosure(b.id);
+    expect(fromB.blockers_transitive.map((t) => t.id)).toEqual([a.id]);
+    expect(fromB.blocking_transitive.map((t) => t.id).sort()).toEqual([c.id, d.id].sort());
+    expect(fromB.depth_blockers).toBe(1);
+    expect(fromB.depth_blocking).toBe(2);
+
+    const fromD = ctx.tasks.getDependencyClosure(d.id);
+    expect(fromD.blockers_transitive.map((t) => t.id).sort()).toEqual([a.id, b.id, c.id].sort());
+    expect(fromD.blocking_transitive).toHaveLength(0);
+    expect(fromD.depth_blockers).toBe(3);
+  });
+
+  it('handles diamond DAG without double-counting', () => {
+    const root = ctx.tasks.create({ title: 'root' }, 'agent-1');
+    const left = ctx.tasks.create({ title: 'left' }, 'agent-1');
+    const right = ctx.tasks.create({ title: 'right' }, 'agent-1');
+    const join = ctx.tasks.create({ title: 'join' }, 'agent-1');
+    ctx.tasks.addDependency(left.id, root.id);
+    ctx.tasks.addDependency(right.id, root.id);
+    ctx.tasks.addDependency(join.id, left.id);
+    ctx.tasks.addDependency(join.id, right.id);
+
+    const fromRoot = ctx.tasks.getDependencyClosure(root.id);
+    expect(fromRoot.blocking_transitive).toHaveLength(3);
+    expect(fromRoot.blocking_transitive.map((t) => t.id).sort()).toEqual(
+      [left.id, right.id, join.id].sort(),
+    );
+    expect(fromRoot.depth_blocking).toBe(2);
+
+    const fromJoin = ctx.tasks.getDependencyClosure(join.id);
+    expect(fromJoin.blockers_transitive).toHaveLength(3);
+    expect(fromJoin.blockers_transitive.map((t) => t.id).sort()).toEqual(
+      [root.id, left.id, right.id].sort(),
+    );
+  });
+
+  it('only follows blocks edges, not related/duplicate', () => {
+    const a = ctx.tasks.create({ title: 'A' }, 'agent-1');
+    const b = ctx.tasks.create({ title: 'B' }, 'agent-1');
+    const c = ctx.tasks.create({ title: 'C' }, 'agent-1');
+    ctx.tasks.addDependency(b.id, a.id, 'blocks');
+    ctx.tasks.addDependency(c.id, b.id, 'related');
+    const fromA = ctx.tasks.getDependencyClosure(a.id);
+    expect(fromA.blocking_transitive.map((t) => t.id)).toEqual([b.id]);
+  });
+
+  it('throws NotFoundError for unknown task id', () => {
+    expect(() => ctx.tasks.getDependencyClosure(99999)).toThrow();
+  });
+});
+
 describe('next task', () => {
   it('returns highest-priority unassigned task', () => {
     ctx.tasks.create({ title: 'Low', priority: 1 }, 'agent-1');

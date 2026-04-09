@@ -145,15 +145,22 @@ function buildManagerPrompt(scenario: Scenario, condition: 'naive' | 'agent-task
     `Your tools: you have the agent-tasks MCP server available. Tasks are in ` +
     `project="${scenario.project}". You can:\n` +
     `  - mcp__agent-tasks__task_list({ project: "${scenario.project}" }) — see all tasks ` +
-    `with status, stage, assignee\n` +
+    `with status, stage, assignee, and DIRECT dependencies\n` +
     `  - mcp__agent-tasks__task_get({ task_id: <id>, include: ["artifacts", "comments"] }) ` +
     `— read a single task with its spec/decision artifacts AND any comments\n` +
+    `  - mcp__agent-tasks__task_get({ task_id: <id>, include: ["transitive_deps"] }) ` +
+    `— get the FULL upstream + downstream dependency closure for a task in ONE call. ` +
+    `Returns { blockers_transitive: [...], blocking_transitive: [...], depth_blockers: N, ` +
+    `depth_blocking: N }. Use this for ANY question about transitive impact, what would ` +
+    `become unblocked, critical path depth, or "what depends on X transitively". Do NOT ` +
+    `try to BFS the graph yourself by calling task_get repeatedly — you will make mistakes. ` +
+    `Use transitive_deps in one call.\n` +
     `Comments contain progress and review notes. Artifacts contain spec text, ` +
     `decision rationale, test results, and review notes.\n\n` +
     `You can also read files in the current directory if you need to verify ` +
-    `something against the source. Prefer the task tools for STATE and HISTORY ` +
-    `questions because they are authoritative; use file reads only when the ` +
-    `question explicitly asks about the implementation.`;
+    `something against the source. Prefer the task tools for STATE, HISTORY, and ` +
+    `DEPENDENCY questions because they are authoritative; use file reads only when ` +
+    `the question explicitly asks about the implementation.`;
 
   const protocol =
     `\n\n## Protocol\n\n` +
