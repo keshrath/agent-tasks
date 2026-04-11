@@ -2,7 +2,7 @@
   "id": "agent-tasks",
   "name": "Tasks",
   "icon": "task_alt",
-  "version": "1.10.3",
+  "version": "1.10.4",
   "description": "Pipeline task board — kanban, stages, artifacts, dependencies",
   "ui": "./dist/ui/app.js",
   "css": "./dist/ui/styles.css",

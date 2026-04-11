@@ -70,7 +70,17 @@ agent-tasks works with any MCP client (stdio) or HTTP client (REST API). Pick yo
 
 ### Claude Code
 
-#### Step 1: Add the MCP server
+#### Quick setup (recommended)
+
+From the agent-tasks clone:
+
+```bash
+node scripts/setup.js
+```
+
+This detects Claude Code, registers the MCP server in `~/.claude.json`, wires all 5 hooks into `~/.claude/settings.json`, and grants `mcp__agent-tasks__*` permission in one shot. Restart Claude Code afterwards to pick up the new config.
+
+#### Step 1: Add the MCP server (manual)
 
 Edit `~/.claude/settings.json`:
 
@@ -182,7 +192,7 @@ Hooks automate pipeline workflows — dashboard announcements, TodoWrite bridgin
 
 ### Claude Code Hooks
 
-agent-tasks ships with 4 hook scripts. Add all of them to `~/.claude/settings.json`:
+agent-tasks ships **5 hook scripts**. `scripts/setup.js` installs them automatically; the block below shows the manual equivalent for `~/.claude/settings.json`:
 
 ```json
 {
@@ -203,23 +213,24 @@ agent-tasks ships with 4 hook scripts. Add all of them to `~/.claude/settings.js
         ]
       }
     ],
-    "PreToolUse": [
+    "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/todowrite-bridge.js\"",
-            "timeout": 5
+            "command": "node \"/path/to/agent-tasks/scripts/hooks/pipeline-enforcer.mjs\"",
+            "timeout": 10
           }
         ]
       }
     ],
-    "SubagentStart": [
+    "PreToolUse": [
       {
+        "matcher": "TodoWrite",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"/path/to/agent-tasks/scripts/hooks/session-start.js\"",
+            "command": "node \"/path/to/agent-tasks/scripts/hooks/todowrite-bridge.mjs\"",
             "timeout": 5
           }
         ]
@@ -251,14 +262,17 @@ agent-tasks ships with 4 hook scripts. Add all of them to `~/.claude/settings.js
 }
 ```
 
-Replace `/path/to/agent-tasks` with the actual path (or use `npx` paths if installed globally).
+Replace `/path/to/agent-tasks` with the actual path.
 
-| Hook                    | Event                        | Purpose                                     |
-| ----------------------- | ---------------------------- | ------------------------------------------- |
-| `session-start.js`      | SessionStart + SubagentStart | Announces dashboard URL and pipeline stages |
-| `task-cleanup-start.js` | SessionStart                 | Auto-fails tasks from dead sessions         |
-| `todowrite-bridge.js`   | PreToolUse                   | Syncs TodoWrite to pipeline                 |
-| `task-cleanup-stop.js`  | Stop + SubagentStop          | Blocks stop, then auto-fails orphaned tasks |
+| Hook                    | Event                  | Purpose                                        |
+| ----------------------- | ---------------------- | ---------------------------------------------- |
+| `session-start.js`      | SessionStart           | Announces dashboard URL                        |
+| `task-cleanup-start.js` | SessionStart           | Auto-fails tasks from dead sessions            |
+| `pipeline-enforcer.mjs` | UserPromptSubmit       | Requires an active pipeline task for real work |
+| `todowrite-bridge.mjs`  | PreToolUse (TodoWrite) | Syncs TodoWrite todos to pipeline              |
+| `task-cleanup-stop.js`  | Stop + SubagentStop    | Blocks stop, then auto-fails orphaned tasks    |
+
+See [`docs/hooks.md`](hooks.md) for the full hook reference including the work-prompt classifier, environment variables, and test coverage.
 
 #### Task Cleanup — Stop (`scripts/hooks/task-cleanup-stop.js`)
 
@@ -299,7 +313,7 @@ On every session start:
 
 This is the safety net — even if the Stop hook never fires, the next session to start will clean up.
 
-#### TodoWrite Bridge (`~/.claude/hooks/todowrite-bridge.js`)
+#### TodoWrite Bridge (`scripts/hooks/todowrite-bridge.mjs`)
 
 Intercepts Claude Code's built-in `TodoWrite` tool and syncs todos to agent-tasks. Every todo Claude creates automatically appears on the kanban board.
 
