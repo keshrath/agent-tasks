@@ -444,6 +444,33 @@ Per-stage gate rules:
 | `require_comment`       | boolean  | Require at least one comment                     |
 | `require_approval`      | boolean  | Require an approved approval                     |
 
+**Example: self-review gate**
+
+Enforce that every task gets a review before completion — even when a single agent does all the work. Configure the review stage to require a `review-notes` artifact:
+
+```
+task_config({
+  action: "pipeline",
+  project: "my-project",
+  gate_config: {
+    gates: {
+      "review": { "require_artifacts": ["review-notes"] }
+    },
+    exempt_stages: ["backlog"]
+  }
+})
+```
+
+Now advancing past the review stage fails unless a `review-notes` artifact exists:
+
+```
+task_artifact({ type: "general", task_id: 42, name: "review-notes",
+  content: "Re-read diff, ran tests (all pass), verified acceptance criteria met." })
+task_stage({ action: "advance", task_id: 42 })
+```
+
+This works for both solo and multi-agent workflows. Solo: the implementing agent self-reviews. Multi-agent: a different agent can claim the review stage and attach the artifact.
+
 **Action: cleanup**
 
 Purge old completed tasks or stale agent tasks.
