@@ -15,6 +15,7 @@ src/
 - **No frameworks** — no React, Vue, Express. Pure Node.js + TypeScript.
 - `context.ts` is the DI root — wires all services together.
 - UI files (`index.html`, `app.js`, `styles.css`) are plain files copied to `dist/ui/` on build.
+- **Soft deps**: `AgentBridge` → agent-comm (notifications), `KnowledgeBridge` → agent-knowledge (push learnings/decisions on task completion). Both HTTP-only, fail-open.
 
 ## UI / Dashboard
 

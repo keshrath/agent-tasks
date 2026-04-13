@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.10.5] - 2026-04-13
+
+### Added
+
+- **KnowledgeBridge** — new `src/domain/knowledge-bridge.ts` pushes `learning` and `decision` artifacts to agent-knowledge on task completion. Same pattern as AgentBridge: HTTP-only, fail-open, no npm dependency. Configurable via `AGENT_KNOWLEDGE_URL` env var (default `http://localhost:3423`). Wired into `context.ts` with start/stop lifecycle.
+- 5 new tests covering event subscription, unsubscribe, fail-open behavior, artifact push on completion, and skip when no learnings exist. 432/432 tests green.
+
 ## [1.10.3] - 2026-04-09
 
 ### Added

@@ -14,7 +14,8 @@ src/
 │   ├── comments.ts       # Threaded comments
 │   ├── collaborators.ts  # Multi-agent collaboration with roles
 │   ├── approvals.ts      # Stage-gated approval workflows
-│   ├── agent-bridge.ts   # Agent-comm notification bridge
+│   ├── agent-bridge.ts   # Agent-comm notification bridge (soft dep, HTTP, fail-open)
+│   ├── knowledge-bridge.ts # Agent-knowledge integration bridge (soft dep, HTTP, fail-open)
 │   ├── rules.ts          # IDE rule generation (.mdc, CLAUDE.md)
 │   ├── events.ts         # In-process event bus
 │   └── validate.ts       # Input validation constants
@@ -60,7 +61,57 @@ graph TD
     end
 
     WS --> UI["Dashboard UI<br/>http://localhost:3422"]
+
+    D -->|task:completed| KB["KnowledgeBridge"]
+    KB -->|POST /api/knowledge| AK["agent-knowledge<br/>:3423"]
+    D -->|task:claimed| AB["AgentBridge"]
+    AB -->|POST /api/messages| AC["agent-comm<br/>:3421"]
 ```
+
+## Soft dependencies
+
+agent-tasks integrates with two sibling MCP servers via HTTP. Both are fail-open — agent-tasks works standalone.
+
+| Service             | Bridge class      | Env var               | Default                 | Purpose                                                |
+| ------------------- | ----------------- | --------------------- | ----------------------- | ------------------------------------------------------ |
+| **agent-comm**      | `AgentBridge`     | `AGENT_COMM_URL`      | `http://localhost:3421` | Notifications on claim/advance, agent list for cleanup |
+| **agent-knowledge** | `KnowledgeBridge` | `AGENT_KNOWLEDGE_URL` | `http://localhost:3423` | Push learning/decision artifacts on task completion    |
+
+### AgentBridge (`agent-bridge.ts`)
+
+Listens to task lifecycle events and forwards notifications to agents via agent-comm's REST API.
+
+**Events handled:**
+
+| Event                | Action                                                                   |
+| -------------------- | ------------------------------------------------------------------------ |
+| `task:claimed`       | Direct message to the assigned agent: "Task #N has been assigned to you" |
+| `task:advanced`      | Direct message to the assigned agent: "Task #N advanced to {stage}"      |
+| `comment:created`    | Channel post to `general`: "Comment on task #N by {agent}"               |
+| `approval:requested` | Direct message to the reviewer: "Approval requested for task #N"         |
+
+Also exposes `fetchAgents()` which queries `GET /api/agents` on agent-comm — used by `CleanupService` to detect stale agent sessions and auto-fail their orphaned tasks.
+
+### KnowledgeBridge (`knowledge-bridge.ts`)
+
+Listens to `task:completed` events and pushes learning/decision artifacts to agent-knowledge via `POST /api/knowledge`.
+
+**Flow:**
+
+1. On `task:completed`, queries the DB for artifacts named `learning` or `decision` on the completed task
+2. If none found, exits (most tasks have no learnings — this is a no-op path)
+3. For each learning/decision artifact, formats a markdown entry with YAML frontmatter:
+   - `title`: "Task #{id}: {title} — {Learning|Decision}"
+   - `tags`: `[agent-tasks, {learning|decision}, {project}]`
+   - `confidence: extracted`, `source: agent-tasks`
+   - Context block: task ID, project, assignee, completion timestamp, stage
+   - Full artifact content
+4. POSTs each entry to `POST /api/knowledge` with `category: "decisions"`
+5. All POSTs are fire-and-forget — errors are silently swallowed (fail-open)
+
+**Filename convention:** `task-{id}-{learning|decision}-{n}.md` (e.g. `task-42-learning-1.md`)
+
+The entries land in `~/agent-knowledge/decisions/` and are auto-indexed with embeddings, auto-linked to similar entries (cosine > 0.7), and git-synced — all handled by the agent-knowledge POST endpoint.
 
 ## Database
 

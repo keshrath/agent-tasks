@@ -6,12 +6,12 @@
     "url": "https://github.com/keshrath/agent-tasks",
     "source": "github"
   },
-  "version": "1.10.4",
+  "version": "1.10.5",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "agent-tasks",
-      "version": "1.10.4",
+      "version": "1.10.5",
       "transport": {
         "type": "stdio"
       }

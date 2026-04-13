@@ -12,6 +12,7 @@ import { CommentService } from './domain/comments.js';
 import { CollaboratorService } from './domain/collaborators.js';
 import { ApprovalService } from './domain/approvals.js';
 import { AgentBridge } from './domain/agent-bridge.js';
+import { KnowledgeBridge } from './domain/knowledge-bridge.js';
 import { CleanupService } from './domain/cleanup.js';
 
 export interface AppContext {
@@ -22,6 +23,7 @@ export interface AppContext {
   readonly collaborators: CollaboratorService;
   readonly approvals: ApprovalService;
   readonly agentBridge: AgentBridge;
+  readonly knowledgeBridge: KnowledgeBridge;
   readonly cleanup: CleanupService;
   close(): void;
 }
@@ -36,10 +38,12 @@ export function createContext(dbOptions?: DbOptions): AppContext {
   const collaborators = new CollaboratorService(db, events);
   const approvals = new ApprovalService(db, events);
   const agentBridge = new AgentBridge(events);
+  const knowledgeBridge = new KnowledgeBridge(db, events);
   const retentionDays = parseInt(process.env.AGENT_TASKS_RETENTION_DAYS ?? '30', 10);
   const cleanup = new CleanupService(db, retentionDays, agentBridge);
 
   agentBridge.start();
+  knowledgeBridge.start();
   cleanup.start();
 
   return {
@@ -50,11 +54,13 @@ export function createContext(dbOptions?: DbOptions): AppContext {
     collaborators,
     approvals,
     agentBridge,
+    knowledgeBridge,
     cleanup,
     close() {
       if (closed) return;
       closed = true;
       cleanup.stop();
+      knowledgeBridge.stop();
       agentBridge.stop();
       events.removeAll();
       db.close();
