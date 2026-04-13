@@ -79,7 +79,7 @@ agent-tasks integrates with two sibling MCP servers via HTTP. Both are fail-open
 
 ### AgentBridge (`agent-bridge.ts`)
 
-Listens to task lifecycle events and forwards notifications to agents via agent-comm's REST API.
+Listens to task lifecycle events and forwards notifications to agents via agent-comm's REST API (`POST /api/messages`).
 
 **Events handled:**
 
@@ -90,17 +90,49 @@ Listens to task lifecycle events and forwards notifications to agents via agent-
 | `comment:created`    | Channel post to `general`: "Comment on task #N by {agent}"               |
 | `approval:requested` | Direct message to the reviewer: "Approval requested for task #N"         |
 
-Also exposes `fetchAgents()` which queries `GET /api/agents` on agent-comm — used by `CleanupService` to detect stale agent sessions and auto-fail their orphaned tasks.
+**Cleanup integration:** Also exposes `fetchAgents()` which queries `GET /api/agents` on agent-comm. Used by `CleanupService` in two ways:
+
+- **Heartbeat-based stale detection** (`failStaleAgentTasks`) — runs 10s after startup, then periodically. Queries all `in_progress` tasks with an `assigned_to`. For each unique agent name, checks agent-comm: if the agent is offline, unregistered, or hasn't heartbeated in 30 minutes (configurable via `timeoutMinutes`), all their in-progress tasks are auto-failed with a descriptive reason.
+- **Orphan reaper** (`cancelOrphanedTasks`) — runs on every cleanup cycle. Cancels tasks stuck `in_progress` with no assignee for longer than `AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES` (default: 360 min / 6 hours). Catches tasks that were never claimed by any agent.
+
+**Hooks (5 scripts in `scripts/hooks/`):**
+
+| Hook                    | Event             | What it does                                                                      |
+| ----------------------- | ----------------- | --------------------------------------------------------------------------------- |
+| `session-start.js`      | SessionStart      | Announces the pipeline dashboard URL as session context                           |
+| `task-cleanup-start.js` | SessionStart      | Opens the DB, finds tasks assigned to agents not online in agent-comm, auto-fails |
+| `pipeline-enforcer.mjs` | UserPromptSubmit  | Checks agent-comm registration + pipeline task existence, injects reminder        |
+| `todowrite-bridge.mjs`  | PreToolUse        | Mirrors Claude Code `TodoWrite` todos into pipeline tasks                         |
+| `task-cleanup-stop.js`  | Stop/SubagentStop | Fails all tasks still assigned to this session on exit                            |
+
+All hooks fail open — errors are logged to stderr and return empty JSON. See `docs/hooks.md` for full details.
+
+**Environment variables:**
+
+| Variable                               | Default                 | Description                                        |
+| -------------------------------------- | ----------------------- | -------------------------------------------------- |
+| `AGENT_COMM_URL`                       | `http://localhost:3421` | agent-comm REST base URL                           |
+| `AGENT_TASKS_COMM_TIMEOUT_MS`          | `5000`                  | Timeout for agent-comm HTTP requests               |
+| `AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES`   | `360`                   | Minutes before unassigned in-progress tasks cancel |
+| `AGENT_TASKS_COMPLETED_RETENTION_DAYS` | `7`                     | Days before completed tasks are purged             |
+| `AGENT_TASKS_CANCELLED_RETENTION_DAYS` | `1`                     | Days before cancelled tasks are purged             |
+| `AGENT_TASKS_FAILED_RETENTION_DAYS`    | `7`                     | Days before failed tasks are purged                |
 
 ### KnowledgeBridge (`knowledge-bridge.ts`)
 
-Listens to `task:completed` events and pushes learning/decision artifacts to agent-knowledge via `POST /api/knowledge`.
+Listens to `task:completed` events and pushes learning/decision artifacts to agent-knowledge via `POST /api/knowledge`. Closes the feedback loop: completed tasks with insights auto-persist to the cross-session knowledge base.
+
+**Events handled:**
+
+| Event            | Action                                                                      |
+| ---------------- | --------------------------------------------------------------------------- |
+| `task:completed` | Queries DB for `learning` and `decision` artifacts, POSTs each to knowledge |
 
 **Flow:**
 
 1. On `task:completed`, queries the DB for artifacts named `learning` or `decision` on the completed task
-2. If none found, exits (most tasks have no learnings — this is a no-op path)
-3. For each learning/decision artifact, formats a markdown entry with YAML frontmatter:
+2. If none found, exits immediately (most tasks have no learnings — this is a no-op path)
+3. For each artifact, formats a markdown entry with YAML frontmatter:
    - `title`: "Task #{id}: {title} — {Learning|Decision}"
    - `tags`: `[agent-tasks, {learning|decision}, {project}]`
    - `confidence: extracted`, `source: agent-tasks`
@@ -109,9 +141,36 @@ Listens to `task:completed` events and pushes learning/decision artifacts to age
 4. POSTs each entry to `POST /api/knowledge` with `category: "decisions"`
 5. All POSTs are fire-and-forget — errors are silently swallowed (fail-open)
 
+**What happens downstream in agent-knowledge:**
+
+The `POST /api/knowledge` endpoint runs the full write pipeline:
+
+- `git pull --rebase` to sync
+- `writeEntry()` — writes markdown file to `~/agent-knowledge/decisions/`
+- Embedding indexing via the configured provider (Claude/OpenAI/Gemini/local)
+- Auto-linking: finds top-3 similar entries via cosine similarity, creates `related_to` graph edges for matches > 0.7
+- `git add -A && commit && push` to sync to remote
+- Duplicate detection via TF-IDF similarity check
+
+Entries are immediately searchable via `knowledge_search` and visible in the agent-knowledge dashboard (http://localhost:3423).
+
 **Filename convention:** `task-{id}-{learning|decision}-{n}.md` (e.g. `task-42-learning-1.md`)
 
-The entries land in `~/agent-knowledge/decisions/` and are auto-indexed with embeddings, auto-linked to similar entries (cosine > 0.7), and git-synced — all handled by the agent-knowledge POST endpoint.
+**Environment variables:**
+
+| Variable              | Default                 | Description                   |
+| --------------------- | ----------------------- | ----------------------------- |
+| `AGENT_KNOWLEDGE_URL` | `http://localhost:3423` | agent-knowledge REST base URL |
+
+**Failure modes:**
+
+| Scenario                       | Behavior                                                     |
+| ------------------------------ | ------------------------------------------------------------ |
+| agent-knowledge not running    | POST fails silently, task completion unaffected              |
+| Network timeout (>10s)         | Request destroyed, resolved, no retry                        |
+| Invalid response / 4xx / 5xx   | Swallowed, no retry                                          |
+| Task has no learning/decision  | No HTTP requests made (early exit)                           |
+| agent-knowledge git push fails | Entry is written locally, git error in response but no throw |
 
 ## Database
 

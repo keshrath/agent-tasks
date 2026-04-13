@@ -43,7 +43,8 @@ When you run multiple AI agents on the same codebase, they need a shared task pi
 - **Agent affinity** — `task_list(next: true)` prefers routing tasks to agents with related history (parent, dependency, project) as a tie-breaker
 - **Heartbeat-based cleanup** — auto-fails tasks from dead agents using agent-comm heartbeat data
 - **Task cleanup hooks** — auto-fails orphaned tasks on session stop and cleans up stale tasks on session start
-- **Agent bridge** — notifies connected agents on task events
+- **Agent bridge** — notifies connected agents on task events (claim, advance, comment, approval)
+- **Knowledge bridge** — auto-pushes learning and decision artifacts to agent-knowledge on task completion, with embedding indexing and auto-linking
 
 ---
 
@@ -153,6 +154,7 @@ npm run check         # Full CI: typecheck + lint + format + test
 | `AGENT_TASKS_PORT`         | `3422`                          | Dashboard HTTP/WebSocket port                        |
 | `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable response-embedded instructions |
 | `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications         |
+| `AGENT_KNOWLEDGE_URL`      | `http://localhost:3423`         | Agent-knowledge REST URL for knowledge bridge        |
 
 ---
 
@@ -160,7 +162,11 @@ npm run check         # Full CI: typecheck + lint + format + test
 
 **Required**: Node.js >= 20.11, better-sqlite3 (bundled)
 
-**Optional**: [agent-comm](https://github.com/keshrath/agent-comm) — Heartbeat-based task cleanup requires agent-comm running at `AGENT_COMM_URL` (default: `http://localhost:3421`). Without agent-comm, stale agent detection is skipped gracefully. Flow: agent-comm tracks heartbeats → agent-tasks checks heartbeats → auto-fails tasks from dead agents.
+**Optional (soft dependencies — fail-open, HTTP-only, no npm dep):**
+
+- [agent-comm](https://github.com/keshrath/agent-comm) — Heartbeat-based task cleanup and event notifications. agent-comm tracks heartbeats → agent-tasks checks heartbeats → auto-fails tasks from dead agents. Also sends direct messages on claim/advance and posts to channels on comments/approvals. Without agent-comm, stale agent detection and notifications are skipped gracefully.
+
+- [agent-knowledge](https://github.com/keshrath/agent-knowledge) — Knowledge persistence for task learnings and decisions. On task completion, the KnowledgeBridge pushes `learning` and `decision` artifacts to agent-knowledge via `POST /api/knowledge`. Entries are auto-indexed with embeddings, auto-linked to similar entries, and git-synced. Without agent-knowledge, artifacts stay in agent-tasks only.
 
 ---
 
