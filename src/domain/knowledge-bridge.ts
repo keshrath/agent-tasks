@@ -27,6 +27,7 @@ interface KnowledgeWritePayload {
 
 export class KnowledgeBridge {
   private unsubs: (() => void)[] = [];
+  private warned = false;
 
   constructor(
     private readonly db: Db,
@@ -118,9 +119,25 @@ export class KnowledgeBridge {
         () => resolve(),
       );
 
-      req.on('error', () => resolve());
+      req.on('error', () => {
+        if (!this.warned) {
+          this.warned = true;
+          process.stderr.write(
+            `[agent-tasks] agent-knowledge not reachable at ${getKnowledgeUrl()} — learnings will not be persisted. ` +
+              `Install: https://github.com/keshrath/agent-knowledge\n`,
+          );
+        }
+        resolve();
+      });
       req.on('timeout', () => {
         req.destroy();
+        if (!this.warned) {
+          this.warned = true;
+          process.stderr.write(
+            `[agent-tasks] agent-knowledge timeout at ${getKnowledgeUrl()} — learnings will not be persisted. ` +
+              `Install: https://github.com/keshrath/agent-knowledge\n`,
+          );
+        }
         resolve();
       });
       req.write(data);

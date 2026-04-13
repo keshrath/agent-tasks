@@ -42,6 +42,7 @@ function isApprovalPayload(v: unknown): v is ApprovalPayload {
 
 export class AgentBridge {
   private unsubs: (() => void)[] = [];
+  private warned = false;
 
   constructor(private readonly events: EventBus) {}
 
@@ -155,9 +156,25 @@ export class AgentBridge {
         () => resolve(),
       );
 
-      req.on('error', () => resolve());
+      req.on('error', () => {
+        if (!this.warned) {
+          this.warned = true;
+          process.stderr.write(
+            `[agent-tasks] agent-comm not reachable at ${AGENT_COMM_URL} — task notifications disabled. ` +
+              `Install: https://github.com/keshrath/agent-comm\n`,
+          );
+        }
+        resolve();
+      });
       req.on('timeout', () => {
         req.destroy();
+        if (!this.warned) {
+          this.warned = true;
+          process.stderr.write(
+            `[agent-tasks] agent-comm timeout at ${AGENT_COMM_URL} — task notifications disabled. ` +
+              `Install: https://github.com/keshrath/agent-comm\n`,
+          );
+        }
         resolve();
       });
       req.write(data);
