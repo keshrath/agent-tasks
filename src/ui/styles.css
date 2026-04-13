@@ -2906,3 +2906,134 @@ header {
   overflow-x: auto;
   min-width: 0;
 }
+
+/* --------------------------------------------------------------------------
+   Mobile Responsive (768px)
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 768px) {
+  header {
+    flex-wrap: wrap;
+    padding: 6px 12px;
+    gap: 8px;
+  }
+  .header-left {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .header-left h1 {
+    font-size: 14px;
+  }
+  .header-right {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .stats {
+    display: none;
+  }
+  .filter-bar {
+    padding: 6px 10px;
+  }
+  .filter-group {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .filter-input {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .filter-select {
+    flex: 1 1 calc(50% - 3px);
+    min-width: 0;
+  }
+  .kanban-board {
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px;
+    gap: 8px;
+  }
+  .kanban-column {
+    min-width: 0;
+    max-width: none;
+    flex: 0 0 auto;
+    max-height: none;
+    width: 100%;
+  }
+  .kanban-column.collapsed {
+    min-width: 0;
+    max-width: none;
+    writing-mode: horizontal-tb;
+  }
+  .kanban-column.collapsed .column-header {
+    writing-mode: horizontal-tb;
+    flex-direction: row;
+    padding: 10px 12px;
+  }
+  .column-body {
+    max-height: none;
+  }
+  .board-wrapper.panel-open .side-panel {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    min-width: 100%;
+    z-index: 200;
+    border-left: none;
+    box-shadow: none;
+  }
+  .board-wrapper.panel-open .side-panel.panel-wide {
+    width: 100%;
+  }
+  .panel-resize-handle {
+    display: none;
+  }
+  .task-card {
+    padding: 8px 10px;
+    min-width: 0;
+    width: 100%;
+  }
+  .task-card:hover {
+    transform: none;
+  }
+  .modal {
+    width: calc(100% - 16px);
+    max-width: 100%;
+    margin: 8px;
+    max-height: calc(100vh - 16px);
+  }
+  .confirm-dialog {
+    min-width: 0;
+    max-width: calc(100% - 16px);
+    margin: 8px;
+  }
+  .toast-container {
+    left: 8px;
+    right: 8px;
+    top: 8px;
+  }
+  .toast {
+    max-width: none;
+  }
+  .panel-body {
+    padding: 12px;
+  }
+  .panel-grid {
+    grid-template-columns: 80px 1fr;
+    gap: 4px 8px;
+  }
+  .board-empty .empty-steps {
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .diff-viewer {
+    flex-direction: column;
+  }
+  .diff-side {
+    flex: none;
+    width: 100%;
+  }
+}
