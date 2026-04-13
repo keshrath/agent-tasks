@@ -2925,16 +2925,19 @@ header {
     font-size: 14px;
   }
   .header-right {
-    width: 100%;
-    justify-content: flex-end;
-    flex-wrap: wrap;
+    width: auto;
     gap: 6px;
   }
   .stats {
     display: none;
   }
+
+  /* -- Filter bar: hide orphaned icon, compact layout -- */
   .filter-bar {
     padding: 6px 10px;
+  }
+  .filter-icon {
+    display: none;
   }
   .filter-group {
     flex-wrap: wrap;
@@ -2948,6 +2951,35 @@ header {
     flex: 1 1 calc(50% - 3px);
     min-width: 0;
   }
+
+  /* -- Kanban: compact empty columns -- */
+  .column-empty {
+    padding: 12px 8px;
+  }
+  .column-empty .material-symbols-outlined {
+    font-size: 22px;
+  }
+  .column-empty .empty-text {
+    font-size: 11px;
+  }
+  .column-empty .empty-cta {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+  .column-add-btn {
+    padding: 6px;
+    font-size: 12px;
+  }
+
+  /* -- Icon buttons: touch-friendly -- */
+  .icon-btn {
+    min-width: 36px;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
   .kanban-board {
     flex-direction: column;
     overflow-y: auto;
