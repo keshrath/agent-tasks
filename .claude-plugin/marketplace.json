@@ -1,0 +1,19 @@
+{
+  "name": "agent-tasks",
+  "owner": {
+    "name": "keshrath"
+  },
+  "metadata": {
+    "description": "Pipeline-driven task management for AI coding agents.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "agent-tasks",
+      "source": "./",
+      "description": "Pipeline-driven task management for AI coding agents. Tasks flow through backlog → spec → plan → implement → test → review → done stages with dependencies, per-stage artifacts, multi-agent claiming, and a live Kanban dashboard on :3422.",
+      "category": "workflow",
+      "tags": ["mcp", "tasks", "pipeline", "kanban"]
+    }
+  ]
+}

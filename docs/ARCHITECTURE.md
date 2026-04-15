@@ -103,7 +103,7 @@ Listens to task lifecycle events and forwards notifications to agents via agent-
 | `task-cleanup-start.js` | SessionStart      | Opens the DB, finds tasks assigned to agents not online in agent-comm, auto-fails |
 | `pipeline-enforcer.mjs` | UserPromptSubmit  | Checks agent-comm registration + pipeline task existence, injects reminder        |
 | `todowrite-bridge.mjs`  | PreToolUse        | Mirrors Claude Code `TodoWrite` todos into pipeline tasks                         |
-| `task-cleanup-stop.js`  | Stop/SubagentStop | Fails all tasks still assigned to this session on exit                            |
+| `task-cleanup-stop.js`  | Stop/SubagentStop | Auto-fails open tasks whose `assigned_to` is no longer online in agent-comm       |
 
 All hooks fail open — errors are logged to stderr and return empty JSON. See `docs/hooks.md` for full details.
 

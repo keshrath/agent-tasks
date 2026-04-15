@@ -276,30 +276,29 @@ See [`docs/hooks.md`](hooks.md) for the full hook reference including the work-p
 
 #### Task Cleanup — Stop (`scripts/hooks/task-cleanup-stop.js`)
 
-Prevents sessions from ending with incomplete tasks. Runs on both `Stop` (main session) and `SubagentStop` (spawned agents).
+Sweeps for tasks assigned to sessions that are no longer online and auto-fails them. Runs on both `Stop` (main session) and `SubagentStop` (spawned agents), complementing the `SessionStart` sweep.
 
-1. **First stop attempt**: Blocks and lists all incomplete tasks assigned to the session. Tells Claude to call `task_stage` (action `complete` or `fail`) for each.
-2. **Second stop attempt**: Auto-fails all remaining tasks with reason `"Session ended without completing this task (auto-cleanup)"` and allows stop.
+The hook does **not** block the stop. Claude Code's Stop event does not carry enough metadata to reliably identify which agent-comm session is stopping (multiple sessions share the same Claude install), so attributing "your" open tasks to the stopping session was error-prone — it frequently flagged sibling sessions' work. The hook now only cleans up tasks owned by agents whose agent-comm status is no longer `online`.
 
 ```mermaid
 sequenceDiagram
     participant CC as Claude Code
     participant Hook as task-cleanup-stop.js
-    participant DB as agent-tasks DB
+    participant CommDB as agent-comm DB
+    participant TasksDB as agent-tasks DB
 
     CC->>Hook: Stop event (stdin JSON)
-    Hook->>DB: SELECT incomplete tasks for session
-    alt Has incomplete tasks (1st attempt)
-        Hook->>CC: {decision: "block", reason: "Complete your tasks"}
-    else Has incomplete tasks (2nd attempt)
-        Hook->>DB: UPDATE tasks SET status='failed'
-        Hook->>CC: {decision: "allow", reason: "Auto-failed N tasks"}
-    else No incomplete tasks
+    Hook->>CommDB: SELECT name FROM agents WHERE status = 'online'
+    Hook->>TasksDB: SELECT open tasks WHERE assigned_to NOT IN onlineAgents
+    alt Has orphaned tasks
+        Hook->>TasksDB: UPDATE tasks SET status = 'failed'
+        Hook->>CC: {decision: "approve", reason: "Auto-failed N orphaned tasks"}
+    else No orphans
         Hook->>CC: {} (allow stop)
     end
 ```
 
-The block counter is stored in `~/.claude/task-cleanup-counter.json`. To change the number of blocks before auto-cleanup, edit `MAX_BLOCKS` in the script (default: 1).
+Open tasks whose assigned agent is still online are left untouched — their session is assumed to be alive and actively working on them.
 
 #### Task Cleanup — Session Start (`scripts/hooks/task-cleanup-start.js`)
 

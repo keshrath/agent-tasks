@@ -7,13 +7,13 @@ lifecycle events. They live under `scripts/hooks/` and are installed by
 All hooks fail open — any internal error is logged to stderr and the hook
 returns an empty JSON object so the user is never blocked by a broken hook.
 
-| Script                  | Event                  | Purpose                                          |
-| ----------------------- | ---------------------- | ------------------------------------------------ |
-| `session-start.js`      | SessionStart           | Announces the pipeline dashboard URL             |
-| `task-cleanup-start.js` | SessionStart           | Auto-fails tasks assigned to dead sessions       |
-| `pipeline-enforcer.mjs` | UserPromptSubmit       | Requires an active pipeline task for real work   |
-| `todowrite-bridge.mjs`  | PreToolUse (TodoWrite) | Mirrors TodoWrite todos into the pipeline        |
-| `task-cleanup-stop.js`  | Stop / SubagentStop    | Fails still-assigned tasks when the session ends |
+| Script                  | Event                  | Purpose                                               |
+| ----------------------- | ---------------------- | ----------------------------------------------------- |
+| `session-start.js`      | SessionStart           | Announces the pipeline dashboard URL                  |
+| `task-cleanup-start.js` | SessionStart           | Auto-fails tasks assigned to dead sessions            |
+| `pipeline-enforcer.mjs` | UserPromptSubmit       | Requires an active pipeline task for real work        |
+| `todowrite-bridge.mjs`  | PreToolUse (TodoWrite) | Mirrors TodoWrite todos into the pipeline             |
+| `task-cleanup-stop.js`  | Stop / SubagentStop    | Auto-fails open tasks whose owner is no longer online |
 
 ## session-start.js
 
@@ -74,9 +74,14 @@ timeout and lets the original `TodoWrite` proceed.
 
 ## task-cleanup-stop.js
 
-On `Stop` / `SubagentStop`, finds any tasks still assigned to this session
-and fails them with a `session ended` message. Works together with
-`task-cleanup-start.js` so crashes don't leak in-progress tasks forever.
+On `Stop` / `SubagentStop`, sweeps for open tasks whose `assigned_to` is no
+longer present in agent-comm's `online` agent list and auto-fails them with
+a `session ended` message. Never blocks the stop and never touches tasks
+owned by sessions that are still alive — Claude Code's Stop event does not
+carry enough metadata to identify which agent-comm session is stopping, so
+attempting to nag "your" tasks specifically would false-positive on sibling
+sessions. Works together with `task-cleanup-start.js` so crashes don't leak
+in-progress tasks forever.
 
 ## Manual configuration
 

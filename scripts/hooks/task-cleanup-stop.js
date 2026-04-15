@@ -3,50 +3,30 @@
 // =============================================================================
 // Task Cleanup Enforcer (Stop + SubagentStop hook)
 //
-// Ensures pipeline tasks don't get orphaned when a session ends.
-//
-// Attempt 1: Block stop, tell Claude to complete/fail its tasks.
-// Attempt 2: Auto-fail all orphaned tasks directly in the DB, allow stop.
+// Sweeps tasks whose assigned agent is no longer online (dead-session cleanup)
+// and auto-fails them. Never blocks — Claude Code Stop hooks can't reliably
+// derive the stopping session's agent-comm name, so we can't nag "your" tasks
+// without false-positives. Dead-session sweep is safe and idempotent and
+// complements the SessionStart hook's own sweep.
 // =============================================================================
 
-import { readFileSync, existsSync, writeFileSync } from 'fs';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import Database from 'better-sqlite3';
 
-const MAX_BLOCKS = 1;
-const COUNTER_FILE = join(homedir(), '.claude', 'task-cleanup-counter.json');
 const DB_PATH = process.env.AGENT_TASKS_DB || join(homedir(), '.agent-tasks', 'agent-tasks.db');
+const COMM_DB_PATH = join(homedir(), '.agent-comm', 'agent-comm.db');
 
-function getSessionName() {
-  const agentCommDb = join(homedir(), '.agent-comm', 'agent-comm.db');
+function getOnlineAgentNames() {
   try {
-    const db = new Database(agentCommDb, { readonly: true, fileMustExist: true });
-    const row = db
-      .prepare(
-        `SELECT name FROM agents WHERE status = 'online' ORDER BY last_heartbeat DESC LIMIT 1`,
-      )
-      .get();
+    const db = new Database(COMM_DB_PATH, { readonly: true, fileMustExist: true });
+    const rows = db.prepare(`SELECT name FROM agents WHERE status = 'online'`).all();
     db.close();
-    if (row && row.name) return row.name;
-  } catch {}
-  return null;
-}
-
-function getBlockCount(sessionName) {
-  try {
-    if (existsSync(COUNTER_FILE)) {
-      const counter = JSON.parse(readFileSync(COUNTER_FILE, 'utf-8'));
-      if (counter.session === sessionName) return counter.count || 0;
-    }
-  } catch {}
-  return 0;
-}
-
-function setBlockCount(sessionName, count) {
-  try {
-    writeFileSync(COUNTER_FILE, JSON.stringify({ session: sessionName, count }));
-  } catch {}
+    return new Set(rows.map((r) => r.name));
+  } catch {
+    return new Set();
+  }
 }
 
 function main() {
@@ -65,52 +45,38 @@ function main() {
 }
 
 function run() {
-  const sessionName = getSessionName();
-  if (!sessionName || !existsSync(DB_PATH)) {
+  if (!existsSync(DB_PATH)) {
     console.log(JSON.stringify({}));
     return;
   }
 
+  const onlineAgents = getOnlineAgentNames();
   const db = new Database(DB_PATH, { readonly: false });
-  const tasks = db
-    .prepare(
-      `SELECT id, title, status, stage FROM tasks
-     WHERE assigned_to = ? AND status IN ('pending', 'in_progress')`,
-    )
-    .all(sessionName);
 
-  if (!tasks.length) {
+  const allOpenTasks = db
+    .prepare(
+      `SELECT id, title, status, stage, assigned_to FROM tasks
+       WHERE status IN ('pending', 'in_progress') AND assigned_to IS NOT NULL`,
+    )
+    .all();
+
+  const orphanedTasks = allOpenTasks.filter((t) => !onlineAgents.has(t.assigned_to));
+
+  if (!orphanedTasks.length) {
     db.close();
-    setBlockCount(sessionName, 0);
     console.log(JSON.stringify({}));
     return;
   }
 
-  const blockCount = getBlockCount(sessionName);
-  const taskList = tasks.map((t) => `#${t.id} [${t.status}@${t.stage}] ${t.title}`).join('\n  ');
-
-  if (blockCount < MAX_BLOCKS) {
-    db.close();
-    setBlockCount(sessionName, blockCount + 1);
-    console.log(
-      JSON.stringify({
-        decision: 'block',
-        reason: `You have ${tasks.length} incomplete task(s):\n  ${taskList}\n\nComplete (task_complete) or fail (task_fail) each task before stopping. If you stop again without resolving them, they will be auto-failed.`,
-      }),
-    );
-    return;
-  }
-
-  // Auto-fail and allow stop
   const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
   const failStmt = db.prepare(
     `UPDATE tasks SET status = 'failed', result = ?, updated_at = ? WHERE id = ?`,
   );
 
   const failAll = db.transaction(() => {
-    for (const task of tasks) {
+    for (const task of orphanedTasks) {
       failStmt.run(
-        `Session "${sessionName}" ended without completing this task (auto-cleanup)`,
+        `Session "${task.assigned_to}" ended without completing this task (auto-cleanup)`,
         now,
         task.id,
       );
@@ -119,12 +85,11 @@ function run() {
   failAll();
   db.close();
 
-  const ids = tasks.map((t) => `#${t.id}`).join(', ');
-  setBlockCount(sessionName, 0);
+  const ids = orphanedTasks.map((t) => `#${t.id}`).join(', ');
   console.log(
     JSON.stringify({
-      decision: 'allow',
-      reason: `Auto-failed ${tasks.length} orphaned task(s): ${ids}. Session ending.`,
+      decision: 'approve',
+      reason: `Auto-failed ${orphanedTasks.length} orphaned task(s) from dead sessions: ${ids}. Session ending.`,
     }),
   );
 }

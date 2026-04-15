@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.10.11] - 2026-04-15
+
+### Added
+
+- `.claude-plugin/plugin.json` and `marketplace.json` — Claude Code plugin manifests for distribution.
+- `.mcp.json` — MCP server entry point manifest.
+- `PRIVACY.md` — privacy policy for the dashboard and data handling.
+
+### Changed
+
+- **`scripts/hooks/task-cleanup-stop.js`** — significant rewrite; simplified cleanup logic (net -81 lines).
+- **Docs polish** — `docs/ARCHITECTURE.md`, `docs/SETUP.md`, `docs/hooks.md` minor edits and clarifications.
+
 ## [1.10.6] - 2026-04-13
 
 ### Added

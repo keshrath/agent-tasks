@@ -1,0 +1,12 @@
+{
+  "name": "agent-tasks",
+  "description": "Pipeline-driven task management for AI coding agents with stages, dependencies, artifacts, multi-agent claiming, and a live Kanban dashboard.",
+  "version": "1.10.10",
+  "author": {
+    "name": "keshrath"
+  },
+  "homepage": "https://github.com/keshrath/agent-tasks",
+  "repository": "https://github.com/keshrath/agent-tasks",
+  "license": "MIT",
+  "keywords": ["mcp", "tasks", "pipeline", "kanban", "claude-code"]
+}
