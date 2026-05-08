@@ -231,6 +231,41 @@ describe('task_list', () => {
     const page = handle('task_list', { limit: 2, offset: 1 }) as unknown[];
     expect(page).toHaveLength(2);
   });
+
+  it('filters by tags (single tag)', () => {
+    handle('task_create', { title: 'A', tags: ['okr:H1', 'iter:H1'] });
+    handle('task_create', { title: 'B', tags: ['okr:H1'] });
+    handle('task_create', { title: 'C', tags: ['iter:H1'] });
+    const list = handle('task_list', { tags: ['okr:H1'] }) as { title: string }[];
+    expect(list.map((t) => t.title).sort()).toEqual(['A', 'B']);
+  });
+
+  it('filters by tags (AND-mode across multiple tags)', () => {
+    handle('task_create', { title: 'A', tags: ['okr:H1', 'iter:H1'] });
+    handle('task_create', { title: 'B', tags: ['okr:H1'] });
+    handle('task_create', { title: 'C', tags: ['iter:H1'] });
+    const both = handle('task_list', { tags: ['okr:H1', 'iter:H1'] }) as { title: string }[];
+    expect(both.map((t) => t.title)).toEqual(['A']);
+  });
+
+  it('combines tag filter with project filter (cross-project rollup)', () => {
+    handle('task_create', { title: 'A', project: 'alpha', tags: ['okr:H1'] });
+    handle('task_create', { title: 'B', project: 'beta', tags: ['okr:H1'] });
+    handle('task_create', { title: 'C', project: 'alpha' });
+
+    const all = handle('task_list', { tags: ['okr:H1'] }) as {
+      title: string;
+      project: string;
+    }[];
+    expect(all.map((t) => t.title).sort()).toEqual(['A', 'B']);
+    expect(new Set(all.map((t) => t.project))).toEqual(new Set(['alpha', 'beta']));
+
+    const alphaOnly = handle('task_list', {
+      tags: ['okr:H1'],
+      project: 'alpha',
+    }) as { title: string }[];
+    expect(alphaOnly.map((t) => t.title)).toEqual(['A']);
+  });
 });
 
 // =============================================================================

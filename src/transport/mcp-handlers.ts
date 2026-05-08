@@ -222,6 +222,7 @@ export function handleList(
     parent_id: optNumber(args, 'parent_id'),
     root_only: optBoolean(args, 'root_only'),
     collaborator: optString(args, 'collaborator'),
+    tags: optStringArray(args, 'tags'),
     limit: optNumber(args, 'limit'),
     offset: optNumber(args, 'offset'),
   });

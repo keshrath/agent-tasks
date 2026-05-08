@@ -12,7 +12,7 @@ agent-tasks consolidates everything into 8 action-based tools to keep per-prompt
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `task_create` | Create a pipeline task (title, description, priority, project, tags, parent_id, assign_to, stage)                                                   |
 | `task_get`    | Get a task with optional `include: ["subtasks", "artifacts", "comments"]`. Replaces the former `task_get_subtasks/artifacts/comments` family.       |
-| `task_list`   | List/search tasks (filters: query, status, stage, project, assign_to, collaborator, root_only, parent_id, pagination)                               |
+| `task_list`   | List/search tasks (filters: query, status, stage, project, assign_to, collaborator, root_only, parent_id, tags, pagination)                         |
 | `task_update` | Update metadata (title, description, priority, project, tags, assign_to). Inline `dependency: { action, depends_on, relationship }` for add/remove. |
 | `task_delete` | Delete a task with cascading cleanup of subtasks, comments, artifacts                                                                               |
 
@@ -65,7 +65,7 @@ All endpoints return JSON. CORS is enabled. The server runs on port 3422 by defa
 | Method | Path                          | Description                                                                                                     |
 | ------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `GET`  | `/health`                     | Health check with version, uptime, and task count                                                               |
-| `GET`  | `/api/tasks`                  | List tasks (query params: `status`, `stage`, `project`, `assigned_to`, `root_only`, `limit`, `offset`)          |
+| `GET`  | `/api/tasks`                  | List tasks (query params: `status`, `stage`, `project`, `assigned_to`, `root_only`, `tags`, `limit`, `offset`)  |
 | `GET`  | `/api/tasks/:id`              | Get a single task by ID                                                                                         |
 | `GET`  | `/api/tasks/:id/subtasks`     | Get subtasks of a parent task                                                                                   |
 | `GET`  | `/api/tasks/:id/artifacts`    | Get artifacts (query: `stage`)                                                                                  |
@@ -76,6 +76,8 @@ All endpoints return JSON. CORS is enabled. The server runs on port 3422 by defa
 | `GET`  | `/api/overview`               | Full state dump (tasks, dependencies, artifact counts, comment counts, subtask progress, collaborators, stages) |
 | `GET`  | `/api/agents`                 | Online agents (proxied from agent-comm)                                                                         |
 | `GET`  | `/api/search?q=`              | Full-text search across tasks                                                                                   |
+
+`tags` is AND-mode — a task must carry every tag listed. Repeat the parameter once per tag (`?tags=okr:H1&tags=iter:H1`); it is not comma-separated, since a tag may itself contain a comma.
 
 ### Write endpoints
 

@@ -53,6 +53,7 @@ export interface TaskListFilter {
   parent_id?: number;
   root_only?: boolean;
   collaborator?: string;
+  tags?: string[];
   limit?: number;
   offset?: number;
 }

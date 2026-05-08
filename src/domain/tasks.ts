@@ -321,6 +321,14 @@ export class TaskService {
       sql += ' AND tc.agent_id = ?';
       params.push(filter.collaborator);
     }
+    // json_each() over a NULL tags column yields zero rows, so untagged tasks
+    // fall out of an EXISTS without needing a separate NULL guard.
+    if (filter.tags) {
+      for (const tag of filter.tags) {
+        sql += ' AND EXISTS (SELECT 1 FROM json_each(t.tags) WHERE value = ?)';
+        params.push(tag);
+      }
+    }
 
     sql += ' ORDER BY t.priority DESC, t.created_at DESC';
 
