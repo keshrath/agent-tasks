@@ -321,6 +321,13 @@ export class TaskService {
       sql += ' AND tc.agent_id = ?';
       params.push(filter.collaborator);
     }
+    if (filter.tags && filter.tags.length > 0) {
+      for (const tag of filter.tags) {
+        sql +=
+          ' AND t.tags IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(t.tags) WHERE value = ?)';
+        params.push(tag);
+      }
+    }
 
     sql += ' ORDER BY t.priority DESC, t.created_at DESC';
 

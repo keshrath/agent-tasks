@@ -121,6 +121,11 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
 
   route('GET', '/api/tasks', (req, res) => {
     const url = new URL(req.url!, `http://${req.headers.host}`);
+    const tagsParam = url.searchParams.getAll('tags');
+    const tags =
+      tagsParam.length > 0
+        ? tagsParam.flatMap((t) => t.split(',')).filter((t) => t.length > 0)
+        : undefined;
     json(
       res,
       ctx.tasks.list({
@@ -128,6 +133,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
         assigned_to: url.searchParams.get('assigned_to') ?? undefined,
         stage: url.searchParams.get('stage') ?? undefined,
         project: url.searchParams.get('project') ?? undefined,
+        tags,
         limit: url.searchParams.has('limit')
           ? parseInt(url.searchParams.get('limit')!, 10)
           : undefined,
