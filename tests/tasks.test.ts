@@ -73,6 +73,55 @@ describe('task CRUD', () => {
     expect(() => ctx.tasks.list({ status: 'bogus' as 'pending' })).toThrow('Invalid status');
   });
 
+  it('filters by tags (single tag)', () => {
+    ctx.tasks.create({ title: 'A', tags: ['okr:H1-3', 'iter:H1'] }, 'agent-1');
+    ctx.tasks.create({ title: 'B', tags: ['okr:H1-3'] }, 'agent-1');
+    ctx.tasks.create({ title: 'C', tags: ['iter:H1'] }, 'agent-1');
+    ctx.tasks.create({ title: 'D' }, 'agent-1');
+
+    const okr = ctx.tasks.list({ tags: ['okr:H1-3'] });
+    expect(okr.map((t) => t.title).sort()).toEqual(['A', 'B']);
+  });
+
+  it('filters by tags (AND-mode across multiple tags)', () => {
+    ctx.tasks.create({ title: 'A', tags: ['okr:H1-3', 'iter:H1'] }, 'agent-1');
+    ctx.tasks.create({ title: 'B', tags: ['okr:H1-3'] }, 'agent-1');
+    ctx.tasks.create({ title: 'C', tags: ['iter:H1'] }, 'agent-1');
+
+    const both = ctx.tasks.list({ tags: ['okr:H1-3', 'iter:H1'] });
+    expect(both.map((t) => t.title)).toEqual(['A']);
+  });
+
+  it('filters by tags returns empty when no match', () => {
+    ctx.tasks.create({ title: 'A', tags: ['okr:H1-3'] }, 'agent-1');
+    ctx.tasks.create({ title: 'B' }, 'agent-1');
+
+    expect(ctx.tasks.list({ tags: ['okr:nonexistent'] })).toHaveLength(0);
+    expect(ctx.tasks.list({ tags: [] })).toHaveLength(2);
+  });
+
+  it('filters by tags spans projects (cross-project rollup)', () => {
+    ctx.tasks.create({ title: 'A', project: 'proj1', tags: ['okr:H1-3'] }, 'agent-1');
+    ctx.tasks.create({ title: 'B', project: 'proj2', tags: ['okr:H1-3'] }, 'agent-1');
+    ctx.tasks.create({ title: 'C', project: 'proj1' }, 'agent-1');
+
+    const rollup = ctx.tasks.list({ tags: ['okr:H1-3'] });
+    expect(rollup.map((t) => t.title).sort()).toEqual(['A', 'B']);
+    expect(new Set(rollup.map((t) => t.project))).toEqual(new Set(['proj1', 'proj2']));
+  });
+
+  it('combines tag filter with other filters', () => {
+    ctx.tasks.create(
+      { title: 'A', project: 'proj1', tags: ['okr:H1-3'], stage: 'implement' },
+      'agent-1',
+    );
+    ctx.tasks.create({ title: 'B', project: 'proj1', tags: ['okr:H1-3'] }, 'agent-1');
+    ctx.tasks.create({ title: 'C', project: 'proj2', tags: ['okr:H1-3'] }, 'agent-1');
+
+    const filtered = ctx.tasks.list({ tags: ['okr:H1-3'], project: 'proj1' });
+    expect(filtered.map((t) => t.title).sort()).toEqual(['A', 'B']);
+  });
+
   it('updates task metadata', () => {
     const task = ctx.tasks.create({ title: 'Original' }, 'agent-1');
     const updated = ctx.tasks.update(task.id, { title: 'Updated', priority: 5 });

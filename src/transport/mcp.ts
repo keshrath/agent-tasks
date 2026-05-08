@@ -101,6 +101,12 @@ export const tools: ToolDefinition[] = [
         collaborator: { type: 'string', description: 'Filter tasks where agent is a collaborator' },
         root_only: { type: 'boolean', description: 'Only show top-level tasks (no subtasks)' },
         parent_id: { type: 'number', description: 'Filter subtasks of a specific parent' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Filter by tags. Returns tasks that have ALL listed tags (AND-mode). Use one or more tag values, e.g. ["okr:OKR-H1-3", "iter:H1"].',
+        },
         limit: {
           type: 'number',
           description: 'Max results (default: 500 for list, 50 for search)',
