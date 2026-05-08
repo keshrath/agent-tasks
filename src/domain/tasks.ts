@@ -392,7 +392,14 @@ export class TaskService {
     return gate?.stage_instructions?.[stage] ?? null;
   }
 
-  claim(taskId: number, claimerName: string): Task {
+  /**
+   * Take ownership of a pending task. With `advance` (the default) a task
+   * sitting on the pipeline's first stage moves to the second, which is right
+   * when that first stage is a queue ("backlog") rather than work. Pass false
+   * for pipelines whose first stage is itself a do-work stage, so the claim
+   * does not skip it.
+   */
+  claim(taskId: number, claimerName: string, advance = true): Task {
     validateAssignee(claimerName);
 
     return this.db.transaction(() => {
@@ -421,8 +428,11 @@ export class TaskService {
       const stages = this.getPipelineStages(task.project ?? undefined);
       const firstStage = stages[0];
       const nextStage = stages.length > 1 ? stages[1] : firstStage;
-      const newStage = task.stage === firstStage ? nextStage : task.stage;
-      const newStatus = syncStatusForStage(newStage, stages);
+      const newStage = advance && task.stage === firstStage ? nextStage : task.stage;
+      // A claimed task is never left pending: claim() gates on status alone, so
+      // a pending-but-assigned task could be claimed again by a second agent.
+      const synced = syncStatusForStage(newStage, stages);
+      const newStatus = synced === 'pending' ? 'in_progress' : synced;
 
       this.db.run(
         `UPDATE tasks SET status = ?, stage = ?, assigned_to = ?, updated_at = datetime('now') WHERE id = ?`,

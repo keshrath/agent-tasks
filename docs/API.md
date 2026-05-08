@@ -18,9 +18,9 @@ agent-tasks consolidates everything into 8 action-based tools to keep per-prompt
 
 ### Lifecycle
 
-| Tool         | Description                                                                                                                                                                                                                  |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `task_stage` | All lifecycle transitions via `action`: `claim` (assign to caller, advance from backlog), `advance` (next stage or specific via `stage`), `regress`, `complete`, `fail`, `cancel`. Optional `comment` and `result`/`reason`. |
+| Tool         | Description                                                                                                                                                                                                                                                                                                                            |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_stage` | All lifecycle transitions via `action`: `claim` (assign to caller, advance from backlog), `assign` (assign to caller, stage unchanged — for pipelines whose first stage is itself a do-work stage), `advance` (next stage or specific via `stage`), `regress`, `complete`, `fail`, `cancel`. Optional `comment` and `result`/`reason`. |
 
 ### Artifacts
 

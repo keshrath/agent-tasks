@@ -301,7 +301,7 @@ export function handleStage(
 ): unknown {
   const action = validateEnum(
     optString(args, 'action'),
-    ['claim', 'advance', 'regress', 'complete', 'fail', 'cancel'] as const,
+    ['claim', 'assign', 'advance', 'regress', 'complete', 'fail', 'cancel'] as const,
     'action',
   );
   const taskId = requireNumber(args, 'task_id');
@@ -310,6 +310,12 @@ export function handleStage(
     const claimer = optString(args, 'claimer') ?? sessionName(session);
     const claimed = ctx.tasks.claim(taskId, claimer);
     return withStageInstructions(ctx, claimed);
+  }
+
+  if (action === 'assign') {
+    const assignee = optString(args, 'claimer') ?? sessionName(session);
+    const assigned = ctx.tasks.claim(taskId, assignee, false);
+    return withStageInstructions(ctx, assigned);
   }
 
   if (action === 'advance') {
