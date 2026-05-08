@@ -270,6 +270,46 @@ describe('task_stage claim', () => {
 });
 
 // =============================================================================
+// task_stage: assign (claim minus stage advance)
+// =============================================================================
+
+describe('task_stage assign', () => {
+  it('assigns without advancing the stage', () => {
+    const task = handle('task_create', { title: 'Assign me' }) as {
+      id: number;
+      stage: string;
+    };
+    expect(task.stage).toBe('backlog');
+    const assigned = handle('task_stage', { action: 'assign', task_id: task.id }) as {
+      stage: string;
+      status: string;
+      assigned_to: string;
+    };
+    expect(assigned.stage).toBe('backlog');
+    expect(assigned.assigned_to).toBe('test-agent');
+    expect(assigned.status).toBe('in_progress');
+  });
+
+  it('uses custom assignee name via claimer arg', () => {
+    const task = handle('task_create', { title: 'Assign me' }) as { id: number };
+    const assigned = handle('task_stage', {
+      action: 'assign',
+      task_id: task.id,
+      claimer: 'head-influencer',
+    }) as { assigned_to: string };
+    expect(assigned.assigned_to).toBe('head-influencer');
+  });
+
+  it('rejects assign on already-claimed task', () => {
+    const task = handle('task_create', { title: 'Locked' }) as { id: number };
+    handle('task_stage', { action: 'claim', task_id: task.id });
+    expect(() =>
+      handle('task_stage', { action: 'assign', task_id: task.id, claimer: 'other' }),
+    ).toThrow('not pending');
+  });
+});
+
+// =============================================================================
 // task_stage: advance
 // =============================================================================
 

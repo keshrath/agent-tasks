@@ -163,13 +163,13 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_stage',
     description:
-      'Move a task through its lifecycle. Actions: "claim" → assign to you and advance from backlog to spec, "advance" → next stage (or jump to a specific one), "regress" → earlier stage (requires reason), "complete" → marks done with result, "fail" → marks failed with error, "cancel" → cancels with reason.',
+      'Move a task through its lifecycle. Actions: "claim" → assign to you and advance from backlog to spec, "assign" → assign to you WITHOUT advancing the stage (use for custom pipelines where the first stage is itself a do-work stage), "advance" → next stage (or jump to a specific one), "regress" → earlier stage (requires reason), "complete" → marks done with result, "fail" → marks failed with error, "cancel" → cancels with reason.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['claim', 'advance', 'regress', 'complete', 'fail', 'cancel'],
+          enum: ['claim', 'assign', 'advance', 'regress', 'complete', 'fail', 'cancel'],
           description: 'Lifecycle action to perform',
         },
         task_id: { type: 'number', description: 'Task ID' },
