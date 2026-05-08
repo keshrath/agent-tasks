@@ -426,6 +426,47 @@ export class TaskService {
     });
   }
 
+  // Like `claim` but never advances the stage. For pipelines whose first
+  // stage is itself a do-work stage (read-context, pull-from-queue, etc.)
+  // where assignment and "begin spec" are distinct actions.
+  assign(taskId: number, assigneeName: string): Task {
+    validateAssignee(assigneeName);
+
+    return this.db.transaction(() => {
+      const task = this.requireTask(taskId);
+      if (task.status !== 'pending') {
+        throw new ConflictError(`Task ${taskId} is not pending (status: ${task.status}).`);
+      }
+
+      const gate = this.getGateConfig(task.project ?? undefined);
+      const minConfidence = gate?.min_confidence_for_claim;
+      if (typeof minConfidence === 'number' && minConfidence > 0) {
+        const { score, reasons } = scoreTaskConfidence({
+          title: task.title,
+          description: task.description,
+        });
+        if (score < minConfidence) {
+          const detail = reasons.length ? ` Issues: ${reasons.join('; ')}` : '';
+          throw new ValidationError(
+            `Task ${taskId} confidence ${score}/100 below required ${minConfidence}.${detail}`,
+          );
+        }
+      }
+
+      // Stage stays put; status flips to in_progress because an agent now
+      // actively owns the task. Status no longer follows stage strictly here,
+      // but a "pending + assigned_to set" state is incoherent for queue
+      // semantics (next-task picker would otherwise hand it out again).
+      this.db.run(
+        `UPDATE tasks SET status = 'in_progress', assigned_to = ?, updated_at = datetime('now') WHERE id = ?`,
+        [assigneeName, taskId],
+      );
+      const assigned = this.getById(taskId)!;
+      this.events.emit('task:claimed', { task: assigned, claimer: assigneeName });
+      return assigned;
+    });
+  }
+
   // ---- Learnings ----
 
   learn(

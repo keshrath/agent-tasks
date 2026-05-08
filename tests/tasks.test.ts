@@ -129,6 +129,54 @@ describe('claiming', () => {
   });
 });
 
+describe('assigning (no stage advance)', () => {
+  it('assigns a task without advancing the stage', () => {
+    const task = ctx.tasks.create({ title: 'Assign me' }, 'agent-1');
+    expect(task.stage).toBe('backlog');
+    const assigned = ctx.tasks.assign(task.id, 'agent-2');
+    expect(assigned.assigned_to).toBe('agent-2');
+    expect(assigned.stage).toBe('backlog');
+    expect(assigned.status).toBe('in_progress');
+  });
+
+  it('respects custom pipelines (stays at the first stage)', () => {
+    ctx.tasks.setPipelineConfig('proj', ['I-0-pull', 'I-1-plan', 'I-2-exec', 'I-3-closeout']);
+    const task = ctx.tasks.create({ title: 'Custom' }, 'agent-1');
+    ctx.tasks.update(task.id, { project: 'proj' });
+    // re-create at first stage of custom pipeline
+    const wave = ctx.tasks.create({ title: 'Wave', project: 'proj', stage: 'I-0-pull' }, 'agent-1');
+    const assigned = ctx.tasks.assign(wave.id, 'head-influencer');
+    expect(assigned.stage).toBe('I-0-pull');
+    expect(assigned.assigned_to).toBe('head-influencer');
+    expect(assigned.status).toBe('in_progress');
+  });
+
+  it('rejects assigning non-pending task', () => {
+    const task = ctx.tasks.create({ title: 'Already claimed' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    expect(() => ctx.tasks.assign(task.id, 'agent-2')).toThrow('not pending');
+  });
+
+  it('emits task:claimed event (same channel as claim)', () => {
+    const task = ctx.tasks.create({ title: 'Listen' }, 'agent-1');
+    let captured: { task: { id: number }; claimer: string } | null = null;
+    ctx.events.on('task:claimed', (e) => {
+      captured = e.data as { task: { id: number }; claimer: string };
+    });
+    ctx.tasks.assign(task.id, 'agent-2');
+    expect(captured).not.toBeNull();
+    expect(captured!.claimer).toBe('agent-2');
+    expect(captured!.task.id).toBe(task.id);
+  });
+
+  it('respects min_confidence_for_claim gate (parity with claim)', () => {
+    ctx.tasks.setPipelineConfig('strict', ['I-0-pull', 'I-1-plan', 'done']);
+    ctx.tasks.setGateConfig('strict', { min_confidence_for_claim: 80 });
+    const vague = ctx.tasks.create({ title: 'x', project: 'strict', stage: 'I-0-pull' }, 'agent-1');
+    expect(() => ctx.tasks.assign(vague.id, 'agent-2')).toThrow('confidence');
+  });
+});
+
 describe('advancement', () => {
   it('advances through stages sequentially', () => {
     const task = ctx.tasks.create({ title: 'Flow' }, 'agent-1');
