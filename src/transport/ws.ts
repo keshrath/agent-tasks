@@ -51,12 +51,18 @@ export function setupWebSocket(httpServer: Server, ctx: AppContext): WebSocketHa
     getFingerprints: () => {
       const row = ctx.db.queryOne<{ fp: string }>(
         `SELECT
-           (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at),'') || ':' || COALESCE(MAX(id),0) FROM tasks)
+           (SELECT COALESCE(
+              group_concat(id || ':' || COALESCE(updated_at, ''), '|'), ''
+            ) FROM (SELECT id, updated_at FROM tasks ORDER BY id))
            || '|' ||
-           (SELECT COALESCE(MAX(id),0) FROM task_comments)
+           (SELECT COALESCE(
+              group_concat(id || ':' || task_id || ':' || COALESCE(created_at, ''), '|'), ''
+            ) FROM (SELECT id, task_id, created_at FROM task_comments ORDER BY id))
            || '|' ||
-           (SELECT COALESCE(MAX(id),0) FROM task_artifacts)
-         AS fp`,
+           (SELECT COALESCE(
+              group_concat(id || ':' || task_id || ':' || COALESCE(created_at, ''), '|'), ''
+            ) FROM (SELECT id, task_id, created_at FROM task_artifacts ORDER BY id))
+          AS fp`,
       );
       return { pipeline: row?.fp ?? '' };
     },
@@ -97,6 +103,7 @@ function buildStatePayload(ctx: AppContext): Record<string, unknown> {
     dependencies: ctx.tasks.getAllDependencies(),
     artifactCounts: ctx.tasks.getArtifactCounts(),
     commentCounts: ctx.comments.countByTask(),
+    lastActivityAt: ctx.tasks.getLastActivityByTask(),
     subtaskProgress: ctx.tasks.getAllSubtaskProgress(),
     stages: ctx.tasks.getPipelineStages(),
     gateConfigs: ctx.tasks.getAllGateConfigs(),

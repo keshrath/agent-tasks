@@ -15,6 +15,7 @@ var state = {
   dependencies: [],
   artifactCounts: {},
   commentCounts: {},
+  lastActivityAt: {},
   subtaskProgress: {},
   collaborators: {},
   stages: ['backlog', 'spec', 'plan', 'implement', 'test', 'review', 'done', 'cancelled'],
@@ -37,6 +38,7 @@ var filters = {
   project: '',
   assignee: '',
   minPriority: 0,
+  live: false,
 };
 
 var ws = null;
@@ -51,6 +53,7 @@ try {
   if (saved.project) filters.project = saved.project;
   if (saved.assignee) filters.assignee = saved.assignee;
   if (saved.minPriority) filters.minPriority = saved.minPriority;
+  if (saved.live === true) filters.live = true;
 } catch {
   /* ignore */
 }
@@ -99,8 +102,57 @@ TaskBoard.getBlockedTaskIds = getBlockedTaskIds;
 
 // ---- Filters ----
 
+var LIVE_WINDOW_MS = 30 * 60 * 1000;
+
+function parseActivityTimestamp(value) {
+  if (!value) return NaN;
+  var stringValue = String(value);
+  var match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/.exec(stringValue);
+  if (!match) return NaN;
+
+  var year = Number(match[1]);
+  var month = Number(match[2]);
+  var day = Number(match[3]);
+  var hour = Number(match[4]);
+  var minute = Number(match[5]);
+  var second = Number(match[6]);
+  if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59) return NaN;
+
+  var timestamp = Date.UTC(year, month - 1, day, hour, minute, second);
+  var date = new Date(timestamp);
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day ||
+    date.getUTCHours() !== hour ||
+    date.getUTCMinutes() !== minute ||
+    date.getUTCSeconds() !== second
+  ) {
+    return NaN;
+  }
+  return timestamp;
+}
+
+function updateLatestActivity(taskId, timestamp) {
+  if (!timestamp) return;
+  var nextTimestamp = parseActivityTimestamp(timestamp);
+  if (!Number.isFinite(nextTimestamp)) return;
+  var previousTimestamp = parseActivityTimestamp(state.lastActivityAt[taskId]);
+  if (!Number.isFinite(previousTimestamp) || nextTimestamp > previousTimestamp) {
+    state.lastActivityAt[taskId] = timestamp;
+  }
+}
+
+function hasRecentActivity(task) {
+  var timestamp = parseActivityTimestamp(state.lastActivityAt[task.id] || task.updated_at);
+  if (!Number.isFinite(timestamp)) return false;
+  var age = Date.now() - timestamp;
+  return age >= 0 && age < LIVE_WINDOW_MS;
+}
+
 function getFilteredTasks() {
   return state.tasks.filter((t) => {
+    if (filters.live && !hasRecentActivity(t)) return false;
     if (filters.project && t.project !== filters.project) return false;
     if (filters.assignee && t.assigned_to !== filters.assignee) return false;
     if (filters.minPriority && t.priority < filters.minPriority) return false;
@@ -116,6 +168,7 @@ function getFilteredTasks() {
 }
 
 TaskBoard.getFilteredTasks = getFilteredTasks;
+TaskBoard.hasRecentActivity = hasRecentActivity;
 
 function updateFilterDropdowns() {
   var esc = TaskBoard.esc;
@@ -146,6 +199,8 @@ function applyRestoredFilters() {
   if (filters.assignee && assigneeSelect) assigneeSelect.value = filters.assignee;
   var prioritySelect = TaskBoard._root.getElementById('filter-priority');
   if (filters.minPriority && prioritySelect) prioritySelect.value = String(filters.minPriority);
+  var liveToggle = TaskBoard._root.getElementById('filter-live');
+  if (liveToggle) liveToggle.checked = filters.live;
 }
 
 // ---- Rendering ----
@@ -211,6 +266,7 @@ function handleFullState(data) {
   state.dependencies = data.dependencies || [];
   state.artifactCounts = data.artifactCounts || {};
   state.commentCounts = data.commentCounts || {};
+  state.lastActivityAt = data.lastActivityAt || {};
   state.subtaskProgress = data.subtaskProgress || {};
   state.collaborators = data.collaborators || {};
   if (data.stages) state.stages = data.stages;
@@ -235,6 +291,7 @@ function quickFingerprint(data) {
   fp += '|' + (data.dependencies || []).length;
   fp += '|' + JSON.stringify(data.artifactCounts || {});
   fp += '|' + JSON.stringify(data.commentCounts || {});
+  fp += '|' + JSON.stringify(data.lastActivityAt || {});
   fp += '|' + JSON.stringify(data.subtaskProgress || {});
   return fp;
 }
@@ -266,6 +323,7 @@ function handleEvent(event) {
         var idx = state.tasks.findIndex((t) => t.id === d.task.id);
         if (idx >= 0) state.tasks[idx] = d.task;
         else state.tasks.unshift(d.task);
+        updateLatestActivity(d.task.id, d.task.updated_at);
       }
       showToast('Task created', d.task?.title || '');
       break;
@@ -281,12 +339,14 @@ function handleEvent(event) {
         var idx2 = state.tasks.findIndex((t) => t.id === d.task.id);
         if (idx2 >= 0) state.tasks[idx2] = d.task;
         else state.tasks.unshift(d.task);
+        updateLatestActivity(d.task.id, d.task.updated_at);
       }
       break;
     }
     case 'task:deleted': {
       if (d.task) {
         state.tasks = state.tasks.filter((t) => t.id !== d.task.id);
+        delete state.lastActivityAt[d.task.id];
         if (state.panelTaskId === d.task.id) closePanel();
       }
       break;
@@ -295,6 +355,7 @@ function handleEvent(event) {
       if (d.artifact) {
         var tid = d.artifact.task_id;
         state.artifactCounts[tid] = (state.artifactCounts[tid] || 0) + 1;
+        updateLatestActivity(tid, d.artifact.created_at);
       }
       break;
     }
@@ -302,6 +363,7 @@ function handleEvent(event) {
       if (d.comment) {
         var ctid = d.comment.task_id;
         state.commentCounts[ctid] = (state.commentCounts[ctid] || 0) + 1;
+        updateLatestActivity(ctid, d.comment.created_at);
       }
       break;
     }
@@ -406,6 +468,13 @@ function _init() {
 
   TaskBoard._root.getElementById('filter-priority')?.addEventListener('change', (e) => {
     filters.minPriority = parseInt(e.target.value) || 0;
+    saveFilters();
+    TaskBoard.resetColumnVisibleCounts();
+    render();
+  });
+
+  TaskBoard._root.getElementById('filter-live')?.addEventListener('change', (e) => {
+    filters.live = e.target.checked;
     saveFilters();
     TaskBoard.resetColumnVisibleCounts();
     render();

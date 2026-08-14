@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Live dashboard filter** — optionally shows tasks with task, comment, or artifact activity from the last 30 minutes while preserving the existing filters.
+
 ## [1.10.11] - 2026-04-15
 
 ### Added

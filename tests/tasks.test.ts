@@ -113,6 +113,69 @@ describe('task CRUD', () => {
   });
 });
 
+describe('activity timestamps', () => {
+  it('uses the task timestamp when no child activity exists', () => {
+    const task = ctx.tasks.create({ title: 'Task activity' }, 'agent-1');
+    const taskTimestamp = '2026-01-01 12:00:00';
+    ctx.db.run('UPDATE tasks SET updated_at = ? WHERE id = ?', [taskTimestamp, task.id]);
+
+    expect(ctx.tasks.getLastActivityByTask()).toEqual({ [task.id]: taskTimestamp });
+  });
+
+  it('uses the newest timestamp across task, comment, and artifact activity', () => {
+    const task = ctx.tasks.create({ title: 'Child activity' }, 'agent-1');
+    const oldTimestamp = '2026-01-01 12:00:00';
+    const commentTimestamp = '2026-01-01 13:00:00';
+    const artifactTimestamp = '2026-01-01 14:00:00';
+
+    ctx.db.run('UPDATE tasks SET updated_at = ? WHERE id = ?', [oldTimestamp, task.id]);
+    const comment = ctx.comments.add(task.id, 'agent-2', 'Recent comment');
+    ctx.db.run('UPDATE task_comments SET created_at = ? WHERE id = ?', [
+      commentTimestamp,
+      comment.id,
+    ]);
+    const artifact = ctx.tasks.addArtifact(task.id, 'notes', 'Recent artifact', 'agent-2');
+    ctx.db.run('UPDATE task_artifacts SET created_at = ? WHERE id = ?', [
+      artifactTimestamp,
+      artifact.id,
+    ]);
+
+    expect(ctx.tasks.getLastActivityByTask()[task.id]).toBe(artifactTimestamp);
+
+    const newestCommentTimestamp = '2026-01-01 15:00:00';
+    ctx.db.run('UPDATE task_comments SET created_at = ? WHERE id = ?', [
+      newestCommentTimestamp,
+      comment.id,
+    ]);
+
+    expect(ctx.tasks.getLastActivityByTask()[task.id]).toBe(newestCommentTimestamp);
+  });
+
+  it('ignores malformed timestamps when selecting the newest valid activity', () => {
+    const task = ctx.tasks.create({ title: 'Malformed activity' }, 'agent-1');
+    const validTaskTimestamp = '2026-01-01 12:00:00';
+    const invalidCommentTimestamp = '2026-02-30 15:00:00';
+    ctx.db.run('UPDATE tasks SET updated_at = ? WHERE id = ?', [validTaskTimestamp, task.id]);
+
+    const comment = ctx.comments.add(task.id, 'agent-2', 'Malformed comment timestamp');
+    ctx.db.run('UPDATE task_comments SET created_at = ? WHERE id = ?', [
+      invalidCommentTimestamp,
+      comment.id,
+    ]);
+
+    expect(ctx.tasks.getLastActivityByTask()[task.id]).toBe(validTaskTimestamp);
+
+    const validCommentTimestamp = '2026-01-01 13:00:00';
+    ctx.db.run('UPDATE task_comments SET created_at = ? WHERE id = ?', [
+      validCommentTimestamp,
+      comment.id,
+    ]);
+    ctx.db.run('UPDATE tasks SET updated_at = ? WHERE id = ?', [invalidCommentTimestamp, task.id]);
+
+    expect(ctx.tasks.getLastActivityByTask()[task.id]).toBe(validCommentTimestamp);
+  });
+});
+
 describe('claiming', () => {
   it('claims a task and advances from backlog', () => {
     const task = ctx.tasks.create({ title: 'Claim me' }, 'agent-1');

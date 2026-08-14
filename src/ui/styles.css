@@ -374,6 +374,28 @@ header {
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.filter-toggle:has(input:checked) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.filter-toggle input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
 .filter-chips {
   display: flex;
   gap: 6px;

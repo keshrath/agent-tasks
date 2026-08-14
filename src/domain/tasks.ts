@@ -40,6 +40,36 @@ import {
 } from './task-validator.js';
 import { scoreTaskConfidence, type ConfidenceScore } from './confidence.js';
 
+function parseActivityTimestamp(value: string | null | undefined): number {
+  if (!value) return NaN;
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return NaN;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59) {
+    return NaN;
+  }
+
+  const timestamp = Date.UTC(year, month - 1, day, hour, minute, second);
+  const date = new Date(timestamp);
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day ||
+    date.getUTCHours() !== hour ||
+    date.getUTCMinutes() !== minute ||
+    date.getUTCSeconds() !== second
+  ) {
+    return NaN;
+  }
+  return timestamp;
+}
+
 export const DEFAULT_STAGES = [
   'backlog',
   'spec',
@@ -1025,6 +1055,33 @@ export class TaskService {
     ])!;
     this.events.emit('artifact:created', { artifact });
     return artifact;
+  }
+
+  getLastActivityByTask(): Record<number, string> {
+    const taskRows = this.db.queryAll<{ id: number; updated_at: string }>(
+      'SELECT id, updated_at FROM tasks',
+    );
+    const childRows = this.db.queryAll<{ task_id: number; created_at: string }>(
+      `SELECT task_id, created_at FROM task_comments
+       UNION ALL
+       SELECT task_id, created_at FROM task_artifacts`,
+    );
+    const latest: Record<number, { value: string; timestamp: number }> = {};
+    const consider = (taskId: number, value: string | null | undefined) => {
+      const timestamp = parseActivityTimestamp(value);
+      if (!Number.isFinite(timestamp)) return;
+      const previous = latest[taskId];
+      if (!previous || timestamp > previous.timestamp) {
+        latest[taskId] = { value: value!, timestamp };
+      }
+    };
+
+    for (const row of taskRows) consider(row.id, row.updated_at);
+    for (const row of childRows) consider(row.task_id, row.created_at);
+
+    const activity: Record<number, string> = {};
+    for (const [taskId, value] of Object.entries(latest)) activity[Number(taskId)] = value.value;
+    return activity;
   }
 
   getArtifacts(taskId: number, stage?: string): TaskArtifact[] {
