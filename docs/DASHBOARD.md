@@ -80,6 +80,7 @@ The filter bar at the top provides:
 - **Project filter** — dropdown populated from existing tasks
 - **Assignee filter** — dropdown populated from existing tasks
 - **Priority filter** — minimum priority threshold (P1+, P3+, P5+, P10+)
+- **Live** — shows tasks with task, comment, or artifact activity strictly less than 30 minutes old; combines with the other filters, persists across reloads, and reevaluates on dashboard updates
 - **Filter chips** — active filters shown as removable chips
 
 ![Filters](assets/filters.png)
@@ -115,6 +116,7 @@ Columns with no tasks display a helpful empty state with an icon and hint text.
 - Drag-and-drop between stage columns with auto-scroll
 - Full-text search powered by FTS5
 - Project/assignee/priority filtering with removable chips
+- Live activity filtering based on task, comment, and artifact activity
 - ARIA attributes for accessibility
 - Mobile responsive layout
 
@@ -122,6 +124,6 @@ Columns with no tasks display a helpful empty state with an icon and hint text.
 
 The dashboard connects via WebSocket for real-time updates:
 
-- **On connect:** receives full state snapshot (`type: "state"`) with tasks, dependencies, artifact/comment counts, stages, gate configs, and collaborators
-- **Incremental events:** streamed as tasks change
+- **On connect:** receives full state snapshot (`type: "state"`) with tasks, dependencies, artifact/comment counts, `lastActivityAt`, stages, gate configs, and collaborators
+- **State deltas:** server sends current changed state data when a database fingerprint changes
 - **Polling:** server polls SQLite every 2s to detect cross-process changes (MCP stdio servers)

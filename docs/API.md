@@ -117,14 +117,21 @@ Connect to `ws://localhost:3422` for real-time events.
 
 ### Connection lifecycle
 
-1. **On connect:** receives a full state snapshot (`type: "state"`) containing tasks, dependencies, pipeline stages, artifact counts, comment counts, subtask progress, and collaborators
-2. **Incremental events:** streamed as tasks are created, updated, moved, or deleted
+1. **On connect:** receives a full state snapshot (`type: "state"`) containing tasks, dependencies, pipeline stages, artifact counts, comment counts, `lastActivityAt`, subtask progress, and collaborators
+2. **State deltas:** when a database fingerprint changes, the server sends a `state` message with the current changed category data; agent-tasks supplies the dashboard state fields together so task/comment/artifact activity stays consistent
 3. **Polling:** the server polls SQLite every 2 seconds to detect cross-process changes (e.g., tasks created via MCP in another terminal)
+
+`lastActivityAt` is an object keyed by task ID. Each value is the newest UTC
+timestamp among the task's `updated_at`, comment `created_at`, and artifact
+`created_at` values. The dashboard's `Live` filter accepts values younger than
+30 minutes using a strict `< 30 minutes` comparison; missing, invalid, and
+future timestamps do not match. The selected Live state is persisted in the
+browser's `agent-tasks-filters` preference and reevaluated when a state message
+arrives.
 
 ### Event types
 
-- `state` — full snapshot (sent on initial connection)
-- Task CRUD events — streamed when tasks are created, updated, advanced, completed, or deleted
+- `state` — full snapshot or database-change delta
 
 ### Cross-process sync
 

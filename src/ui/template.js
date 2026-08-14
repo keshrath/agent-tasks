@@ -42,6 +42,10 @@ TaskBoard._template = function () {
     '<option value="5">P5+</option>' +
     '<option value="10">P10+</option>' +
     '</select>' +
+    '<label class="filter-toggle">' +
+    '<input type="checkbox" id="filter-live" aria-label="Filter tasks with activity in the last 30 minutes" />' +
+    '<span>Live</span>' +
+    '</label>' +
     '</div>' +
     '<div class="filter-chips" id="filter-chips"></div>' +
     '</div>' +

@@ -1045,6 +1045,27 @@ export class TaskService {
     return artifact;
   }
 
+  /**
+   * Most recent activity per task — the task's own updated_at, or a later
+   * comment/artifact created_at. Feeds the dashboard's "live" filter.
+   * Timestamps are 'YYYY-MM-DD HH:MM:SS' (datetime('now')), so MAX() over the
+   * strings is chronological.
+   */
+  getLastActivityByTask(): Record<number, string> {
+    const rows = this.db.queryAll<{ task_id: number; last_activity: string }>(
+      `SELECT task_id, MAX(ts) AS last_activity FROM (
+         SELECT id AS task_id, updated_at AS ts FROM tasks
+         UNION ALL
+         SELECT task_id, created_at AS ts FROM task_comments
+         UNION ALL
+         SELECT task_id, created_at AS ts FROM task_artifacts
+       ) WHERE ts IS NOT NULL GROUP BY task_id`,
+    );
+    const activity: Record<number, string> = {};
+    for (const row of rows) activity[row.task_id] = row.last_activity;
+    return activity;
+  }
+
   getArtifacts(taskId: number, stage?: string): TaskArtifact[] {
     this.requireTask(taskId);
     if (stage) {

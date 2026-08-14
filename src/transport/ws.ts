@@ -97,6 +97,7 @@ function buildStatePayload(ctx: AppContext): Record<string, unknown> {
     dependencies: ctx.tasks.getAllDependencies(),
     artifactCounts: ctx.tasks.getArtifactCounts(),
     commentCounts: ctx.comments.countByTask(),
+    lastActivityAt: ctx.tasks.getLastActivityByTask(),
     subtaskProgress: ctx.tasks.getAllSubtaskProgress(),
     stages: ctx.tasks.getPipelineStages(),
     gateConfigs: ctx.tasks.getAllGateConfigs(),
