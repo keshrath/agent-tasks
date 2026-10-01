@@ -1,7 +1,7 @@
 {
   "name": "agent-tasks",
   "description": "Pipeline-driven task management for AI coding agents with stages, dependencies, artifacts, multi-agent claiming, and a live Kanban dashboard.",
-  "version": "1.10.10",
+  "version": "1.10.13",
   "author": {
     "name": "keshrath"
   },

@@ -58,7 +58,7 @@ Example `gate_config`:
 
 ## REST API (19 endpoints)
 
-All endpoints return JSON. CORS is enabled. The server runs on port 3422 by default.
+All endpoints return JSON. Loopback only: foreign `Host`/`Origin` headers get 403, request bodies must be `application/json`, no wildcard CORS. The server runs on port 3422 by default.
 
 ### Read endpoints
 

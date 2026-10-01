@@ -470,6 +470,7 @@ Useful for viewing the dashboard while MCP servers run in separate terminals, or
 | -------------------------- | ------------------------------- | ------------------------------------------------------------------------ |
 | `AGENT_TASKS_DB`           | `~/.agent-tasks/agent-tasks.db` | Path to the SQLite database file                                         |
 | `AGENT_TASKS_PORT`         | `3422`                          | HTTP/WebSocket port for the dashboard                                    |
+| `AGENT_TASKS_HOST`         | `127.0.0.1`                     | Dashboard bind address (`0.0.0.0` exposes it to the network)             |
 | `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable embedded instructions in MCP tool responses        |
 | `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST API URL (for bridge notifications and heartbeat cleanup) |
 

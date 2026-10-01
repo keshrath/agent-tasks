@@ -91,12 +91,13 @@ npx agent-tasks
 
 ### Environment Variables
 
-| Variable                   | Default                         | Description                                          |
-| -------------------------- | ------------------------------- | ---------------------------------------------------- |
-| `AGENT_TASKS_DB`           | `~/.agent-tasks/agent-tasks.db` | SQLite database file path                            |
-| `AGENT_TASKS_PORT`         | `3422`                          | Dashboard HTTP/WebSocket port                        |
-| `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable response-embedded instructions |
-| `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications         |
+| Variable                   | Default                         | Description                                                  |
+| -------------------------- | ------------------------------- | ------------------------------------------------------------ |
+| `AGENT_TASKS_DB`           | `~/.agent-tasks/agent-tasks.db` | SQLite database file path                                    |
+| `AGENT_TASKS_PORT`         | `3422`                          | Dashboard HTTP/WebSocket port                                |
+| `AGENT_TASKS_HOST`         | `127.0.0.1`                     | Dashboard bind address (`0.0.0.0` exposes it to the network) |
+| `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable response-embedded instructions         |
+| `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications                 |
 
 ### Claude Code Setup
 
@@ -502,7 +503,7 @@ task_config with action "rules", format "mdc", project "backend"
 
 ## 6. REST API Reference
 
-All endpoints return JSON. CORS enabled. Rate limited to 100 requests per minute per IP.
+All endpoints return JSON. Loopback only: foreign `Host`/`Origin` headers get 403, request bodies must be `application/json`, no wildcard CORS. Rate limited to 100 requests per minute per IP.
 
 ### Health and Overview
 

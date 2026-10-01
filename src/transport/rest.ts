@@ -35,7 +35,6 @@ function checkRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
     res.writeHead(429, {
       'Content-Type': 'application/json',
       'Retry-After': String(Math.ceil((result.resetAt - Date.now()) / 1000)),
-      'Access-Control-Allow-Origin': '*',
       ...SECURITY_HEADERS,
     });
     res.end(JSON.stringify({ error: 'Too many requests. Try again later.' }));
@@ -480,16 +479,6 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
 
   return (req: IncomingMessage, res: ServerResponse) => {
     if (!checkRateLimit(req, res)) return;
-
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204, {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      });
-      res.end();
-      return;
-    }
 
     const url = new URL(req.url!, `http://${req.headers.host}`);
     const pathname = url.pathname;

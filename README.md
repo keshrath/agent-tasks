@@ -110,7 +110,7 @@ See [full API reference](docs/API.md) for detailed descriptions of every tool an
 
 ## REST API (18 endpoints)
 
-All endpoints return JSON. CORS enabled. See [full API reference](docs/API.md#rest-api-18-endpoints) for details.
+All endpoints return JSON. Loopback only: foreign `Host`/`Origin` headers get 403, request bodies must be `application/json`, no wildcard CORS. See [full API reference](docs/API.md#rest-api-18-endpoints) for details.
 
 ```
 GET  /health                          Health check with version + uptime
@@ -148,13 +148,14 @@ npm run check         # Full CI: typecheck + lint + format + test
 
 ## Environment variables
 
-| Variable                   | Default                         | Description                                          |
-| -------------------------- | ------------------------------- | ---------------------------------------------------- |
-| `AGENT_TASKS_DB`           | `~/.agent-tasks/agent-tasks.db` | SQLite database file path                            |
-| `AGENT_TASKS_PORT`         | `3422`                          | Dashboard HTTP/WebSocket port                        |
-| `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable response-embedded instructions |
-| `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications         |
-| `AGENT_KNOWLEDGE_URL`      | `http://localhost:3423`         | Agent-knowledge REST URL for knowledge bridge        |
+| Variable                   | Default                         | Description                                                  |
+| -------------------------- | ------------------------------- | ------------------------------------------------------------ |
+| `AGENT_TASKS_DB`           | `~/.agent-tasks/agent-tasks.db` | SQLite database file path                                    |
+| `AGENT_TASKS_PORT`         | `3422`                          | Dashboard HTTP/WebSocket port                                |
+| `AGENT_TASKS_HOST`         | `127.0.0.1`                     | Dashboard bind address (`0.0.0.0` exposes it to the network) |
+| `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable response-embedded instructions         |
+| `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications                 |
+| `AGENT_KNOWLEDGE_URL`      | `http://localhost:3423`         | Agent-knowledge REST URL for knowledge bridge                |
 
 ---
 

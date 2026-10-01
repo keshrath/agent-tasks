@@ -55,21 +55,31 @@ describe('GET /health', () => {
 // CORS
 // ---------------------------------------------------------------------------
 
-describe('OPTIONS (CORS)', () => {
-  it('returns 204 with CORS headers', async () => {
-    const res = await api('/api/tasks', { method: 'OPTIONS' });
+describe('CORS / request guard', () => {
+  it('answers a loopback preflight with the reflected origin, never *', async () => {
+    const origin = 'http://127.0.0.1:5173';
+    const res = await api('/api/tasks', { method: 'OPTIONS', headers: { Origin: origin } });
     expect(res.status).toBe(204);
-    expect(res.headers.get('access-control-allow-origin')).toBe('*');
-    expect(res.headers.get('access-control-allow-methods')).toContain('GET');
-    expect(res.headers.get('access-control-allow-methods')).toContain('POST');
+    expect(res.headers.get('access-control-allow-origin')).toBe(origin);
     expect(res.headers.get('access-control-allow-methods')).toContain('PUT');
     expect(res.headers.get('access-control-allow-headers')).toContain('Content-Type');
   });
 
-  it('returns CORS headers on any path', async () => {
-    const res = await api('/any/path', { method: 'OPTIONS' });
-    expect(res.status).toBe(204);
-    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+  it('rejects a cross-origin POST', async () => {
+    const res = await api('/api/tasks', {
+      ...jsonBody({ title: 'evil' }),
+      headers: { 'Content-Type': 'application/json', Origin: 'https://evil.com' },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects a text/plain POST body', async () => {
+    const res = await api('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ title: 'evil' }),
+    });
+    expect(res.status).toBe(415);
   });
 });
 
@@ -680,9 +690,9 @@ describe('Response headers', () => {
     expect(res.headers.get('content-type')).toContain('application/json');
   });
 
-  it('includes CORS header on API responses', async () => {
+  it('never sends a wildcard CORS header on API responses', async () => {
     const res = await api('/api/tasks');
-    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 
   it('includes X-Content-Type-Options header', async () => {
