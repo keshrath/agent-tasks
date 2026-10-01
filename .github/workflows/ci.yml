@@ -6,9 +6,14 @@ on:
     tags: [v*]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to (re)publish, e.g. v1.2.3'
+        required: true
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ inputs.tag }}
   cancel-in-progress: true
 
 permissions:
@@ -37,14 +42,16 @@ jobs:
 
   publish:
     needs: check
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -52,13 +59,31 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npm publish --provenance --access public
+      - name: Publish to npm (skipped if version already exists)
+        run: |
+          SPEC="$(node -p "require('./package.json').name")@$(node -p "require('./package.json').version")"
+          echo "SPEC=$SPEC" >> "$GITHUB_ENV"
+          if [ -n "$(npm view "$SPEC" version 2>/dev/null)" ]; then
+            echo "$SPEC already on npm, skipping publish"
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Wait for npm propagation
+        run: |
+          for i in $(seq 1 30); do
+            [ -n "$(npm view "$SPEC" version 2>/dev/null)" ] && exit 0
+            echo "waiting for $SPEC on npm ($i/30)"; sleep 10
+          done
+          echo "$SPEC not visible on npm after 5 min"; exit 1
       - name: Install mcp-publisher
         run: |
           curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
       - name: Publish to MCP Registry
         run: |
-          ./mcp-publisher login github-oidc
-          ./mcp-publisher publish
+          for delay in 15 30 60 120 0; do
+            ./mcp-publisher login github-oidc && ./mcp-publisher publish && exit 0
+            [ "$delay" -eq 0 ] && exit 1
+            echo "retrying in ${delay}s"; sleep "$delay"
+          done
