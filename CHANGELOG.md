@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.10.14] - 2026-10-10
+
+### Added
+
+- **Configurable Live dashboard window** — choose a 5-minute to 72-hour activity window while preserving the existing Live filter and filter persistence.
+
 ## [1.10.11] - 2026-04-15
 
 ### Added

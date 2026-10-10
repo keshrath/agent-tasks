@@ -169,9 +169,11 @@ Click the "+" button at the top of any column to create a task directly in that 
 
 Use the filter bar to narrow by project, assignee, minimum priority, Live
 activity, or full-text query. Live combines with the other filters and matches
-tasks whose newest task, comment, or artifact activity is strictly less than
-30 minutes old. Missing, invalid, and future timestamps do not match; the
-preference persists in `localStorage`.
+tasks whose newest task, comment, or artifact activity is strictly newer than
+the selected window (5 minutes, 15 minutes, 30 minutes, 60 minutes, 2 hours,
+6 hours, 12 hours, 24 hours, or 72 hours; 30 minutes by default).
+Missing, invalid, and future timestamps do not match; the preference persists
+in `localStorage`.
 
 ### Theme Toggle
 

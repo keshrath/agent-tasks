@@ -215,13 +215,33 @@ test.describe('agent-tasks dashboard', () => {
       timeout: 10000,
     });
 
-    const liveToggle = page.getByLabel('Filter tasks with activity in the last 30 minutes');
+    const liveToggle = page.getByLabel('Filter tasks with recent activity');
+    const liveWindow = page.getByLabel('Live activity window');
     await expect(liveToggle).toBeVisible();
+    await expect(liveWindow).toHaveValue('30');
+    await expect(liveWindow.locator('option')).toHaveText([
+      'Last 5 minutes',
+      'Last 15 minutes',
+      'Last 30 minutes',
+      'Last 60 minutes',
+      'Last 2 hours',
+      'Last 6 hours',
+      'Last 12 hours',
+      'Last 24 hours',
+      'Last 72 hours',
+    ]);
     await liveToggle.check({ force: true });
 
     await expect(page.locator(`.task-card[data-task-id="${liveIds.task}"]`)).toBeVisible();
     await expect(page.locator(`.task-card[data-task-id="${liveIds.comment}"]`)).toBeVisible();
     await expect(page.locator(`.task-card[data-task-id="${liveIds.artifact}"]`)).toBeVisible();
+    await expect(page.locator(`.task-card[data-task-id="${liveIds.stale}"]`)).toHaveCount(0);
+
+    await liveWindow.selectOption('60');
+    await expect(page.locator(`.task-card[data-task-id="${liveIds.stale}"]`)).toBeVisible();
+    await liveWindow.selectOption('4320');
+    await expect(page.locator(`.task-card[data-task-id="${liveIds.stale}"]`)).toBeVisible();
+    await liveWindow.selectOption('30');
     await expect(page.locator(`.task-card[data-task-id="${liveIds.stale}"]`)).toHaveCount(0);
 
     await page.getByLabel('Filter by project').selectOption('live-project');
@@ -252,9 +272,8 @@ test.describe('agent-tasks dashboard', () => {
     await expect(page.locator('.kanban-column[data-stage="backlog"]')).toBeVisible({
       timeout: 10000,
     });
-    await expect(
-      page.getByLabel('Filter tasks with activity in the last 30 minutes'),
-    ).toBeChecked();
+    await expect(page.getByLabel('Filter tasks with recent activity')).toBeChecked();
+    await expect(page.getByLabel('Live activity window')).toHaveValue('30');
 
     const invalidActivityAccepted = await page.evaluate(() => {
       type BoardWindow = Window & {
@@ -290,7 +309,9 @@ test.describe('agent-tasks dashboard', () => {
       document.body.appendChild(container);
       const board = (window as PluginWindow).TaskBoard;
       board.mount(container, { wsUrl: location.host });
-      const exists = Boolean(container.shadowRoot?.getElementById('filter-live'));
+      const exists =
+        Boolean(container.shadowRoot?.getElementById('filter-live')) &&
+        Boolean(container.shadowRoot?.getElementById('filter-live-window'));
       board.unmount();
       container.remove();
       return exists;

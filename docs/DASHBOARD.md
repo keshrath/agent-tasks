@@ -80,7 +80,7 @@ The filter bar at the top provides:
 - **Project filter** — dropdown populated from existing tasks
 - **Assignee filter** — dropdown populated from existing tasks
 - **Priority filter** — minimum priority threshold (P1+, P3+, P5+, P10+)
-- **Live** — shows tasks with task, comment, or artifact activity strictly less than 30 minutes old; combines with the other filters, persists across reloads, and reevaluates on dashboard updates
+- **Live** — shows tasks with task, comment, or artifact activity within the selected window (5, 15, 30, 60, 120, 360, 720, 1440, or 4320 minutes; 30 minutes by default); combines with the other filters, persists across reloads, and reevaluates on dashboard updates
 - **Filter chips** — active filters shown as removable chips
 
 ![Filters](assets/filters.png)

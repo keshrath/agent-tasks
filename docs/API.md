@@ -124,10 +124,10 @@ Connect to `ws://localhost:3422` for real-time events.
 `lastActivityAt` is an object keyed by task ID. Each value is the newest UTC
 timestamp among the task's `updated_at`, comment `created_at`, and artifact
 `created_at` values. The dashboard's `Live` filter accepts values younger than
-30 minutes using a strict `< 30 minutes` comparison; missing, invalid, and
-future timestamps do not match. The selected Live state is persisted in the
-browser's `agent-tasks-filters` preference and reevaluated when a state message
-arrives.
+the selected 5, 15, 30, 60, 120, 360, 720, 1440, or 4320 minute window using a
+strict comparison; missing, invalid, and future timestamps do not match. The
+selected Live state and window are persisted in the browser's
+`agent-tasks-filters` preference and reevaluated when a state message arrives.
 
 ### Event types
 

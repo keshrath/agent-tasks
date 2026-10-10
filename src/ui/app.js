@@ -33,12 +33,15 @@ TaskBoard._fetch = function (url, opts) {
 TaskBoard._wsUrl = null;
 TaskBoard._root = document;
 
+var LIVE_WINDOW_OPTIONS = [5, 15, 30, 60, 120, 360, 720, 1440, 4320];
+
 var filters = {
   search: '',
   project: '',
   assignee: '',
   minPriority: 0,
   live: false,
+  liveWindowMinutes: LIVE_WINDOW_OPTIONS[2],
 };
 
 var ws = null;
@@ -54,6 +57,10 @@ try {
   if (saved.assignee) filters.assignee = saved.assignee;
   if (saved.minPriority) filters.minPriority = saved.minPriority;
   if (saved.live === true) filters.live = true;
+  var savedLiveWindow = Number(saved.liveWindowMinutes);
+  if (LIVE_WINDOW_OPTIONS.includes(savedLiveWindow)) {
+    filters.liveWindowMinutes = savedLiveWindow;
+  }
 } catch {
   /* ignore */
 }
@@ -102,8 +109,6 @@ TaskBoard.getBlockedTaskIds = getBlockedTaskIds;
 
 // ---- Filters ----
 
-var LIVE_WINDOW_MS = 30 * 60 * 1000;
-
 // Server timestamps are 'YYYY-MM-DD HH:MM:SS' in UTC (SQLite datetime('now')).
 function parseActivityTimestamp(value) {
   if (!value) return NaN;
@@ -124,7 +129,7 @@ function hasRecentActivity(task) {
   var timestamp = parseActivityTimestamp(state.lastActivityAt[task.id] || task.updated_at);
   if (!Number.isFinite(timestamp)) return false;
   var age = Date.now() - timestamp;
-  return age >= 0 && age < LIVE_WINDOW_MS;
+  return age >= 0 && age < filters.liveWindowMinutes * 60 * 1000;
 }
 
 function getFilteredTasks() {
@@ -178,6 +183,8 @@ function applyRestoredFilters() {
   if (filters.minPriority && prioritySelect) prioritySelect.value = String(filters.minPriority);
   var liveToggle = TaskBoard._root.getElementById('filter-live');
   if (liveToggle) liveToggle.checked = filters.live;
+  var liveWindowSelect = TaskBoard._root.getElementById('filter-live-window');
+  if (liveWindowSelect) liveWindowSelect.value = String(filters.liveWindowMinutes);
 }
 
 // ---- Rendering ----
@@ -452,6 +459,15 @@ function _init() {
 
   TaskBoard._root.getElementById('filter-live')?.addEventListener('change', (e) => {
     filters.live = e.target.checked;
+    saveFilters();
+    TaskBoard.resetColumnVisibleCounts();
+    render();
+  });
+
+  TaskBoard._root.getElementById('filter-live-window')?.addEventListener('change', (e) => {
+    var minutes = Number(e.target.value);
+    if (!LIVE_WINDOW_OPTIONS.includes(minutes)) return;
+    filters.liveWindowMinutes = minutes;
     saveFilters();
     TaskBoard.resetColumnVisibleCounts();
     render();
