@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
+import { createContext } from '../../src/context.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -133,6 +135,66 @@ describe('task-cleanup-stop.js', () => {
   it('exits 0 on non-JSON stdin', async () => {
     const { code } = await runHook('task-cleanup-stop.js', 'junk', { env: isolatedEnv });
     expect(code).toBe(0);
+  });
+
+  function seed(dir: string): { live: number; dead: number } {
+    const ctx = createContext({ path: join(dir, 'agent-tasks.db') });
+    const live = ctx.tasks.create({ title: 'Live' }, 'test').id;
+    const dead = ctx.tasks.create({ title: 'Dead' }, 'test').id;
+    ctx.tasks.claim(live, 'alive-agent');
+    ctx.tasks.claim(dead, 'gone-agent');
+    ctx.close();
+    return { live, dead };
+  }
+
+  function statuses(dir: string): Record<number, string> {
+    const db = new Database(join(dir, 'agent-tasks.db'), { readonly: true });
+    const rows = db.prepare('SELECT id, status FROM tasks').all() as {
+      id: number;
+      status: string;
+    }[];
+    db.close();
+    return Object.fromEntries(rows.map((r) => [r.id, r.status]));
+  }
+
+  it('fails only the tasks of agents not online in AGENT_COMM_DB', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-tasks-stop-'));
+    try {
+      const { live, dead } = seed(dir);
+      const comm = new Database(join(dir, 'agent-comm.db'));
+      comm.exec(`CREATE TABLE agents (name TEXT, status TEXT)`);
+      comm.exec(`INSERT INTO agents VALUES ('alive-agent', 'online'), ('gone-agent', 'offline')`);
+      comm.close();
+      const env = {
+        ...isolatedEnv,
+        AGENT_TASKS_DB: join(dir, 'agent-tasks.db'),
+        AGENT_COMM_DB: join(dir, 'agent-comm.db'),
+      };
+
+      const { code, json } = await runHook('task-cleanup-stop.js', '{}', { env });
+
+      expect(code).toBe(0);
+      expect((json as { reason?: string }).reason).toContain(`#${dead}`);
+      expect(statuses(dir)).toEqual({ [live]: 'in_progress', [dead]: 'failed' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails nothing when the agent-comm DB cannot be read', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-tasks-stop-'));
+    try {
+      const { live, dead } = seed(dir);
+      const env = { ...isolatedEnv, AGENT_TASKS_DB: join(dir, 'agent-tasks.db') };
+
+      const { code, json } = await runHook('task-cleanup-stop.js', '{}', { env });
+
+      expect(code).toBe(0);
+      expect(json).toEqual({});
+      expect(statuses(dir)).toEqual({ [live]: 'in_progress', [dead]: 'in_progress' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -9,23 +9,30 @@ returns an empty JSON object so the user is never blocked by a broken hook.
 
 | Script                  | Event                  | Purpose                                               |
 | ----------------------- | ---------------------- | ----------------------------------------------------- |
-| `session-start.js`      | SessionStart           | Announces the pipeline dashboard URL                  |
+| `session-start.js`      | SessionStart           | Points at the MCP tools and the `/pipeline` pane      |
 | `task-cleanup-start.js` | SessionStart           | Auto-fails tasks assigned to dead sessions            |
-| `pipeline-enforcer.mjs` | UserPromptSubmit       | Requires an active pipeline task for real work        |
+| `pipeline-enforcer.mjs` | UserPromptSubmit       | Reminds when no pipeline task is active               |
 | `todowrite-bridge.mjs`  | PreToolUse (TodoWrite) | Mirrors TodoWrite todos into the pipeline             |
 | `task-cleanup-stop.js`  | Stop / SubagentStop    | Auto-fails open tasks whose owner is no longer online |
 
 ## session-start.js
 
-Prints the dashboard URL (`http://localhost:3422` by default, override via
-`AGENT_TASKS_PORT`) and injects it as session context.
+Tells the person that `/pipeline` opens the board (the agent-tasks plugin's
+pane) and injects session context naming the MCP tools that drive the
+pipeline (`task_list`, `task_stage`, `task_artifact`).
 
 ## task-cleanup-start.js
 
 On every session start, opens the agent-tasks DB and finds tasks with
-`status IN ('pending', 'in_progress')` whose `assigned_to` is not an online
-agent in agent-comm. Those tasks are auto-failed with a `stale task cleanup`
-message. Catches tasks orphaned by crashes where the Stop hook never fired.
+`status IN ('pending', 'in_progress')` and an `assigned_to`. A task is
+auto-failed with a `stale task cleanup` message only when both hold:
+
+- its assignee is no live agent in agent-comm: neither `status = 'online'` nor
+  a heartbeat within `AGENT_TASKS_HEARTBEAT_FRESH_MINUTES` (default 15), and
+- it has been idle (no update) for `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES`
+  (default 60).
+
+Catches tasks orphaned by crashes where the Stop hook never fired.
 
 ## pipeline-enforcer.mjs
 
@@ -80,8 +87,9 @@ a `session ended` message. Never blocks the stop and never touches tasks
 owned by sessions that are still alive — Claude Code's Stop event does not
 carry enough metadata to identify which agent-comm session is stopping, so
 attempting to nag "your" tasks specifically would false-positive on sibling
-sessions. Works together with `task-cleanup-start.js` so crashes don't leak
-in-progress tasks forever.
+sessions. When agent-comm's DB (`AGENT_COMM_DB`) cannot be read, nobody can
+be told apart from a dead session, so the sweep is skipped. Works together
+with `task-cleanup-start.js` so crashes don't leak in-progress tasks forever.
 
 ## Manual configuration
 
@@ -131,6 +139,17 @@ automatically. If you need to configure them by hand, add entries like:
       }
     ],
     "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/abs/path/to/agent-tasks/scripts/hooks/task-cleanup-stop.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
       {
         "hooks": [
           {

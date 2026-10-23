@@ -52,15 +52,16 @@ npm install
 npm run build
 ```
 
-This compiles TypeScript to `dist/` and copies UI files to `dist/ui/`.
+This compiles TypeScript to `dist/`.
 
 ### Verify
 
 ```bash
 node dist/server.js
+curl http://localhost:3422/health
 ```
 
-Open **http://localhost:3422** — you should see the kanban dashboard with empty columns for each pipeline stage.
+You should get `{"status":"ok","version":"...","tasks":0,...}`.
 
 ---
 
@@ -70,7 +71,16 @@ agent-tasks works with any MCP client (stdio) or HTTP client (REST API). Pick yo
 
 ### Claude Code
 
-#### Quick setup (recommended)
+#### Plugin (recommended)
+
+```bash
+claude plugin marketplace add keshrath/agent-tasks
+claude plugin install agent-tasks@agent-tasks
+```
+
+The plugin runs the MCP server and adds the `/pipeline` pane (a Claude Code mod, Claude Code 2.1.289+): type `/pipeline` to open the board beside the conversation. The hook scripts below are not part of the plugin; add them by hand, or with `node scripts/setup.js` — which also registers the MCP server in `~/.claude.json`, so with the plugin installed remove that entry afterwards (`claude mcp remove agent-tasks -s user`) or the server runs twice.
+
+#### Script setup
 
 From the agent-tasks clone:
 
@@ -82,7 +92,7 @@ This detects Claude Code, registers the MCP server in `~/.claude.json`, wires al
 
 #### Step 1: Add the MCP server (manual)
 
-Edit `~/.claude/settings.json`:
+Register the server in `~/.claude.json` (user scope; `claude mcp add agent-tasks -s user -- npx agent-tasks` writes the same entry):
 
 ```json
 {
@@ -91,7 +101,14 @@ Edit `~/.claude/settings.json`:
       "command": "npx",
       "args": ["agent-tasks"]
     }
-  },
+  }
+}
+```
+
+and allow its tools in `~/.claude/settings.json`:
+
+```json
+{
   "permissions": {
     "allow": ["mcp__agent-tasks__*"]
   }
@@ -106,9 +123,9 @@ Start a new Claude Code session. Try:
 
 Claude should call `task_create` and confirm the task was created.
 
-#### Step 3: Open the dashboard
+#### Step 3: The board
 
-The dashboard auto-starts at **http://localhost:3422**.
+One MCP process serves the REST API on **http://localhost:3422** (another takes over when it exits). With the plugin installed, `/pipeline` shows the board in Claude Code.
 
 ### OpenCode
 
@@ -167,7 +184,7 @@ The dashboard auto-starts at **http://localhost:3422**.
 
 ### REST API
 
-If your tool doesn't support MCP, use the REST API:
+If your tool doesn't support MCP, the REST API covers creating, reading one task, the lifecycle actions, comments and delete (everything else is MCP only):
 
 ```bash
 # Create a task
@@ -175,11 +192,11 @@ curl -X POST http://localhost:3422/api/tasks \
   -H 'Content-Type: application/json' \
   -d '{"title": "Fix login bug", "priority": 5, "project": "backend"}'
 
-# List tasks
-curl http://localhost:3422/api/tasks
+# Read a task
+curl http://localhost:3422/api/tasks/1
 
-# Advance a task
-curl -X POST http://localhost:3422/api/tasks/1/advance
+# Advance a task to plan
+curl -X POST http://localhost:3422/api/tasks/1/stage   -H 'Content-Type: application/json'   -d '{"action": "advance", "stage": "plan", "by": "me"}'
 ```
 
 See [API.md](API.md) for the full REST reference.
@@ -188,7 +205,7 @@ See [API.md](API.md) for the full REST reference.
 
 ## Hooks
 
-Hooks automate pipeline workflows — dashboard announcements, TodoWrite bridging, and task cleanup. Support varies by client.
+Hooks automate pipeline workflows — session announcements, TodoWrite bridging, and task cleanup. Support varies by client.
 
 ### Claude Code Hooks
 
@@ -266,11 +283,11 @@ Replace `/path/to/agent-tasks` with the actual path.
 
 | Hook                    | Event                  | Purpose                                        |
 | ----------------------- | ---------------------- | ---------------------------------------------- |
-| `session-start.js`      | SessionStart           | Announces dashboard URL                        |
+| `session-start.js`      | SessionStart           | Points at the MCP tools and `/pipeline`        |
 | `task-cleanup-start.js` | SessionStart           | Auto-fails tasks from dead sessions            |
-| `pipeline-enforcer.mjs` | UserPromptSubmit       | Requires an active pipeline task for real work |
+| `pipeline-enforcer.mjs` | UserPromptSubmit       | Reminds when no pipeline task is active        |
 | `todowrite-bridge.mjs`  | PreToolUse (TodoWrite) | Syncs TodoWrite todos to pipeline              |
-| `task-cleanup-stop.js`  | Stop + SubagentStop    | Blocks stop, then auto-fails orphaned tasks    |
+| `task-cleanup-stop.js`  | Stop + SubagentStop    | Auto-fails orphaned tasks; never blocks a stop |
 
 See [`docs/hooks.md`](hooks.md) for the full hook reference including the work-prompt classifier, environment variables, and test coverage.
 
@@ -278,7 +295,7 @@ See [`docs/hooks.md`](hooks.md) for the full hook reference including the work-p
 
 Sweeps for tasks assigned to sessions that are no longer online and auto-fails them. Runs on both `Stop` (main session) and `SubagentStop` (spawned agents), complementing the `SessionStart` sweep.
 
-The hook does **not** block the stop. Claude Code's Stop event does not carry enough metadata to reliably identify which agent-comm session is stopping (multiple sessions share the same Claude install), so attributing "your" open tasks to the stopping session was error-prone — it frequently flagged sibling sessions' work. The hook now only cleans up tasks owned by agents whose agent-comm status is no longer `online`.
+The hook does **not** block the stop. Claude Code's Stop event does not carry enough metadata to reliably identify which agent-comm session is stopping (multiple sessions share the same Claude install), so attributing "your" open tasks to the stopping session was error-prone — it frequently flagged sibling sessions' work. The hook now only cleans up tasks owned by agents whose agent-comm status is no longer `online`, and skips the sweep entirely when agent-comm's DB (`AGENT_COMM_DB`, default `~/.agent-comm/agent-comm.db`) cannot be read.
 
 ```mermaid
 sequenceDiagram
@@ -314,21 +331,21 @@ This is the safety net — even if the Stop hook never fires, the next session t
 
 #### TodoWrite Bridge (`scripts/hooks/todowrite-bridge.mjs`)
 
-Intercepts Claude Code's built-in `TodoWrite` tool and syncs todos to agent-tasks. Every todo Claude creates automatically appears on the kanban board.
+Intercepts Claude Code's built-in `TodoWrite` tool and syncs todos to agent-tasks. Every todo Claude creates appears on the `/pipeline` board.
 
 When Claude Code calls `TodoWrite`, the hook:
 
 1. Reads the tool input from stdin
 2. Extracts todos with `in_progress` or `pending` status
 3. POSTs each as a new task to `http://localhost:3422/api/tasks`
-4. Maps priority: `high` -> 10, `medium` -> 5, `low` -> 1
-5. Tags all synced tasks with project `claude-todos`
+4. Maps priority: `high` -> 5, `medium` -> 3, `low` -> 1
+5. Files all synced tasks under project `claude-todos` with tags `synced`, `todowrite`
 6. Returns an empty JSON object to let the original tool proceed
 
 ```mermaid
 sequenceDiagram
     participant CC as Claude Code
-    participant Hook as todowrite-bridge.js
+    participant Hook as todowrite-bridge.mjs
     participant AT as agent-tasks
 
     CC->>Hook: PreToolUse (TodoWrite, stdin JSON)
@@ -398,7 +415,7 @@ Add the appropriate block to your platform's instructions file:
 ```markdown
 ## Dev Pipeline
 
-All work flows through a shared pipeline. Dashboard: http://localhost:3422
+All work flows through a shared pipeline (agent-tasks MCP tools; `/pipeline` shows the board).
 
 Pipeline stages: **backlog → spec → plan → implement → test → review → done**
 
@@ -458,7 +475,7 @@ npm run start:server -- --port 8080
 node dist/server.js --port 8080
 ```
 
-Useful for viewing the dashboard while MCP servers run in separate terminals, or integrating via REST API.
+Useful for integrating via the REST API, or for serving the `/pipeline` pane on a custom port (set the same `AGENT_TASKS_PORT` for Claude Code).
 
 ---
 
@@ -466,13 +483,18 @@ Useful for viewing the dashboard while MCP servers run in separate terminals, or
 
 ### Environment variables
 
-| Variable                   | Default                         | Description                                                              |
-| -------------------------- | ------------------------------- | ------------------------------------------------------------------------ |
-| `AGENT_TASKS_DB`           | `~/.agent-tasks/agent-tasks.db` | Path to the SQLite database file                                         |
-| `AGENT_TASKS_PORT`         | `3422`                          | HTTP/WebSocket port for the dashboard                                    |
-| `AGENT_TASKS_HOST`         | `127.0.0.1`                     | Dashboard bind address (`0.0.0.0` exposes it to the network)             |
-| `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable embedded instructions in MCP tool responses        |
-| `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST API URL (for bridge notifications and heartbeat cleanup) |
+| Variable                                 | Default                         | Description                                                                                                    |
+| ---------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `AGENT_TASKS_DB`                         | `~/.agent-tasks/agent-tasks.db` | Path to the SQLite database file                                                                               |
+| `AGENT_TASKS_PORT`                       | `3422`                          | REST API port the MCP processes serve and the `/pipeline` pane reads (`dist/server.js` takes `--port` instead) |
+| `AGENT_TASKS_HOST`                       | `127.0.0.1`                     | REST bind address (`0.0.0.0` exposes it to the network)                                                        |
+| `AGENT_TASKS_USER`                       | the OS user                     | Who the `/pipeline` pane acts as (`created_by`, comment author, `by`)                                          |
+| `AGENT_TASKS_INSTRUCTIONS`               | enabled                         | Set to `0` to disable embedded instructions in MCP tool responses                                              |
+| `AGENT_TASKS_RETENTION_DAYS`             | `30`                            | Days the cleanup keeps resolved approval records                                                               |
+| `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES` | `60`                            | `task-cleanup-start.js`: idle minutes before a dead session's task is failed                                   |
+| `AGENT_TASKS_HEARTBEAT_FRESH_MINUTES`    | `15`                            | `task-cleanup-start.js`: an agent with a heartbeat this recent counts as alive                                 |
+| `AGENT_COMM_URL`                         | `http://localhost:3421`         | Agent-comm REST API URL (for bridge notifications and heartbeat cleanup)                                       |
+| `AGENT_KNOWLEDGE_URL`                    | `http://localhost:3423`         | Agent-knowledge REST API URL (learnings and decisions pushed on completion)                                    |
 
 ### Agent-comm integration
 
@@ -485,7 +507,7 @@ To enable:
 
 1. Install and start agent-comm (default port: 3421)
 2. Set `AGENT_COMM_URL` if using a non-default URL
-3. agent-tasks checks heartbeats on startup (10s delay) and when `task_cleanup` is called with `mode: "stale_agents"` or `mode: "all"`
+3. agent-tasks checks heartbeats on startup (10s delay) and when `task_config` is called with `action: "cleanup"` and `mode: "stale_agents"` or `mode: "all"`
 
 If agent-comm is not running, both features degrade gracefully — notifications are silently dropped and stale agent detection is skipped.
 
@@ -493,10 +515,10 @@ If agent-comm is not running, both features degrade gracefully — notifications
 
 The default pipeline is: `backlog` > `spec` > `plan` > `implement` > `test` > `review` > `done`
 
-You can customize stages per project using the `task_pipeline_config` MCP tool:
+You can customize stages per project with the `task_config` MCP tool (`action: "pipeline"`):
 
 ```
-Use task_pipeline_config to set stages for project "my-project" to: ["todo", "doing", "testing", "done"]
+Use task_config with action "pipeline" to set stages for project "my-project" to: ["todo", "doing", "testing", "done"]
 ```
 
 Or via REST:
@@ -511,13 +533,12 @@ curl http://localhost:3422/api/pipeline?project=my-project
 
 ### Per-stage gate guards
 
-Gate guards enforce quality requirements before tasks can advance to the next stage. Configure via `task_pipeline_config`:
+Gate guards enforce quality requirements before tasks can advance to the next stage. Configure via `task_config` (`action: "pipeline"`):
 
 ```
-Use task_pipeline_config to set gate_config for project "backend" with gates:
+Use task_config with action "pipeline" to set gate_config for project "backend" with gates:
 - implement stage requires artifact named "code-summary"
 - test stage requires artifact named "test-results" and a comment
-- review stage requires approval
 ```
 
 This translates to:
@@ -533,21 +554,18 @@ This translates to:
       "test": {
         "require_artifacts": ["test-results"],
         "require_comment": true
-      },
-      "review": {
-        "require_approval": true
       }
     }
   }
 }
 ```
 
-| Gate option             | Type       | Description                                           |
-| ----------------------- | ---------- | ----------------------------------------------------- |
-| `require_artifacts`     | `string[]` | Named artifacts that must exist at the current stage  |
-| `require_min_artifacts` | `number`   | Minimum number of artifacts at the current stage      |
-| `require_comment`       | `boolean`  | At least one comment must exist on the task           |
-| `require_approval`      | `boolean`  | An approved approval must exist for the current stage |
+| Gate option             | Type       | Description                                                                                                          |
+| ----------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------- |
+| `require_artifacts`     | `string[]` | Named artifacts that must exist at the current stage                                                                 |
+| `require_min_artifacts` | `number`   | Minimum number of artifacts at the current stage                                                                     |
+| `require_comment`       | `boolean`  | At least one comment must exist on the task                                                                          |
+| `require_approval`      | `boolean`  | An approved approval must exist for the current stage. No MCP tool or REST route records approvals, so leave it off. |
 
 If a gate check fails, `task_stage` (with `action: "advance"`) returns an error explaining what's missing.
 
@@ -575,17 +593,17 @@ A new database will be created automatically on the next start.
 
 ### Schema
 
-The database uses schema versioning (currently V4) with automatic migrations. Migrations are idempotent.
+The database uses schema versioning (currently V5) with automatic migrations. Migrations are idempotent.
 
 ---
 
 ## Troubleshooting
 
-### Dashboard shows "Connecting..."
+### `/pipeline` says the REST API is not reachable
 
 - Verify the server is running: `curl http://localhost:3422/health`
 - Check the port isn't in use: `lsof -i :3422` (macOS/Linux) or `netstat -ano | findstr 3422` (Windows)
-- Try a different port: `AGENT_TASKS_PORT=8080 npm run start:server`
+- Try a different port: `npm run start:server -- --port 8080`, and set `AGENT_TASKS_PORT=8080` for Claude Code so the pane finds it
 
 ### MCP tools not appearing
 
@@ -595,7 +613,7 @@ The database uses schema versioning (currently V4) with automatic migrations. Mi
 
 ### Tasks not syncing between terminals
 
-- The WebSocket server polls SQLite every 2 seconds to detect cross-process changes
+- Every MCP process writes the same SQLite database; the `/pipeline` pane polls the REST API, so changes show up within one poll
 - Ensure all MCP instances use the same database file (`AGENT_TASKS_DB`)
 
 ### TodoWrite bridge not working
@@ -609,7 +627,6 @@ The database uses schema versioning (currently V4) with automatic migrations. Mi
 - Both cleanup hooks require `better-sqlite3` (included in agent-tasks dependencies — run `npm install` in the agent-tasks directory)
 - The stop hook identifies sessions via the agent-comm DB — ensure your session calls `comm_register` on startup
 - Check stderr for `[task-cleanup-start]` messages on session start
-- The counter file at `~/.claude/task-cleanup-counter.json` can be deleted to reset block state
 
 ## Client Comparison
 

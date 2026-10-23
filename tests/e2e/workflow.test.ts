@@ -79,7 +79,7 @@ describe('Full workflow: create -> claim -> advance -> complete', () => {
     ctx.tasks.advance(task.id, 'implement');
     expect(ctx.tasks.getById(task.id)!.stage).toBe('implement');
 
-    const regressed = ctx.tasks.regress(task.id, 'spec', 'Spec was incomplete');
+    const regressed = ctx.tasks.regress(task.id, 'spec', 'reviewer', 'Spec was incomplete');
     expect(regressed.stage).toBe('spec');
   });
 });

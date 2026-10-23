@@ -82,9 +82,8 @@ if (!IS_CLAUDE) {
   console.log(`
 Setup complete!
 
-Start the dashboard:  node dist/server.js
 MCP server (stdio):   node dist/index.js
-Dashboard URL:        http://localhost:3422
+REST API:             node dist/server.js (http://localhost:3422)
 `);
   process.exit(0);
 }
@@ -143,7 +142,7 @@ function addMatchedHook(eventName, matcher, marker, command, timeout = 5) {
   console.log(`  ${eventName} (${matcher}): added ${marker} hook`);
 }
 
-// SessionStart: dashboard banner + stale task cleanup
+// SessionStart: pipeline banner + stale task cleanup
 addUnmatchedHook(
   'SessionStart',
   'session-start.js',
@@ -195,12 +194,14 @@ console.log(`
 Setup complete!
 
 Restart Claude Code to load the new MCP server. Every session will now:
-  - Show the pipeline dashboard URL on start (SessionStart hook)
+  - Point at the pipeline (MCP tools, /pipeline pane) on start (SessionStart hook)
   - Auto-fail tasks orphaned by dead sessions (task-cleanup-start)
   - Enforce the "no work without a claimed task" rule (pipeline-enforcer)
   - Mirror Claude Code's TodoWrite todos into the pipeline (todowrite-bridge)
-  - Auto-fail tasks still assigned when the session stops (task-cleanup-stop)
+  - On stop, auto-fail open tasks whose assignee is no longer online in agent-comm (task-cleanup-stop)
 
-Dashboard: http://localhost:3422 (auto-starts on first MCP connection)
+Board: the /pipeline pane comes with the agent-tasks plugin. The plugin runs the MCP
+server itself, so when you install it remove the agent-tasks entry this script added
+to ~/.claude.json (claude mcp remove agent-tasks -s user), or the server runs twice.
 See docs/hooks.md for hook details and docs/SETUP.md for manual configuration.
 `);

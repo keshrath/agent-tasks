@@ -6,9 +6,9 @@
 // imagined 15-minute build with 3 worker agents. The state has the same
 // shape in BOTH conditions (file system identical); the difference is what
 // the manager has access to: just the file system, or also the agent-tasks DB
-// + MCP tools + dashboard.
+// + MCP tools + board.
 //
-// The scenario is deliberately seeded with two TRAPS that the dashboard makes
+// The scenario is deliberately seeded with two TRAPS that the board makes
 // trivial to find but file-system inspection makes hard:
 //
 //   TRAP 1: Spec-implementation drift. Task 1 spec says "include archived

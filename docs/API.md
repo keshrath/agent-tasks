@@ -1,6 +1,6 @@
 # API Reference
 
-agent-tasks exposes three transport layers: MCP (stdio), REST (HTTP), and WebSocket (real-time events).
+agent-tasks exposes two transport layers: MCP (stdio) and a loopback REST API (HTTP), which the Claude Code `/pipeline` pane and the hook scripts read.
 
 ## MCP Tools (8)
 
@@ -8,13 +8,13 @@ agent-tasks consolidates everything into 8 action-based tools to keep per-prompt
 
 ### Task CRUD
 
-| Tool          | Description                                                                                                                                         |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `task_create` | Create a pipeline task (title, description, priority, project, tags, parent_id, assign_to, stage)                                                   |
-| `task_get`    | Get a task with optional `include: ["subtasks", "artifacts", "comments"]`. Replaces the former `task_get_subtasks/artifacts/comments` family.       |
-| `task_list`   | List/search tasks (filters: query, status, stage, project, assign_to, collaborator, root_only, parent_id, tags, pagination)                         |
-| `task_update` | Update metadata (title, description, priority, project, tags, assign_to). Inline `dependency: { action, depends_on, relationship }` for add/remove. |
-| `task_delete` | Delete a task with cascading cleanup of subtasks, comments, artifacts                                                                               |
+| Tool          | Description                                                                                                                                                                                                                                                                                                             |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_create` | Create a pipeline task (title, description, priority, project, tags, parent_id, assign_to, stage)                                                                                                                                                                                                                       |
+| `task_get`    | Get a task with optional `include: ["subtasks", "artifacts", "comments", "transitive_deps"]` (comments: the newest `limit`, default 100, oldest first). `dependencies.blockers` / `blocking` list `blocks` links only; `dependencies.links` lists `related` / `duplicate` links as `{ task, relationship, direction }`. |
+| `task_list`   | List/search tasks (filters: query, status, stage, project, assign_to, collaborator, root_only, parent_id, tags, pagination)                                                                                                                                                                                             |
+| `task_update` | Update metadata (title, description, priority, project, tags, assign_to). Inline `dependency: { action, depends_on, relationship }` for add/remove.                                                                                                                                                                     |
+| `task_delete` | Delete a task with cascading cleanup of subtasks, comments, artifacts                                                                                                                                                                                                                                                   |
 
 ### Lifecycle
 
@@ -56,38 +56,27 @@ Example `gate_config`:
 
 ---
 
-## REST API (19 endpoints)
+## REST API (8 endpoints)
 
-All endpoints return JSON. Loopback only: foreign `Host`/`Origin` headers get 403, request bodies must be `application/json`, no wildcard CORS. The server runs on port 3422 by default.
+All endpoints return JSON. Loopback only: a foreign `Host` header gets 403, request bodies must be `application/json`, no wildcard CORS. Any request that carries an `Origin` header gets 403 too: the callers (the `/pipeline` pane, the hook scripts) are not browsers, so no web page on the machine can reach the API. The server runs on port 3422 by default. The routes are what the pane and the hook scripts call; everything else goes through the MCP tools.
 
 ### Read endpoints
 
-| Method | Path                          | Description                                                                                                     |
-| ------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/health`                     | Health check with version, uptime, and task count                                                               |
-| `GET`  | `/api/tasks`                  | List tasks (query params: `status`, `stage`, `project`, `assigned_to`, `root_only`, `tags`, `limit`, `offset`)  |
-| `GET`  | `/api/tasks/:id`              | Get a single task by ID                                                                                         |
-| `GET`  | `/api/tasks/:id/subtasks`     | Get subtasks of a parent task                                                                                   |
-| `GET`  | `/api/tasks/:id/artifacts`    | Get artifacts (query: `stage`)                                                                                  |
-| `GET`  | `/api/tasks/:id/comments`     | Get comments                                                                                                    |
-| `GET`  | `/api/tasks/:id/dependencies` | Get dependencies for a task                                                                                     |
-| `GET`  | `/api/dependencies`           | Get all dependencies across all tasks                                                                           |
-| `GET`  | `/api/pipeline`               | Get pipeline stage configuration (query: `project`)                                                             |
-| `GET`  | `/api/overview`               | Full state dump (tasks, dependencies, artifact counts, comment counts, subtask progress, collaborators, stages) |
-| `GET`  | `/api/agents`                 | Online agents (proxied from agent-comm)                                                                         |
-| `GET`  | `/api/search?q=`              | Full-text search across tasks                                                                                   |
-
-`tags` is AND-mode — a task must carry every tag listed. Repeat the parameter once per tag (`?tags=okr:H1&tags=iter:H1`); it is not comma-separated, since a tag may itself contain a comma.
+| Method | Path             | Description                                                                                                                                                                                                               |
+| ------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/health`        | Health check with version, uptime, and task count                                                                                                                                                                         |
+| `GET`  | `/api/tasks/:id` | A single task in the `task_get` shape: dependencies (`blockers`, `blocking`, `links`), claim status, every artifact, `comments_count` (query: `include=subtasks,comments,transitive_deps`; `comments` are the newest 100) |
+| `GET`  | `/api/pipeline`  | Pipeline stages and gate config (query: `project`)                                                                                                                                                                        |
+| `GET`  | `/api/board`     | Every open task, the most recently closed ones (`?recent=30`), per-project pipelines, dependencies, subtask progress (what the pane polls)                                                                                |
 
 ### Write endpoints
 
-| Method | Path                      | Description                                          |
-| ------ | ------------------------- | ---------------------------------------------------- |
-| `POST` | `/api/tasks`              | Create a new task                                    |
-| `PUT`  | `/api/tasks/:id`          | Update task fields                                   |
-| `PUT`  | `/api/tasks/:id/stage`    | Change stage (advance or regress)                    |
-| `POST` | `/api/tasks/:id/comments` | Add a comment to a task                              |
-| `POST` | `/api/cleanup`            | Trigger manual cleanup (body: `{ "maxAgeDays": 7 }`) |
+| Method   | Path                      | Description                                                                                                                                                                                                                                         |
+| -------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST`   | `/api/tasks`              | Create a task (body: `title`, `description?`, `priority?`, `project?`, `tags?`, `parent_id?`, `assign_to?`, `stage?`, `created_by?`, default `api`)                                                                                                 |
+| `POST`   | `/api/tasks/:id/stage`    | Lifecycle action, as the MCP `task_stage` (body: `action`, `stage?`, `comment?`, `reason?`, `result?`, `claimer?`, `by?`). `by` names who acts (default `api`): the claimer when none is given, the author of an advance comment and of a rejection |
+| `POST`   | `/api/tasks/:id/comments` | Add a comment (body: `content`, `agent_id?` (the author, default `api`), `parent_comment_id?`)                                                                                                                                                      |
+| `DELETE` | `/api/tasks/:id`          | Delete a task                                                                                                                                                                                                                                       |
 
 ### Authentication
 
@@ -104,35 +93,9 @@ The REST API is **unauthenticated**. It is designed for localhost use between tr
 | Status | Meaning                                     |
 | ------ | ------------------------------------------- |
 | 400    | Bad request (missing params, invalid input) |
+| 403    | Foreign `Host` header, or any `Origin`      |
 | 404    | Entity not found                            |
 | 409    | Conflict (e.g. dependency cycle)            |
+| 415    | Request body is not `application/json`      |
 | 422    | Input validation failure                    |
 | 500    | Internal server error                       |
-
----
-
-## WebSocket
-
-Connect to `ws://localhost:3422` for real-time events.
-
-### Connection lifecycle
-
-1. **On connect:** receives a full state snapshot (`type: "state"`) containing tasks, dependencies, pipeline stages, artifact counts, comment counts, `lastActivityAt`, subtask progress, and collaborators
-2. **State deltas:** when a database fingerprint changes, the server sends a `state` message with the current changed category data; agent-tasks supplies the dashboard state fields together so task/comment/artifact activity stays consistent
-3. **Polling:** the server polls SQLite every 2 seconds to detect cross-process changes (e.g., tasks created via MCP in another terminal)
-
-`lastActivityAt` is an object keyed by task ID. Each value is the newest UTC
-timestamp among the task's `updated_at`, comment `created_at`, and artifact
-`created_at` values. The dashboard's `Live` filter accepts values younger than
-30 minutes using a strict `< 30 minutes` comparison; missing, invalid, and
-future timestamps do not match. The selected Live state is persisted in the
-browser's `agent-tasks-filters` preference and reevaluated when a state message
-arrives.
-
-### Event types
-
-- `state` — full snapshot or database-change delta
-
-### Cross-process sync
-
-Because MCP servers run as separate stdio processes, the WebSocket server polls the SQLite database every 2 seconds to detect changes made by other processes. This ensures the dashboard stays in sync even when tasks are modified via MCP tools in separate Claude Code sessions.

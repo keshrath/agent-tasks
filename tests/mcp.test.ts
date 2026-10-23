@@ -434,6 +434,15 @@ describe('task_stage regress', () => {
     expect(regressed.stage).toBe('spec');
   });
 
+  it('records the rejection under the session that sent it back', () => {
+    const task = handle('task_create', { title: 'Regress' }) as { id: number };
+    handle('task_stage', { action: 'claim', task_id: task.id });
+    handle('task_stage', { action: 'regress', task_id: task.id, stage: 'backlog', reason: 'No' });
+    expect(ctx.tasks.getArtifacts(task.id)).toEqual([
+      expect.objectContaining({ name: 'rejection', created_by: 'test-agent' }),
+    ]);
+  });
+
   it('accepts optional reason', () => {
     const task = handle('task_create', { title: 'Regress' }) as { id: number };
     handle('task_stage', { action: 'claim', task_id: task.id });
@@ -606,6 +615,13 @@ describe('task_update dependency', () => {
       dependency: { action: 'add', depends_on: a.id, relationship: 'related' },
     }) as { success: boolean };
     expect(result.success).toBe(true);
+    const got = handle('task_get', { task_id: b.id }) as {
+      dependencies: { blockers: unknown[]; links: unknown[] };
+    };
+    expect(got.dependencies.blockers).toEqual([]);
+    expect(got.dependencies.links).toMatchObject([
+      { task: { id: a.id }, relationship: 'related', direction: 'outgoing' },
+    ]);
   });
 
   it('combines metadata update with dependency', () => {
@@ -880,7 +896,7 @@ describe('task_get', () => {
     };
     expect(result.title).toBe('Get me');
     expect(result.comments_count).toBe(0);
-    expect(result.dependencies).toEqual({ blockers: [], blocking: [] });
+    expect(result.dependencies).toEqual({ blockers: [], blocking: [], links: [] });
     expect(result.artifacts).toEqual([]);
   });
 

@@ -10,8 +10,8 @@
   "plugins": [
     {
       "name": "agent-tasks",
-      "source": "./",
-      "description": "Pipeline-driven task management for AI coding agents. Tasks flow through backlog → spec → plan → implement → test → review → done stages with dependencies, per-stage artifacts, multi-agent claiming, and a live Kanban dashboard on :3422.",
+      "source": "./plugin",
+      "description": "Pipeline-driven task management for AI coding agents. Tasks flow through backlog → spec → plan → implement → test → review → done stages with dependencies, per-stage artifacts, multi-agent claiming, and the board in the native Claude Code /pipeline pane.",
       "category": "workflow",
       "tags": ["mcp", "tasks", "pipeline", "kanban"]
     }

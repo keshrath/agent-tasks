@@ -45,14 +45,14 @@ describe('subtasks', () => {
     expect(progress.done).toBe(2);
   });
 
-  it('gets all subtask progress at once', () => {
+  it('gets subtask progress for several parents at once', () => {
     const p1 = ctx.tasks.create({ title: 'P1' }, 'agent-1');
     const p2 = ctx.tasks.create({ title: 'P2' }, 'agent-1');
     ctx.tasks.create({ title: 'C1', parent_id: p1.id }, 'agent-1');
     ctx.tasks.create({ title: 'C2', parent_id: p1.id }, 'agent-1');
     ctx.tasks.create({ title: 'C3', parent_id: p2.id }, 'agent-1');
 
-    const progress = ctx.tasks.getAllSubtaskProgress();
+    const progress = ctx.tasks.getSubtaskProgressForTasks([p1.id, p2.id]);
     expect(progress[p1.id].total).toBe(2);
     expect(progress[p2.id].total).toBe(1);
   });

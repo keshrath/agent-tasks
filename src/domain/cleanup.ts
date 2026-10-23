@@ -3,7 +3,7 @@
 //
 // Extends agent-common's CleanupService base for timer scheduling. Adds:
 //   - agent-bridge integration (fails in-progress tasks whose agent is stale)
-//   - purgeAll() / purgeEverything() variants with different scope
+//   - purgeAll() limited to completed and cancelled tasks
 //   - start()/stop() wrapper methods (the agent-common base uses
 //     startTimer/stopTimer, but context.ts wires cleanup.start()/stop())
 // =============================================================================
@@ -108,19 +108,6 @@ export class CleanupService extends KitCleanupService<TasksCleanupStats> {
       `DELETE FROM task_artifacts WHERE task_id NOT IN (SELECT id FROM tasks)`,
     );
     const approvals = this.db.run(`DELETE FROM task_approvals WHERE status != 'pending'`);
-    return {
-      purgedTasks: tasks.changes,
-      purgedComments: comments.changes,
-      purgedArtifacts: artifacts.changes,
-      purgedApprovals: approvals.changes,
-    };
-  }
-
-  purgeEverything(): TasksCleanupStats {
-    const tasks = this.db.run(`DELETE FROM tasks`);
-    const comments = this.db.run(`DELETE FROM task_comments`);
-    const artifacts = this.db.run(`DELETE FROM task_artifacts`);
-    const approvals = this.db.run(`DELETE FROM task_approvals`);
     return {
       purgedTasks: tasks.changes,
       purgedComments: comments.changes,

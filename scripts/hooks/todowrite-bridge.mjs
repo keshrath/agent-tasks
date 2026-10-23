@@ -5,8 +5,8 @@
 //
 // Intercepts Claude Code's built-in TodoWrite tool and mirrors each pending
 // todo into the pipeline via the REST API. Runs before the original tool so
-// the todos show up on the dashboard in real time. Fail-open — a dashboard
-// that isn't running must never block the tool call.
+// the todos show up on the /pipeline board in real time. Fail-open — a REST
+// server that isn't running must never block the tool call.
 // =============================================================================
 
 import http from 'node:http';

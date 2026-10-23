@@ -46,7 +46,7 @@ export const tools: ToolDefinition[] = [
   {
     name: 'task_get',
     description:
-      'Get a single task by ID. By default returns task with artifact count, comment count, dependencies, and collaborators. Use "include" to inline full subtasks, artifacts (filterable by stage), comments (with limit), or transitive_deps (full upstream + downstream closure of the dependency graph in one call — answers questions like "what depends on this task transitively?" and "what is its critical path depth?" without forcing the caller to BFS the graph).',
+      'Get a single task by ID. By default returns task with artifacts, comment count, dependencies (blockers/blocking = `blocks` edges; links = `related`/`duplicate`, with direction), claim status and collaborators. Use "include" to inline full subtasks, artifacts (filterable by stage), comments (with limit), or transitive_deps (full upstream + downstream closure of the dependency graph in one call — answers questions like "what depends on this task transitively?" and "what is its critical path depth?" without forcing the caller to BFS the graph).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -145,7 +145,8 @@ export const tools: ToolDefinition[] = [
             relationship: {
               type: 'string',
               enum: ['blocks', 'related', 'duplicate'],
-              description: 'Relationship type (default: blocks, only for add)',
+              description:
+                'Relationship type (default: blocks, only for add). Only blocks gates advancement; related/duplicate show as links in task_get. One link per task pair.',
             },
           },
           required: ['action', 'depends_on'],

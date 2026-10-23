@@ -6,7 +6,7 @@
 // =============================================================================
 
 import type { AppContext } from '../context.js';
-import { ValidationError, type Task, type TaskRelationshipType } from '../types.js';
+import { NotFoundError, ValidationError, type Task, type TaskRelationshipType } from '../types.js';
 import { generateRules } from '../domain/rules.js';
 
 /**
@@ -144,7 +144,7 @@ export function handleCreate(
 export function handleGet(ctx: AppContext, args: Record<string, unknown>): unknown {
   const taskId = requireNumber(args, 'task_id');
   const task = ctx.tasks.getById(taskId);
-  if (!task) throw new ValidationError(`Task ${taskId} not found.`);
+  if (!task) throw new NotFoundError('Task', taskId);
   const deps = ctx.tasks.getDependencies(taskId);
   const collaborators = ctx.collaborators.list(taskId);
   const commentCounts = ctx.comments.countByTaskIds([taskId]);
@@ -328,7 +328,12 @@ export function handleStage(
   }
 
   if (action === 'regress') {
-    return ctx.tasks.regress(taskId, requireString(args, 'stage'), optString(args, 'reason'));
+    return ctx.tasks.regress(
+      taskId,
+      requireString(args, 'stage'),
+      sessionName(session),
+      optString(args, 'reason'),
+    );
   }
 
   if (action === 'complete') {
@@ -374,7 +379,7 @@ export function handleArtifact(
     const over = requireString(args, 'over');
     const because = requireString(args, 'because');
     const task = ctx.tasks.getById(taskId);
-    if (!task) throw new ValidationError(`Task ${taskId} not found.`);
+    if (!task) throw new NotFoundError('Task', taskId);
     const decisionStage = task.stage;
     const decisionContent = [
       '## Decision',

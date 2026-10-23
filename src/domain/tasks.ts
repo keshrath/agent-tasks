@@ -12,6 +12,7 @@ import type {
   TaskArtifact,
   TaskCreateInput,
   TaskDependency,
+  TaskLink,
   TaskListFilter,
   TaskRelationshipType,
   TaskStatus,
@@ -115,27 +116,6 @@ export class TaskService {
     const cached = this.getCachedConfig(project);
     if (cached) return cached.stages;
     return this.loadAndCacheConfig(project).stages;
-  }
-
-  getAllGateConfigs(): Record<string, GateConfig> {
-    const configs = this.db.queryAll<PipelineConfig>(
-      'SELECT * FROM pipeline_config WHERE gate_config IS NOT NULL',
-    );
-    const result: Record<string, GateConfig> = {};
-    for (const c of configs) {
-      try {
-        const gate = JSON.parse(c.gate_config!) as GateConfig;
-        result[c.project] = gate;
-        const cached = this.configCache.get(c.project);
-        if (cached) {
-          cached.gate = gate;
-          cached.at = Date.now();
-        }
-      } catch {
-        // skip corrupt entries
-      }
-    }
-    return result;
   }
 
   getGateConfig(project?: string): GateConfig | null {
@@ -344,6 +324,15 @@ export class TaskService {
     return this.db.queryAll<Task>(sql, params);
   }
 
+  /** Finished tasks (completed, failed, cancelled), most recently closed first. */
+  listRecentlyClosed(limit = 30): Task[] {
+    return this.db.queryAll<Task>(
+      `SELECT * FROM tasks WHERE status IN ('completed', 'failed', 'cancelled')
+       ORDER BY updated_at DESC, id DESC LIMIT ?`,
+      [Math.min(Math.max(limit, 1), MAX_LIST_LIMIT)],
+    );
+  }
+
   getById(id: number): Task | null {
     return this.db.queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [id]);
   }
@@ -375,7 +364,7 @@ export class TaskService {
 
   /**
    * Score a task's clarity using deterministic heuristics. Surface for
-   * dashboards/CLIs that want to show authors how to improve a task before
+   * callers that want to show authors how to improve a task before
    * an agent claims it.
    */
   scoreConfidence(taskId: number): ConfidenceScore {
@@ -503,6 +492,7 @@ export class TaskService {
       if (task.status !== 'in_progress') {
         throw new ConflictError(`Task ${taskId} not in progress (status: ${task.status}).`);
       }
+      this.checkDependencies(taskId);
 
       const stages = this.getPipelineStages(task.project ?? undefined);
       const doneStage = stages.filter((s) => s !== 'cancelled').pop() ?? 'done';
@@ -577,7 +567,7 @@ export class TaskService {
       let targetIdx: number;
       if (toStage) {
         if (toStage === 'cancelled') {
-          throw new ValidationError('Use task_cancel to cancel a task.');
+          throw new ValidationError('Use task_stage action "cancel" to cancel a task.');
         }
         targetIdx = activeStages.indexOf(toStage);
         if (targetIdx === -1) {
@@ -587,7 +577,7 @@ export class TaskService {
         }
         if (targetIdx <= currentIdx) {
           throw new ValidationError(
-            `Target stage '${toStage}' is not ahead of current stage '${task.stage}'. Use task_regress to move backward.`,
+            `Target stage '${toStage}' is not ahead of current stage '${task.stage}'. Use task_stage action "regress" to move backward.`,
           );
         }
       } else {
@@ -619,7 +609,7 @@ export class TaskService {
     });
   }
 
-  regress(taskId: number, toStage: string, reason?: string): Task {
+  regress(taskId: number, toStage: string, by: string, reason?: string): Task {
     return this.db.transaction(() => {
       const task = this.requireTask(taskId);
 
@@ -651,7 +641,7 @@ export class TaskService {
             task.stage,
             'rejection',
             `Regressed from ${task.stage} to ${toStage}: ${reason}`,
-            'system',
+            by,
           ],
         );
       }
@@ -863,22 +853,27 @@ export class TaskService {
     this.events.emit('dependency:removed', { task_id: taskId, depends_on: dependsOn });
   }
 
-  getDependencies(taskId: number): { blockers: Task[]; blocking: Task[] } {
+  getDependencies(taskId: number): { blockers: Task[]; blocking: Task[]; links: TaskLink[] } {
     this.requireTask(taskId);
-    return {
-      blockers: this.db.queryAll<Task>(
-        'SELECT t.* FROM tasks t JOIN task_dependencies d ON t.id = d.depends_on WHERE d.task_id = ?',
-        [taskId],
-      ),
-      blocking: this.db.queryAll<Task>(
-        'SELECT t.* FROM tasks t JOIN task_dependencies d ON t.id = d.task_id WHERE d.depends_on = ?',
-        [taskId],
-      ),
-    };
-  }
-
-  getAllDependencies(): TaskDependency[] {
-    return this.db.queryAll<TaskDependency>('SELECT * FROM task_dependencies');
+    const rows = this.db.queryAll<
+      Task & { link_relationship: TaskRelationshipType; link_outgoing: number }
+    >(
+      `SELECT t.*, d.relationship AS link_relationship, d.task_id = ? AS link_outgoing
+       FROM task_dependencies d
+       JOIN tasks t ON t.id = CASE WHEN d.task_id = ? THEN d.depends_on ELSE d.task_id END
+       WHERE d.task_id = ? OR d.depends_on = ?
+       ORDER BY t.id`,
+      [taskId, taskId, taskId, taskId],
+    );
+    const result = { blockers: [] as Task[], blocking: [] as Task[], links: [] as TaskLink[] };
+    for (const { link_relationship: relationship, link_outgoing: outgoing, ...task } of rows) {
+      if (relationship !== 'blocks') {
+        result.links.push({ task, relationship, direction: outgoing ? 'outgoing' : 'incoming' });
+      } else {
+        (outgoing ? result.blockers : result.blocking).push(task);
+      }
+    }
+    return result;
   }
 
   getDependenciesForTasks(taskIds: number[]): TaskDependency[] {
@@ -1045,27 +1040,6 @@ export class TaskService {
     return artifact;
   }
 
-  /**
-   * Most recent activity per task — the task's own updated_at, or a later
-   * comment/artifact created_at. Feeds the dashboard's "live" filter.
-   * Timestamps are 'YYYY-MM-DD HH:MM:SS' (datetime('now')), so MAX() over the
-   * strings is chronological.
-   */
-  getLastActivityByTask(): Record<number, string> {
-    const rows = this.db.queryAll<{ task_id: number; last_activity: string }>(
-      `SELECT task_id, MAX(ts) AS last_activity FROM (
-         SELECT id AS task_id, updated_at AS ts FROM tasks
-         UNION ALL
-         SELECT task_id, created_at AS ts FROM task_comments
-         UNION ALL
-         SELECT task_id, created_at AS ts FROM task_artifacts
-       ) WHERE ts IS NOT NULL GROUP BY task_id`,
-    );
-    const activity: Record<number, string> = {};
-    for (const row of rows) activity[row.task_id] = row.last_activity;
-    return activity;
-  }
-
   getArtifacts(taskId: number, stage?: string): TaskArtifact[] {
     this.requireTask(taskId);
     if (stage) {
@@ -1078,27 +1052,6 @@ export class TaskService {
       'SELECT * FROM task_artifacts WHERE task_id = ? ORDER BY created_at ASC',
       [taskId],
     );
-  }
-
-  getArtifactCounts(): Record<number, number> {
-    const rows = this.db.queryAll<{ task_id: number; cnt: number }>(
-      'SELECT task_id, COUNT(*) as cnt FROM task_artifacts GROUP BY task_id',
-    );
-    const counts: Record<number, number> = {};
-    for (const r of rows) counts[r.task_id] = r.cnt;
-    return counts;
-  }
-
-  getArtifactCountsForTasks(taskIds: number[]): Record<number, number> {
-    if (taskIds.length === 0) return {};
-    const placeholders = taskIds.map(() => '?').join(',');
-    const rows = this.db.queryAll<{ task_id: number; cnt: number }>(
-      `SELECT task_id, COUNT(*) as cnt FROM task_artifacts WHERE task_id IN (${placeholders}) GROUP BY task_id`,
-      taskIds,
-    );
-    const counts: Record<number, number> = {};
-    for (const r of rows) counts[r.task_id] = r.cnt;
-    return counts;
   }
 
   // ---- Subtasks ----
@@ -1131,19 +1084,6 @@ export class TaskService {
     const rows = this.db.queryAll<{ parent_id: number; status: string; cnt: number }>(
       `SELECT parent_id, status, COUNT(*) as cnt FROM tasks WHERE parent_id IN (${placeholders}) GROUP BY parent_id, status`,
       taskIds,
-    );
-    const progress: Record<number, { total: number; done: number }> = {};
-    for (const r of rows) {
-      if (!progress[r.parent_id]) progress[r.parent_id] = { total: 0, done: 0 };
-      progress[r.parent_id].total += r.cnt;
-      if (r.status === 'completed') progress[r.parent_id].done += r.cnt;
-    }
-    return progress;
-  }
-
-  getAllSubtaskProgress(): Record<number, { total: number; done: number }> {
-    const rows = this.db.queryAll<{ parent_id: number; status: string; cnt: number }>(
-      `SELECT parent_id, status, COUNT(*) as cnt FROM tasks WHERE parent_id IS NOT NULL GROUP BY parent_id, status`,
     );
     const progress: Record<number, { total: number; done: number }> = {};
     for (const r of rows) {
@@ -1261,7 +1201,7 @@ export class TaskService {
         );
         if (!commentCount || commentCount.cnt === 0) {
           throw new ValidationError(
-            `Stage gate: at least one comment required before advancing from '${task.stage}'. Use task_comment or pass comment param to task_advance.`,
+            `Stage gate: at least one comment required before advancing from '${task.stage}'. Add one with task_artifact type "comment" or pass comment to task_stage advance.`,
           );
         }
       }
@@ -1274,7 +1214,7 @@ export class TaskService {
       );
       if (!artifactCount || artifactCount.cnt === 0) {
         throw new ValidationError(
-          `Stage gate: at least one artifact required at stage '${task.stage}' before advancing. Use task_add_artifact.`,
+          `Stage gate: at least one artifact required at stage '${task.stage}' before advancing. Attach one with task_artifact.`,
         );
       }
     }
@@ -1290,7 +1230,7 @@ export class TaskService {
         );
         if (!commentCount || commentCount.cnt === 0) {
           throw new ValidationError(
-            `Stage gate [${task.stage}]: comment required before advancing. Use task_comment or pass comment param to task_advance.`,
+            `Stage gate [${task.stage}]: comment required before advancing. Add one with task_artifact type "comment" or pass comment to task_stage advance.`,
           );
         }
       }
@@ -1305,7 +1245,7 @@ export class TaskService {
       const missing = stageGate.require_artifacts.filter((n) => !artifactNames.has(n));
       if (missing.length > 0) {
         throw new ValidationError(
-          `Stage gate [${task.stage}]: required artifacts missing: ${missing.join(', ')}. Use task_add_artifact.`,
+          `Stage gate [${task.stage}]: required artifacts missing: ${missing.join(', ')}. Attach one with task_artifact.`,
         );
       }
     }
@@ -1317,7 +1257,7 @@ export class TaskService {
       );
       if (!artifactCount || artifactCount.cnt < stageGate.require_min_artifacts) {
         throw new ValidationError(
-          `Stage gate [${task.stage}]: at least ${stageGate.require_min_artifacts} artifact(s) required (found ${artifactCount?.cnt ?? 0}). Use task_add_artifact.`,
+          `Stage gate [${task.stage}]: at least ${stageGate.require_min_artifacts} artifact(s) required (found ${artifactCount?.cnt ?? 0}). Attach more with task_artifact.`,
         );
       }
     }
@@ -1329,7 +1269,7 @@ export class TaskService {
       );
       if (!approved || approved.cnt === 0) {
         throw new ValidationError(
-          `Stage gate [${task.stage}]: approval required before advancing. Use task_approval(action: "request") + task_approval(action: "approve").`,
+          `Stage gate [${task.stage}]: approval required before advancing. No MCP tool records approvals (the library's ApprovalService does); drop require_approval with task_config to let agents pass.`,
         );
       }
     }

@@ -22,7 +22,6 @@ export default tseslint.config(
       'dist/',
       'node_modules/',
       'scripts/',
-      'src/ui/*.js',
       '*.config.*',
       'bench/workloads/',
       'bench/_results/',

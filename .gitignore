@@ -13,8 +13,6 @@ dist/
 
 # --- Test & coverage artifacts -----------------------------------------------
 coverage/
-test-results/
-playwright-report/
 
 # --- Worktrees ---------------------------------------------------------------
 .worktrees/
@@ -27,3 +25,5 @@ Thumbs.db
 # --- Bench artifacts ---------------------------------------------------------
 bench/_results/latest.json
 
+# --- Claude Code mod type stubs (written when Claude Code loads the plugin) ----
+plugin/.claude-plugin/types/

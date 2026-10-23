@@ -5,15 +5,15 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { AddressInfo } from 'net';
 import { createContext, type AppContext } from '../src/context.js';
-import { startDashboard, type DashboardServer } from '../src/server.js';
+import { startRestServer, type RestServer } from '../src/server.js';
 
-let server: DashboardServer;
+let server: RestServer;
 let ctx: AppContext;
 let baseUrl: string;
 
 beforeAll(async () => {
   ctx = createContext({ path: ':memory:' });
-  server = await startDashboard(ctx, 0);
+  server = await startRestServer(ctx, 0);
   const addr = server.httpServer.address() as AddressInfo;
   baseUrl = `http://localhost:${addr.port}`;
 });
@@ -52,25 +52,22 @@ describe('GET /health', () => {
 });
 
 // ---------------------------------------------------------------------------
-// CORS
+// Request guard
 // ---------------------------------------------------------------------------
 
-describe('CORS / request guard', () => {
-  it('answers a loopback preflight with the reflected origin, never *', async () => {
-    const origin = 'http://127.0.0.1:5173';
-    const res = await api('/api/tasks', { method: 'OPTIONS', headers: { Origin: origin } });
-    expect(res.status).toBe(204);
-    expect(res.headers.get('access-control-allow-origin')).toBe(origin);
-    expect(res.headers.get('access-control-allow-methods')).toContain('PUT');
-    expect(res.headers.get('access-control-allow-headers')).toContain('Content-Type');
-  });
-
-  it('rejects a cross-origin POST', async () => {
-    const res = await api('/api/tasks', {
-      ...jsonBody({ title: 'evil' }),
-      headers: { 'Content-Type': 'application/json', Origin: 'https://evil.com' },
-    });
-    expect(res.status).toBe(403);
+describe('Request guard', () => {
+  it('refuses every request that carries an Origin, loopback included', async () => {
+    for (const origin of ['http://127.0.0.1:5173', 'http://localhost:3000', 'https://evil.com']) {
+      expect((await api('/api/board', { headers: { Origin: origin } })).status).toBe(403);
+      const del = await api('/api/tasks/1', { method: 'DELETE', headers: { Origin: origin } });
+      expect(del.status).toBe(403);
+      const post = await api('/api/tasks', {
+        ...jsonBody({ title: 'from a web page' }),
+        headers: { 'Content-Type': 'application/json', Origin: origin },
+      });
+      expect(post.status).toBe(403);
+    }
+    expect(ctx.tasks.count()).toBe(0);
   });
 
   it('rejects a text/plain POST body', async () => {
@@ -86,16 +83,6 @@ describe('CORS / request guard', () => {
 // ---------------------------------------------------------------------------
 // Tasks CRUD
 // ---------------------------------------------------------------------------
-
-describe('GET /api/tasks', () => {
-  it('returns empty array initially', async () => {
-    const res = await api('/api/tasks');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Array.isArray(body)).toBe(true);
-    expect(body.length).toBe(0);
-  });
-});
 
 describe('POST /api/tasks', () => {
   it('creates a task and returns 201', async () => {
@@ -211,35 +198,6 @@ describe('POST /api/tasks', () => {
   });
 });
 
-describe('GET /api/tasks (with data)', () => {
-  it('returns tasks that were created', async () => {
-    const res = await api('/api/tasks');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.length).toBeGreaterThanOrEqual(3);
-  });
-
-  it('filters by project', async () => {
-    const res = await api('/api/tasks?project=test-project');
-    const body = await res.json();
-    expect(body.length).toBeGreaterThanOrEqual(1);
-    expect(body.every((t: { project: string }) => t.project === 'test-project')).toBe(true);
-  });
-
-  it('filters by status', async () => {
-    const res = await api('/api/tasks?status=pending');
-    const body = await res.json();
-    expect(body.length).toBeGreaterThanOrEqual(1);
-    expect(body.every((t: { status: string }) => t.status === 'pending')).toBe(true);
-  });
-
-  it('respects limit parameter', async () => {
-    const res = await api('/api/tasks?limit=1');
-    const body = await res.json();
-    expect(body.length).toBe(1);
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Single task
 // ---------------------------------------------------------------------------
@@ -253,6 +211,26 @@ describe('GET /api/tasks/:id', () => {
     expect(task.title).toBe('Test task');
   });
 
+  it('includes subtasks, artifacts and comments on request', async () => {
+    const res = await api('/api/tasks/1?include=subtasks,comments');
+    const task = await res.json();
+    expect(task).toMatchObject({ id: 1, subtasks: [], comments: [], artifacts: [] });
+    expect(task.dependencies).toEqual({ blockers: [], blocking: [], links: [] });
+  });
+
+  it('lists only blocks links as blockers, the others as links', async () => {
+    const blocker = ctx.tasks.create({ title: 'Blocker' }, 'test');
+    const related = ctx.tasks.create({ title: 'Related' }, 'test');
+    const task = ctx.tasks.create({ title: 'Linked' }, 'test');
+    ctx.tasks.addDependency(task.id, blocker.id);
+    ctx.tasks.addDependency(task.id, related.id, 'related');
+    const body = await (await api(`/api/tasks/${task.id}`)).json();
+    expect(body.dependencies.blockers.map((t: { id: number }) => t.id)).toEqual([blocker.id]);
+    expect(body.dependencies.links).toMatchObject([
+      { task: { id: related.id }, relationship: 'related', direction: 'outgoing' },
+    ]);
+  });
+
   it('returns 404 for non-existent task', async () => {
     const res = await api('/api/tasks/99999');
     expect(res.status).toBe(404);
@@ -262,211 +240,55 @@ describe('GET /api/tasks/:id', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Task update
-// ---------------------------------------------------------------------------
-
-describe('PUT /api/tasks/:id', () => {
-  it('updates task title', async () => {
-    const res = await api('/api/tasks/1', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Updated title' }),
-    });
-    expect(res.status).toBe(200);
-    const task = await res.json();
-    expect(task.title).toBe('Updated title');
-  });
-
-  it('updates task priority', async () => {
-    const res = await api('/api/tasks/1', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ priority: 99 }),
-    });
-    expect(res.status).toBe(200);
-    const task = await res.json();
-    expect(task.priority).toBe(99);
-  });
-
-  it('returns 404 for non-existent task', async () => {
-    const res = await api('/api/tasks/99999', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Nope' }),
-    });
-    expect(res.status).toBe(404);
-  });
-
-  it('returns error when no fields provided', async () => {
-    const res = await api('/api/tasks/1', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    expect(res.status).toBeGreaterThanOrEqual(400);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Stage transitions
 // ---------------------------------------------------------------------------
 
-describe('PUT /api/tasks/:id/stage', () => {
-  it('advances a task to the next stage', async () => {
-    const res = await api('/api/tasks/1/stage', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage: 'spec' }),
-    });
+describe('POST /api/tasks/:id/stage', () => {
+  const stage = (id: number, body: Record<string, unknown>) =>
+    api(`/api/tasks/${id}/stage`, jsonBody(body));
+
+  it('claims for the named claimer and lands in the next stage', async () => {
+    const created = await (await api('/api/tasks', jsonBody({ title: 'Lifecycle task' }))).json();
+    const res = await stage(created.id, { action: 'claim', by: 'mathi' });
     expect(res.status).toBe(200);
     const task = await res.json();
-    expect(task.stage).toBe('spec');
+    expect(task).toMatchObject({ assigned_to: 'mathi', status: 'in_progress', stage: 'spec' });
   });
 
-  it('advances multiple stages forward', async () => {
-    const res = await api('/api/tasks/1/stage', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage: 'implement' }),
+  it('advances, leaving the comment under the actor', async () => {
+    const created = await (await api('/api/tasks', jsonBody({ title: 'Advance task' }))).json();
+    await stage(created.id, { action: 'claim', by: 'mathi' });
+    const res = await stage(created.id, { action: 'advance', comment: 'spec ok', by: 'mathi' });
+    expect((await res.json()).stage).toBe('plan');
+    const { comments } = await (await api(`/api/tasks/${created.id}?include=comments`)).json();
+    expect(comments).toEqual([expect.objectContaining({ agent_id: 'mathi', content: 'spec ok' })]);
+  });
+
+  it('regresses with a reason, then completes with a result', async () => {
+    const created = await (await api('/api/tasks', jsonBody({ title: 'Regress task' }))).json();
+    await stage(created.id, { action: 'claim', by: 'mathi' });
+    await stage(created.id, { action: 'advance' });
+    const back = await stage(created.id, {
+      action: 'regress',
+      stage: 'spec',
+      reason: 'rework',
+      by: 'mathi',
     });
-    expect(res.status).toBe(200);
-    const task = await res.json();
-    expect(task.stage).toBe('implement');
+    expect((await back.json()).stage).toBe('spec');
+    const { artifacts } = await (await api(`/api/tasks/${created.id}`)).json();
+    expect(artifacts).toEqual([
+      expect.objectContaining({ name: 'rejection', created_by: 'mathi', stage: 'plan' }),
+    ]);
+    const done = await stage(created.id, { action: 'complete', result: 'shipped' });
+    expect(await done.json()).toMatchObject({ status: 'completed', stage: 'done' });
   });
 
-  it('regresses a task to an earlier stage', async () => {
-    const res = await api('/api/tasks/1/stage', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage: 'spec', reason: 'Needs rework' }),
-    });
-    expect(res.status).toBe(200);
-    const task = await res.json();
-    expect(task.stage).toBe('spec');
-  });
-
-  it('returns same task when setting current stage', async () => {
-    const res = await api('/api/tasks/1/stage', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage: 'spec' }),
-    });
-    expect(res.status).toBe(200);
-    const task = await res.json();
-    expect(task.stage).toBe('spec');
-  });
-
-  it('returns error for invalid stage name', async () => {
-    const res = await api('/api/tasks/1/stage', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage: 'nonexistent-stage' }),
-    });
-    expect(res.status).toBeGreaterThanOrEqual(400);
-    const body = await res.json();
-    expect(body.error).toMatch(/stage/i);
-  });
-
-  it('returns 404 for non-existent task', async () => {
-    const res = await api('/api/tasks/99999/stage', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage: 'spec' }),
-    });
-    expect(res.status).toBe(404);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Subtasks
-// ---------------------------------------------------------------------------
-
-describe('GET /api/tasks/:id/subtasks', () => {
-  it('returns empty array when no subtasks exist', async () => {
-    const res = await api('/api/tasks/1/subtasks');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Array.isArray(body)).toBe(true);
-    expect(body.length).toBe(0);
-  });
-
-  it('returns subtasks for a parent task', async () => {
-    await api(
-      '/api/tasks',
-      jsonBody({
-        title: 'Subtask 1',
-        parent_id: 1,
-      }),
-    );
-    await api(
-      '/api/tasks',
-      jsonBody({
-        title: 'Subtask 2',
-        parent_id: 1,
-      }),
-    );
-
-    const res = await api('/api/tasks/1/subtasks');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.length).toBe(2);
-    expect(body[0].parent_id).toBe(1);
-    expect(body[1].parent_id).toBe(1);
-  });
-
-  it('returns 404 for non-existent parent', async () => {
-    const res = await api('/api/tasks/99999/subtasks');
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.error).toMatch(/not found/i);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Artifacts
-// ---------------------------------------------------------------------------
-
-describe('GET /api/tasks/:id/artifacts', () => {
-  it('returns empty array when no artifacts exist', async () => {
-    const t = ctx.tasks.create({ title: 'Artifact test empty' }, 'test');
-    const res = await api(`/api/tasks/${t.id}/artifacts`);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Array.isArray(body)).toBe(true);
-    expect(body.length).toBe(0);
-  });
-
-  it('returns artifacts after they are created', async () => {
-    const t = ctx.tasks.create({ title: 'Artifact test' }, 'test');
-    ctx.tasks.claim(t.id, 'test');
-    ctx.tasks.addArtifact(t.id, 'design-doc', 'The design document content', 'test-agent', 'spec');
-    ctx.tasks.addArtifact(t.id, 'api-spec', 'OpenAPI spec content', 'test-agent', 'spec');
-
-    const res = await api(`/api/tasks/${t.id}/artifacts`);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.length).toBe(2);
-    expect(body[0].name).toBe('design-doc');
-    expect(body[1].name).toBe('api-spec');
-  });
-
-  it('filters artifacts by stage', async () => {
-    const t = ctx.tasks.create({ title: 'Artifact filter test' }, 'test');
-    ctx.tasks.claim(t.id, 'test');
-    ctx.tasks.addArtifact(t.id, 'spec-doc', 'Spec content', 'test-agent', 'spec');
-    ctx.tasks.addArtifact(t.id, 'impl-doc', 'Impl content', 'test-agent', 'implement');
-
-    const res = await api(`/api/tasks/${t.id}/artifacts?stage=spec`);
-    const body = await res.json();
-    expect(body.length).toBe(1);
-    expect(body[0].stage).toBe('spec');
-  });
-
-  it('returns 404 for non-existent task', async () => {
-    const res = await api('/api/tasks/99999/artifacts');
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.error).toMatch(/not found/i);
+  it('refuses a missing result, an unknown action and an unknown task', async () => {
+    const created = await (await api('/api/tasks', jsonBody({ title: 'Refused task' }))).json();
+    await stage(created.id, { action: 'claim' });
+    expect((await stage(created.id, { action: 'complete' })).status).toBe(422);
+    expect((await stage(created.id, { action: 'teleport' })).status).toBe(422);
+    expect((await stage(99999, { action: 'claim' })).status).toBe(404);
   });
 });
 
@@ -474,104 +296,39 @@ describe('GET /api/tasks/:id/artifacts', () => {
 // Comments
 // ---------------------------------------------------------------------------
 
-describe('GET /api/tasks/:id/comments', () => {
-  it('returns empty array when no comments exist', async () => {
-    const res = await api('/api/tasks/1/comments');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Array.isArray(body)).toBe(true);
-    expect(body.length).toBe(0);
-  });
-});
-
 describe('POST /api/tasks/:id/comments', () => {
-  it('creates a comment and returns 201', async () => {
+  it('creates a comment under the named author and returns 201', async () => {
     const res = await api(
       '/api/tasks/1/comments',
-      jsonBody({
-        content: 'This is a test comment',
-        agent_id: 'reviewer-1',
-      }),
+      jsonBody({ content: 'Looks good', agent_id: 'r1' }),
     );
     expect(res.status).toBe(201);
-    const comment = await res.json();
-    expect(comment.id).toBeGreaterThan(0);
-    expect(comment.content).toBe('This is a test comment');
-    expect(comment.agent_id).toBe('reviewer-1');
-    expect(comment.task_id).toBe(1);
+    expect(await res.json()).toMatchObject({ task_id: 1, agent_id: 'r1', content: 'Looks good' });
   });
 
-  it('creates a comment with default agent_id', async () => {
-    const res = await api(
-      '/api/tasks/1/comments',
-      jsonBody({
-        content: 'Comment from API',
-      }),
-    );
-    expect(res.status).toBe(201);
-    const comment = await res.json();
-    expect(comment.agent_id).toBe('api');
+  it('defaults the author to api', async () => {
+    const res = await api('/api/tasks/1/comments', jsonBody({ content: 'Comment from API' }));
+    expect((await res.json()).agent_id).toBe('api');
   });
 
-  it('lists comments after creation', async () => {
-    const res = await api('/api/tasks/1/comments');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.length).toBe(2);
-  });
-
-  it('returns error for non-existent task', async () => {
-    const res = await api(
-      '/api/tasks/99999/comments',
-      jsonBody({
-        content: 'Should fail',
-      }),
-    );
-    expect(res.status).toBeGreaterThanOrEqual(400);
-    const body = await res.json();
-    expect(body.error).toMatch(/not found/i);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Dependencies
-// ---------------------------------------------------------------------------
-
-describe('GET /api/dependencies', () => {
-  it('returns dependencies after they are created', async () => {
-    const t1 = ctx.tasks.create({ title: 'Dep parent' }, 'test');
-    const t2 = ctx.tasks.create({ title: 'Dep child' }, 'test');
-    ctx.tasks.addDependency(t2.id, t1.id);
-
-    const res = await api('/api/dependencies');
-    const body = await res.json();
-    expect(body.length).toBeGreaterThanOrEqual(1);
-    expect(
-      body.some(
-        (d: { task_id: number; depends_on: number }) =>
-          d.task_id === t2.id && d.depends_on === t1.id,
-      ),
-    ).toBe(true);
-  });
-});
-
-describe('GET /api/tasks/:id/dependencies', () => {
-  it('returns dependencies for a specific task', async () => {
-    const t1 = ctx.tasks.create({ title: 'Dep query A' }, 'test');
-    const t2 = ctx.tasks.create({ title: 'Dep query B' }, 'test');
-    ctx.tasks.addDependency(t2.id, t1.id);
-
-    const res = await api(`/api/tasks/${t2.id}/dependencies`);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.blockers.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('returns 404 for non-existent task', async () => {
-    const res = await api('/api/tasks/99999/dependencies');
+  it('refuses an empty comment and an unknown task', async () => {
+    expect((await api('/api/tasks/1/comments', jsonBody({ content: ' ' }))).status).toBe(422);
+    const res = await api('/api/tasks/99999/comments', jsonBody({ content: 'Should fail' }));
     expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.error).toMatch(/not found/i);
+    expect((await res.json()).error).toMatch(/not found/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
+
+describe('DELETE /api/tasks/:id', () => {
+  it('deletes a task, then answers 404', async () => {
+    const t = ctx.tasks.create({ title: 'Delete me' }, 'test');
+    const res = await api(`/api/tasks/${t.id}`, { method: 'DELETE' });
+    expect(await res.json()).toEqual({ ok: true });
+    expect((await api(`/api/tasks/${t.id}`, { method: 'DELETE' })).status).toBe(404);
   });
 });
 
@@ -605,78 +362,35 @@ describe('GET /api/pipeline', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Overview
+// Board
 // ---------------------------------------------------------------------------
 
-describe('GET /api/overview', () => {
-  it('returns full pipeline state', async () => {
-    const res = await api('/api/overview');
+describe('GET /api/board', () => {
+  it('returns every open task, the recently closed ones and their row facts', async () => {
+    const open = await (await api('/api/tasks', jsonBody({ title: 'Open task' }))).json();
+    const closed = await (await api('/api/tasks', jsonBody({ title: 'Closed task' }))).json();
+    await api(`/api/tasks/${closed.id}/stage`, jsonBody({ action: 'cancel', reason: 'dup' }));
+    const res = await api('/api/board');
     expect(res.status).toBe(200);
     const body = await res.json();
-
-    expect(Array.isArray(body.tasks)).toBe(true);
-    expect(body.tasks.length).toBeGreaterThanOrEqual(1);
-
+    expect(body.open.map((t: { id: number }) => t.id)).toContain(open.id);
+    expect(body.open.every((t: { status: string }) => /pending|in_progress/.test(t.status))).toBe(
+      true,
+    );
+    expect(body.recent[0]).toMatchObject({ id: closed.id, status: 'cancelled' });
     expect(Array.isArray(body.dependencies)).toBe(true);
-
-    expect(body.artifactCounts).toEqual(expect.any(Object));
-    expect(body.commentCounts).toEqual(expect.any(Object));
     expect(body.subtaskProgress).toEqual(expect.any(Object));
-
-    expect(Array.isArray(body.stages)).toBe(true);
-    expect(body.stages.length).toBeGreaterThanOrEqual(7);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Search
-// ---------------------------------------------------------------------------
-
-describe('GET /api/search', () => {
-  it('returns empty results for unmatched query', async () => {
-    const res = await api('/api/search?q=zzzznonexistent');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Array.isArray(body)).toBe(true);
-    expect(body.length).toBe(0);
-  });
-
-  it('finds tasks by title', async () => {
-    ctx.tasks.create({ title: 'Searchable unique keyword xyzzy' }, 'test');
-    const res = await api('/api/search?q=xyzzy');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.length).toBeGreaterThanOrEqual(1);
-    expect(body[0].task.title).toContain('xyzzy');
-  });
-
-  it('respects limit parameter', async () => {
-    const res = await api('/api/search?q=task&limit=1');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.length).toBeLessThanOrEqual(1);
-  });
-
-  it('filters by project', async () => {
-    ctx.tasks.create({ title: 'Searchable projfilt', project: 'search-proj' }, 'test');
-    const res = await api('/api/search?q=projfilt&project=search-proj');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.length).toBe(1);
-    expect(body[0].task.project).toBe('search-proj');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Agents
-// ---------------------------------------------------------------------------
-
-describe('GET /api/agents', () => {
-  it('returns an array (may be empty)', async () => {
-    const res = await api('/api/agents');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Array.isArray(body)).toBe(true);
+    expect(body.stages).toEqual([
+      'backlog',
+      'spec',
+      'plan',
+      'implement',
+      'test',
+      'review',
+      'done',
+      'cancelled',
+    ]);
+    expect(body.pipelines).toEqual({});
   });
 });
 
@@ -686,17 +400,17 @@ describe('GET /api/agents', () => {
 
 describe('Response headers', () => {
   it('returns JSON content-type on API routes', async () => {
-    const res = await api('/api/tasks');
+    const res = await api('/api/board');
     expect(res.headers.get('content-type')).toContain('application/json');
   });
 
   it('never sends a wildcard CORS header on API responses', async () => {
-    const res = await api('/api/tasks');
+    const res = await api('/api/board');
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 
   it('includes X-Content-Type-Options header', async () => {
-    const res = await api('/api/tasks');
+    const res = await api('/api/board');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
   });
 });

@@ -2,9 +2,11 @@
 
 ## Bottom line
 
-agent-tasks ships five product features: **Visibility ("at a glance"),
-Stages, Dependencies, Approvals, Artifacts.** The bench tests each one
-directly with a manager-in-the-loop scenario and a known answer key.
+The bench measures five things a manager asks of agent-tasks: **Visibility
+("at a glance"), Stages, Dependencies, review sign-off, Artifacts**, each
+with a manager-in-the-loop scenario and a known answer key. Review sign-off
+here is a reviewer's comment on a task at the `review` stage, not the
+`task_approvals` table: no MCP tool or REST route records an approval.
 
 **Result across all five features, N=2 per scenario:**
 
@@ -13,19 +15,19 @@ directly with a manager-in-the-loop scenario and a known answer key.
 | Visibility ("at a glance")              | `csv-export`                   | 4.0 / 10            | **10.0 / 10** ⭐      |
 | **Artifacts**                           | `audit-recall`                 | 2.8 / 10            | **10.0 / 10** ⭐      |
 | **Dependencies**                        | `dep-aware-mgmt`               | **0.5 / 10**        | **8.5 / 10** ⭐       |
-| **Approvals**                           | `gates-and-approvals`          | **0.5 / 10**        | **9.75 / 10** ⭐      |
+| **Review sign-off**                     | `gates-and-approvals`          | **0.5 / 10**        | **9.75 / 10** ⭐      |
 | Parallel coordination                   | `realistic-funcs` (throughput) | 3.3 / 4 (83%)       | **4.0 / 4 (100%)** ⭐ |
 | **AGGREGATE (visibility, 4 scenarios)** |                                | **1.95 / 10 (20%)** | **9.56 / 10 (96%)**   |
 
 **agent-tasks gives a manager observing a fleet of agents ~5× better
 answer correctness on standard "what's going on?" questions, and is the
-ONLY way to answer questions about Dependencies or Approvals at all** —
+ONLY way to answer questions about Dependencies or review sign-off at all** —
 naive file-system inspection scores literal zero on those dimensions
 because the data physically does not exist where it can read.
 
 ## Why this is the right framing
 
-agent-tasks is a **Kanban dashboard for AI agent fleets**. The value is
+agent-tasks is a **Kanban board for AI agent fleets**. The value is
 what the human manager can see across N parallel terminals, not how fast
 the workers individually run.
 
@@ -79,7 +81,7 @@ spec?", "what's the longest-idle worker?".
 
 The questions naive cannot answer (0/0 in both runs): Q2 blocked, Q4 why
 CSV, Q6 longest idle, Q8 remaining count, Q10 backlog list. These are
-exactly the visibility questions the dashboard exists for.
+exactly the visibility questions the board exists for.
 
 ### 2. `audit-recall` — Artifacts (historical/provenance)
 
@@ -122,7 +124,7 @@ question; the 2.5 missing points are on multi-step reasoning questions
 graph correctly even with the data in hand. Future bench iterations can
 sharpen these.
 
-### 4. `gates-and-approvals` — Approvals (NEW in v1.10.1)
+### 4. `gates-and-approvals` — review sign-off (NEW in v1.10.1)
 
 **Setup.** A 6-task pricing rules engine build with explicit `review`
 stage gates. Two tasks at the review stage: one **approved** by
@@ -180,7 +182,7 @@ overhead. Documented post-mortem in the v1.10.0 commit message.
   where the last left off
 - Audit-trail-needing work where "why did we ship this and who approved
   it" matters weeks later
-- Multi-agent visibility where the human needs a single dashboard
+- Multi-agent visibility where the human needs a single board
   showing what all agents are doing across all terminals
 
 **DON'T** use it for:
@@ -195,7 +197,7 @@ a limitation, we have:
 
 - **The manager-proxy is an LLM, not a real human.** A real human
   manager would be faster than naive (skim a screen vs grep code) and
-  faster than the LLM-proxy with agent-tasks (read the dashboard). The
+  faster than the LLM-proxy with agent-tasks (read the board). The
   bench simulates the lower bound of cognitive effort, not real wall
   time. The relative gap between conditions is what matters here, not
   the absolute seconds.
@@ -248,7 +250,7 @@ bench/
       csv-export.ts                      — at-a-glance / live state visibility
       audit-recall.ts                    — Artifacts (historical recall)
       dep-aware-mgmt.ts                  — Dependencies (NEW)
-      gates-and-approvals.ts             — Approvals (NEW)
+      gates-and-approvals.ts             — review sign-off (NEW)
   _results/
     latest.json                          — throughput pilot results
     visibility.json                      — visibility pilot results

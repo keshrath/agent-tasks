@@ -5,7 +5,7 @@
 1. [Overview](#1-overview)
 2. [Installation](#2-installation)
 3. [Configuration](#3-configuration)
-4. [Dashboard Guide](#4-dashboard-guide)
+4. [The /pipeline Pane](#4-the-pipeline-pane)
 5. [MCP Tools Reference](#5-mcp-tools-reference)
 6. [REST API Reference](#6-rest-api-reference)
 7. [Pipeline Stages and Task Lifecycle](#7-pipeline-stages-and-task-lifecycle)
@@ -18,20 +18,19 @@
 
 ### What agent-tasks Does
 
-agent-tasks is an MCP (Model Context Protocol) server that provides pipeline-driven task management for AI coding agents. Instead of flat todo lists, tasks flow through configurable stages with dependency tracking, approval workflows, and multi-agent collaboration:
+agent-tasks is an MCP (Model Context Protocol) server that provides pipeline-driven task management for AI coding agents. Instead of flat todo lists, tasks flow through configurable stages with dependency tracking, stage gates, and multi-agent claiming:
 
 - **Pipeline stages** -- tasks move through `backlog > spec > plan > implement > test > review > done`, configurable per project.
 - **Task dependencies** -- DAG with automatic cycle detection. Blocks advancement until dependencies are resolved.
-- **Approval workflows** -- stage-gated approve/reject with auto-regress on rejection.
-- **Multi-agent collaboration** -- roles (collaborator, reviewer, watcher), claiming, assignment.
+- **Multi-agent claiming** -- claim, assign, send back to an earlier stage with a reason (recorded as a `rejection` artifact under who sent it back).
 - **Subtask hierarchies** -- parent/child task trees with progress tracking.
 - **Threaded comments** -- async discussions between agents on any task.
 - **Artifact versioning** -- per-stage document attachments with automatic versioning.
 - **Decisions and learnings** -- structured decision records and insight propagation.
 - **Full-text search** -- FTS5 search across task titles and descriptions.
-- **Stage gates** -- configurable per-project rules requiring named artifacts, minimum artifact counts, comments, or approvals before advancing.
+- **Stage gates** -- configurable per-project rules requiring named artifacts, minimum artifact counts or a comment before advancing. (`require_approval` exists in the schema, but no MCP tool or REST route records an approval, so a stage with it set cannot be left; keep it off.)
 - **Agent affinity** -- `task_list(next: true)` prefers routing tasks to agents with related history.
-- **Real-time kanban dashboard** -- drag-and-drop, side panel, inline creation, dark/light theme.
+- **Claude Code `/pipeline` pane** -- the board beside the conversation: tasks by stage, task detail, every lifecycle action, a status line entry.
 - **TodoWrite bridge** -- intercepts Claude Code's built-in TodoWrite and syncs to the pipeline.
 - **Heartbeat-based cleanup** -- auto-fails tasks from dead agents using agent-comm heartbeat data.
 
@@ -39,18 +38,18 @@ agent-tasks is an MCP (Model Context Protocol) server that provides pipeline-dri
 
 agent-tasks has two entry points:
 
-| Entry Point      | File             | Purpose                                                                                   |
-| ---------------- | ---------------- | ----------------------------------------------------------------------------------------- |
-| MCP stdio server | `dist/index.js`  | Communicates with the AI agent via JSON-RPC over stdin/stdout. Auto-starts the dashboard. |
-| HTTP server      | `dist/server.js` | Standalone dashboard + REST API + WebSocket.                                              |
+| Entry Point      | File             | Purpose                                                                                  |
+| ---------------- | ---------------- | ---------------------------------------------------------------------------------------- |
+| MCP stdio server | `dist/index.js`  | Communicates with the AI agent via JSON-RPC over stdin/stdout. Auto-starts the REST API. |
+| REST server      | `dist/server.js` | Standalone REST API (what the `/pipeline` pane reads).                                   |
 
 Internally:
 
 ```
 domain/      Tasks (stages, dependencies, artifacts, claiming), events, validation
 storage/     SQLite via better-sqlite3 (WAL mode, schema V5)
-transport/   REST (node:http), WebSocket (ws), MCP (stdio JSON-RPC)
-ui/          Vanilla JS kanban dashboard (no build step for the UI)
+transport/   REST (node:http), MCP (stdio JSON-RPC)
+plugin/      Claude Code plugin: MCP server config + the /pipeline mod
 ```
 
 No framework dependencies -- no Express, no React. Pure Node.js + TypeScript.
@@ -91,13 +90,18 @@ npx agent-tasks
 
 ### Environment Variables
 
-| Variable                   | Default                         | Description                                                  |
-| -------------------------- | ------------------------------- | ------------------------------------------------------------ |
-| `AGENT_TASKS_DB`           | `~/.agent-tasks/agent-tasks.db` | SQLite database file path                                    |
-| `AGENT_TASKS_PORT`         | `3422`                          | Dashboard HTTP/WebSocket port                                |
-| `AGENT_TASKS_HOST`         | `127.0.0.1`                     | Dashboard bind address (`0.0.0.0` exposes it to the network) |
-| `AGENT_TASKS_INSTRUCTIONS` | enabled                         | Set to `0` to disable response-embedded instructions         |
-| `AGENT_COMM_URL`           | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications                 |
+| Variable                                 | Default                         | Description                                                                    |
+| ---------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------ |
+| `AGENT_TASKS_DB`                         | `~/.agent-tasks/agent-tasks.db` | SQLite database file path                                                      |
+| `AGENT_TASKS_PORT`                       | `3422`                          | REST API port (the `/pipeline` pane reads it)                                  |
+| `AGENT_TASKS_HOST`                       | `127.0.0.1`                     | REST bind address (`0.0.0.0` exposes it to the network)                        |
+| `AGENT_TASKS_USER`                       | the OS user                     | Who the `/pipeline` pane acts as (`created_by`, comment author, `by`)          |
+| `AGENT_TASKS_INSTRUCTIONS`               | enabled                         | Set to `0` to disable response-embedded instructions                           |
+| `AGENT_TASKS_RETENTION_DAYS`             | `30`                            | Days the cleanup keeps resolved approval records                               |
+| `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES` | `60`                            | `task-cleanup-start.js`: idle minutes before a dead session's task is failed   |
+| `AGENT_TASKS_HEARTBEAT_FRESH_MINUTES`    | `15`                            | `task-cleanup-start.js`: an agent with a heartbeat this recent counts as alive |
+| `AGENT_COMM_URL`                         | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications                                   |
+| `AGENT_KNOWLEDGE_URL`                    | `http://localhost:3423`         | Agent-knowledge REST URL for the knowledge bridge                              |
 
 ### Claude Code Setup
 
@@ -114,7 +118,7 @@ Add agent-tasks to your MCP configuration in `~/.claude.json`:
 }
 ```
 
-The dashboard auto-starts at http://localhost:3422 on the first MCP connection.
+The first MCP process also serves the REST API on http://localhost:3422. For the board, install the plugin instead (`claude plugin marketplace add keshrath/agent-tasks`, then `claude plugin install agent-tasks@agent-tasks`): it runs the same MCP server and adds `/pipeline`.
 
 ### Permissions (settings.json)
 
@@ -132,54 +136,17 @@ Any MCP client supporting stdio transport can connect. Configure it to spawn `np
 
 ---
 
-## 4. Dashboard Guide
+## 4. The /pipeline Pane
 
-### Accessing the Dashboard
+agent-tasks has no web dashboard (removed in 2.0). With the agent-tasks plugin installed (Claude Code 2.1.289+), `/pipeline` opens the board in a pane beside the conversation (docked in the fullscreen layout, above the prompt otherwise).
 
-The dashboard is available at **http://localhost:3422** (or the port configured via `AGENT_TASKS_PORT`).
+- **Board** -- tasks grouped by pipeline stage with counts; markers for priority, assignee and unmet dependencies. Find narrows it by id, title, assignee, project or tag (`/pipeline <text>` opens it narrowed).
+- **Task detail** -- the stage strip, status, assignee, project, priority, tags, blocking dependencies, subtasks, description, artifacts per stage and the comment thread, with the lifecycle actions for a task an agent is working on (advance, send back, complete, fail), cancel, comment and delete. Claiming stays with the agents (`task_stage`): an unclaimed task waits for one, and a blocked one offers no Advance or Complete, only what it waits for.
+- **Done** -- recently finished tasks with their result; **New** -- a form that creates a task in the first stage.
+- **Who acts** -- what you do in the pane is recorded under `AGENT_TASKS_USER`, else your OS user name.
+- **Status line** -- the board's summary (`7 open tasks · 3 in progress · 1 blocked`); a toast when a task finishes or reaches review.
 
-### Kanban Board
-
-The main view is a kanban board with one column per pipeline stage. Tasks appear as cards that can be dragged between columns to change their stage.
-
-Each task card shows:
-
-- **Title** and **priority** indicator.
-- **Assignee** badge (purple tag).
-- **Project** badge (accent-colored tag).
-- **Artifact count** badge (blue).
-- **Blocked indicator** (red) when dependencies are unmet.
-- **Subtask progress** bar when the task has children.
-
-### Side Panel
-
-Click a task card to open the side panel. The panel shows:
-
-- Full task details (title, description, status, stage, priority, project, tags).
-- **Artifacts** tab -- attached documents, decisions, and learnings with version history.
-- **Comments** tab -- threaded discussion.
-- **Dependencies** tab -- blocking and related tasks.
-- **Collaborators** tab -- assigned agents with roles.
-
-### Inline Task Creation
-
-Click the "+" button at the top of any column to create a task directly in that stage.
-
-### Filtering and Search
-
-Use the filter bar to narrow by project, assignee, minimum priority, Live
-activity, or full-text query. Live combines with the other filters and matches
-tasks whose newest task, comment, or artifact activity is strictly less than
-30 minutes old. Missing, invalid, and future timestamps do not match; the
-preference persists in `localStorage`.
-
-### Theme Toggle
-
-Dark and light themes are available. The preference persists in `localStorage`.
-
-### Real-Time Updates
-
-The dashboard connects via WebSocket. The server polls the SQLite database every 2 seconds for changes made by other processes (MCP stdio servers). This ensures the kanban board stays in sync even when tasks are modified via MCP tools in separate sessions.
+The pane is keyboard-first: `Tab` moves the focus, `Enter` presses, `Esc` hands the keyboard back to the prompt. It reads the REST API on `AGENT_TASKS_PORT`; changes from any session show up within one poll.
 
 ---
 
@@ -215,16 +182,16 @@ task_create with title "Write unit tests", parent_id 42
 
 ### task_get
 
-Get a single task by ID with full details. Optionally include subtasks, artifacts, and comments in one call.
+Get a single task by ID with full details. Always returns its artifacts, `comments_count`, `claim_status` and `dependencies`: `blockers` and `blocking` (the `blocks` links) and `links` (`related` / `duplicate`, each `{ task, relationship, direction }`). Optionally include subtasks, comments and the transitive dependency chain in one call.
 
 **Parameters:**
 
-| Name      | Type     | Required | Description                                                                     |
-| --------- | -------- | -------- | ------------------------------------------------------------------------------- |
-| `task_id` | number   | Yes      | Task ID to retrieve                                                             |
-| `include` | string[] | No       | Any combination of `"subtasks"`, `"artifacts"`, `"comments"`                    |
-| `stage`   | string   | No       | Filter artifacts by stage (only when `include` contains `"artifacts"`)          |
-| `limit`   | number   | No       | Max comments to return (only when `include` contains `"comments"`, default 100) |
+| Name      | Type     | Required | Description                                                                                                      |
+| --------- | -------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `task_id` | number   | Yes      | Task ID to retrieve                                                                                              |
+| `include` | string[] | No       | Any combination of `"subtasks"`, `"artifacts"`, `"comments"`, `"transitive_deps"`                                |
+| `stage`   | string   | No       | Filter artifacts by stage (only when `include` contains `"artifacts"`)                                           |
+| `limit`   | number   | No       | How many of the newest comments to return, oldest first (only when `include` contains `"comments"`, default 100) |
 
 **Examples:**
 
@@ -245,20 +212,21 @@ List, search, or pick tasks.
 
 **Parameters:**
 
-| Name           | Type    | Required | Description                                                                    |
-| -------------- | ------- | -------- | ------------------------------------------------------------------------------ |
-| `query`        | string  | No       | Full-text search across titles and descriptions (FTS5)                         |
-| `next`         | boolean | No       | Return the single best available task (highest priority, unassigned, deps met) |
-| `agent`        | string  | No       | Agent name for affinity scoring (only with next: true)                         |
-| `status`       | string  | No       | Filter: `pending`, `in_progress`, `completed`, `failed`, `cancelled`           |
-| `assign_to`    | string  | No       | Filter by assigned agent name                                                  |
-| `stage`        | string  | No       | Filter by pipeline stage                                                       |
-| `project`      | string  | No       | Filter by project                                                              |
-| `collaborator` | string  | No       | Filter tasks where agent is a collaborator                                     |
-| `root_only`    | boolean | No       | Only show top-level tasks (no subtasks)                                        |
-| `parent_id`    | number  | No       | Filter subtasks of a specific parent                                           |
-| `limit`        | number  | No       | Max results (default: 500 for list, 50 for search)                             |
-| `offset`       | number  | No       | Skip first N results (for pagination)                                          |
+| Name           | Type     | Required | Description                                                                    |
+| -------------- | -------- | -------- | ------------------------------------------------------------------------------ |
+| `query`        | string   | No       | Full-text search across titles and descriptions (FTS5)                         |
+| `next`         | boolean  | No       | Return the single best available task (highest priority, unassigned, deps met) |
+| `agent`        | string   | No       | Agent name for affinity scoring (only with next: true)                         |
+| `status`       | string   | No       | Filter: `pending`, `in_progress`, `completed`, `failed`, `cancelled`           |
+| `assign_to`    | string   | No       | Filter by assigned agent name                                                  |
+| `stage`        | string   | No       | Filter by pipeline stage                                                       |
+| `project`      | string   | No       | Filter by project                                                              |
+| `collaborator` | string   | No       | Filter tasks where agent is a collaborator                                     |
+| `root_only`    | boolean  | No       | Only show top-level tasks (no subtasks)                                        |
+| `parent_id`    | number   | No       | Filter subtasks of a specific parent                                           |
+| `tags`         | string[] | No       | Filter by tags; a task must carry every tag listed                             |
+| `limit`        | number   | No       | Max results (default: 500 for list, 50 for search)                             |
+| `offset`       | number   | No       | Skip first N results (for pagination)                                          |
 
 **Examples:**
 
@@ -315,18 +283,18 @@ Delete a task and all its artifacts, comments, and dependencies (cascading). Can
 
 ### task_stage
 
-Move a task through its lifecycle. All claim/advance/regress/complete/fail/cancel transitions live here.
+Move a task through its lifecycle. All claim/assign/advance/regress/complete/fail/cancel transitions live here.
 
 **Parameters:**
 
 | Name      | Type   | Required | Description                                                                      |
 | --------- | ------ | -------- | -------------------------------------------------------------------------------- |
-| `action`  | string | Yes      | One of: `claim`, `advance`, `regress`, `complete`, `fail`, `cancel`              |
+| `action`  | string | Yes      | One of: `claim`, `assign`, `advance`, `regress`, `complete`, `fail`, `cancel`    |
 | `task_id` | number | Yes      | Task ID                                                                          |
 | `claimer` | string | No       | Agent name claiming (claim only, uses session name if omitted)                   |
 | `stage`   | string | No       | Target stage (advance: optional, advances to next if omitted; regress: required) |
 | `comment` | string | No       | Comment (advance: optional, satisfies stage-gate require_comment check)          |
-| `reason`  | string | No       | Reason for regression, failure, or cancellation                                  |
+| `reason`  | string | No       | Reason for regression or cancellation                                            |
 | `result`  | string | No       | Result summary (complete) or error description (fail)                            |
 
 **Examples:**
@@ -343,8 +311,8 @@ task_stage with action "cancel", task_id 42, reason "Requirements changed"
 
 **Error cases:**
 
-- Unmet dependencies block advancement.
-- Stage gate requirements (artifacts, comments, approvals) must be satisfied.
+- An open `blocks` dependency refuses `advance` and `complete` (claim does not check it).
+- Stage gate requirements (artifacts, comments) must be satisfied.
 - Cannot advance past the last stage (use `complete` instead).
 
 > Replaces the former `task_claim`, `task_advance`, `task_regress`, `task_complete`, `task_fail`, and `task_cancel` tools.
@@ -353,21 +321,22 @@ task_stage with action "cancel", task_id 42, reason "Requirements changed"
 
 ### task_artifact
 
-Attach artifacts to a task. Three types are supported.
+Attach artifacts or comments to a task. Four types are supported.
 
 **Parameters:**
 
-| Name       | Type   | Required | Description                                                                       |
-| ---------- | ------ | -------- | --------------------------------------------------------------------------------- |
-| `type`     | string | Yes      | One of: `general`, `decision`, `learning`                                         |
-| `task_id`  | number | Yes      | Task ID                                                                           |
-| `name`     | string | No       | Artifact name (type: general, e.g. "spec", "test-results", "review-notes")        |
-| `content`  | string | No       | Artifact content (type: general: max 100K; type: learning: the insight)           |
-| `stage`    | string | No       | Stage to attach to (type: general, defaults to current stage)                     |
-| `chose`    | string | No       | What was chosen (type: decision)                                                  |
-| `over`     | string | No       | Alternatives considered (type: decision)                                          |
-| `because`  | string | No       | Rationale (type: decision)                                                        |
-| `category` | string | No       | Learning category: `technique`, `pitfall`, `decision`, `pattern` (type: learning) |
+| Name                | Type   | Required | Description                                                                       |
+| ------------------- | ------ | -------- | --------------------------------------------------------------------------------- |
+| `type`              | string | Yes      | One of: `general`, `decision`, `learning`, `comment`                              |
+| `task_id`           | number | Yes      | Task ID                                                                           |
+| `name`              | string | No       | Artifact name (type: general, e.g. "spec", "test-results", "review-notes")        |
+| `content`           | string | No       | Artifact content (general: max 100K; learning: the insight; comment: the text)    |
+| `stage`             | string | No       | Stage to attach to (type: general, defaults to current stage)                     |
+| `chose`             | string | No       | What was chosen (type: decision)                                                  |
+| `over`              | string | No       | Alternatives considered (type: decision)                                          |
+| `because`           | string | No       | Rationale (type: decision)                                                        |
+| `category`          | string | No       | Learning category: `technique`, `pitfall`, `decision`, `pattern` (type: learning) |
+| `parent_comment_id` | number | No       | The comment this one replies to (type: comment)                                   |
 
 **Examples:**
 
@@ -380,6 +349,10 @@ task_artifact with type "decision", task_id 42, chose "JWT with refresh tokens",
 
 # Learning
 task_artifact with type "learning", task_id 42, content "better-sqlite3 WAL mode needs explicit checkpoint for large transactions", category "pitfall"
+
+# Comment, and a reply to comment 7
+task_artifact with type "comment", task_id 42, content "Is the refresh token rotated?"
+task_artifact with type "comment", task_id 42, content "Yes, on every use", parent_comment_id 7
 ```
 
 **Behavior:**
@@ -442,12 +415,12 @@ task_config with action "pipeline", project "backend", gate_config {"require_com
 
 Per-stage gate rules:
 
-| Field                   | Type     | Description                                      |
-| ----------------------- | -------- | ------------------------------------------------ |
-| `require_artifacts`     | string[] | Named artifacts that must exist before advancing |
-| `require_min_artifacts` | number   | Minimum artifact count required                  |
-| `require_comment`       | boolean  | Require at least one comment                     |
-| `require_approval`      | boolean  | Require an approved approval                     |
+| Field                   | Type     | Description                                                              |
+| ----------------------- | -------- | ------------------------------------------------------------------------ |
+| `require_artifacts`     | string[] | Named artifacts that must exist before advancing                         |
+| `require_min_artifacts` | number   | Minimum artifact count required                                          |
+| `require_comment`       | boolean  | Require at least one comment                                             |
+| `require_approval`      | boolean  | Require an approved approval. No tool records approvals, so leave it off |
 
 **Example: self-review gate**
 
@@ -503,51 +476,19 @@ task_config with action "rules", format "mdc", project "backend"
 
 ## 6. REST API Reference
 
-All endpoints return JSON. Loopback only: foreign `Host`/`Origin` headers get 403, request bodies must be `application/json`, no wildcard CORS. Rate limited to 100 requests per minute per IP.
+All endpoints return JSON. Loopback only: a foreign `Host` header gets 403, so does any request carrying an `Origin` header (loopback origins included), request bodies must be `application/json`, no wildcard CORS.
 
-### Health and Overview
-
-```
-GET  /health                          Health check with version, uptime, task count
-GET  /api/overview                    Full state dump (tasks, dependencies, artifact counts, comment counts, subtask progress, stages)
-                                      Query params: ?limit=100&offset=0
-```
-
-### Tasks
+Eight routes: what the `/pipeline` pane and the hook scripts call. Everything else goes through the MCP tools.
 
 ```
-GET  /api/tasks                       List tasks
-                                      Query params: ?status=&stage=&project=&assigned_to=&limit=
-GET  /api/tasks/:id                   Get a single task
-POST /api/tasks                       Create a task (body: {title, description?, priority?, project?, tags?, parent_id?, assign_to?, stage?})
-PUT  /api/tasks/:id                   Update task fields (body: {title?, description?, priority?, project?, tags?, assigned_to?})
-PUT  /api/tasks/:id/stage             Change stage (body: {stage, reason?})
-GET  /api/tasks/:id/subtasks          Subtasks of a parent
-GET  /api/tasks/:id/artifacts         Artifacts (query: ?stage=)
-POST /api/tasks/:id/artifacts         Add artifact (body: {name, content, created_by?, stage?})
-GET  /api/tasks/:id/comments          Comments on a task
-POST /api/tasks/:id/comments          Add comment (body: {content, agent_id?, parent_comment_id?})
-GET  /api/tasks/:id/dependencies      Dependencies for a task
-```
-
-### Dependencies and Pipeline
-
-```
-GET  /api/dependencies                All dependencies across all tasks
-GET  /api/pipeline                    Pipeline stage configuration (?project=)
-```
-
-### Search and Agents
-
-```
-GET  /api/search?q=                   Full-text search (?project=&limit=)
-GET  /api/agents                      Online agents (from agent-comm bridge)
-```
-
-### Cleanup
-
-```
-POST /api/cleanup                     Trigger cleanup (body: {all?: boolean, force?: boolean})
+GET    /health                        Health check with version, uptime, task count
+GET    /api/board                     Open tasks, recently closed ones (?recent=30), pipelines, dependencies, subtask progress
+GET    /api/pipeline                  Pipeline stages and gate config (?project=)
+GET    /api/tasks/:id                 One task as task_get (?include=subtasks,comments,transitive_deps; newest 100 comments)
+POST   /api/tasks                     Create a task (body: {title, description?, priority?, project?, tags?, parent_id?, assign_to?, stage?, created_by?})
+POST   /api/tasks/:id/stage           Lifecycle action (body: {action, stage?, comment?, reason?, result?, claimer?, by?})
+POST   /api/tasks/:id/comments        Add comment (body: {content, agent_id?, parent_comment_id?})
+DELETE /api/tasks/:id                 Delete a task
 ```
 
 ### Example Requests
@@ -556,8 +497,8 @@ POST /api/cleanup                     Trigger cleanup (body: {all?: boolean, for
 # Health check
 curl http://localhost:3422/health
 
-# List tasks for a project
-curl "http://localhost:3422/api/tasks?project=backend&status=in_progress"
+# One task with its subtasks and comments
+curl "http://localhost:3422/api/tasks/42?include=subtasks,comments"
 
 # Create a task
 curl -X POST http://localhost:3422/api/tasks \
@@ -565,12 +506,9 @@ curl -X POST http://localhost:3422/api/tasks \
   -d '{"title":"Fix login bug","project":"backend","priority":5}'
 
 # Advance stage
-curl -X PUT http://localhost:3422/api/tasks/42/stage \
+curl -X POST http://localhost:3422/api/tasks/42/stage \
   -H "Content-Type: application/json" \
-  -d '{"stage":"implement"}'
-
-# Search
-curl "http://localhost:3422/api/search?q=authentication"
+  -d '{"action":"advance","by":"me"}'
 ```
 
 ---
@@ -611,15 +549,17 @@ Status transitions:
 
 ### Dependencies
 
-Dependencies enforce ordering between tasks. A task with a `blocks` dependency cannot advance past `backlog` until the blocking task is completed.
+Dependencies enforce ordering between tasks. A task with an open `blocks` dependency cannot be advanced or completed until the blocking task is closed (completed, failed or cancelled). Claiming does not check dependencies.
 
 Relationship types:
 
-| Type        | Behavior                                        |
-| ----------- | ----------------------------------------------- |
-| `blocks`    | Blocks advancement until the dependency is done |
-| `related`   | Informational link, does not block              |
-| `duplicate` | Marks tasks as duplicates                       |
+| Type        | Behavior                                                                                         |
+| ----------- | ------------------------------------------------------------------------------------------------ |
+| `blocks`    | Blocks advance and complete until the dependency is closed; listed under `blockers` / `blocking` |
+| `related`   | Informational link, does not block; listed under `links`                                         |
+| `duplicate` | Marks tasks as duplicates, does not block; listed under `links`                                  |
+
+One link per task pair: to turn a `related` link into `blocks`, remove it first.
 
 Cycle detection prevents circular dependencies.
 
@@ -635,9 +575,6 @@ task_config with action "pipeline", project "backend", gate_config {
     "test": {
       "require_artifacts": ["test-results"],
       "require_min_artifacts": 1
-    },
-    "review": {
-      "require_approval": true
     }
   }
 }
@@ -663,15 +600,15 @@ Learnings attached via `task_artifact(type: "learning")` are automatically propa
 
 ## 8. Troubleshooting
 
-### Dashboard Won't Start
+### REST API Won't Start
 
-**Symptom:** Port 3422 already in use.
+**Symptom:** Port 3422 already in use by another program.
 
 **Solutions:**
 
-1. Set `AGENT_TASKS_PORT=3423` in the MCP config env.
+1. Set `AGENT_TASKS_PORT` to a free port in the MCP config env and in the environment Claude Code runs in (the `/pipeline` pane reads the same variable).
 2. Find and stop the process using port 3422.
-3. Multiple MCP instances share the same database. Only one needs to serve the dashboard.
+3. Multiple agent-tasks MCP instances share the same database. Only the first one serves the REST API; the others retry every 5 s and take over when it exits.
 
 ### Task Cannot Be Advanced
 
@@ -679,9 +616,9 @@ Learnings attached via `task_artifact(type: "learning")` are automatically propa
 
 **Common causes:**
 
-- **Unmet dependencies**: A blocking task is not yet completed. Check dependencies with `task_get` (`include: ["subtasks"]`) or `task_update` with the `dependency` field.
-- **Stage gate requirements**: Required artifacts, comments, or approvals are missing. The error message lists unmet requirements.
-- **Task not in progress**: Only `in_progress` tasks can be advanced. Claim the task first with `task_stage` action `claim`.
+- **Unmet dependencies**: A blocking task is not yet completed. `task_get` always returns `dependencies` and `claim_status` (what blocks it); add `include: ["transitive_deps"]` for the whole chain. Remove a dependency with `task_update`'s `dependency` field.
+- **Stage gate requirements**: Required artifacts or comments are missing. The error message lists unmet requirements.
+- **Task closed**: a `completed`, `failed` or `cancelled` task cannot be advanced.
 
 ### Stale Tasks
 
@@ -703,18 +640,6 @@ Learnings attached via `task_artifact(type: "learning")` are automatically propa
 - If corrupted, delete the database and WAL files. All task data will be lost.
 - The database uses WAL mode with schema versioning (currently V5). Migrations run automatically on startup.
 
-### Dashboard Shows Stale Data
-
-**Symptom:** Kanban board not reflecting recent changes.
-
-**Cause:** The dashboard polls the database every 2 seconds. Changes made via MCP appear within about 2 seconds.
-
-**Solutions:**
-
-- Wait a few seconds for the poll cycle.
-- Refresh the browser page.
-- Check WebSocket connection in browser dev tools.
-
 ---
 
 ## 9. FAQ
@@ -729,13 +654,12 @@ agent-tasks optionally connects to agent-comm via `AGENT_COMM_URL`. This enables
 
 - **Heartbeat-based cleanup**: Detects when agents die and auto-fails their tasks.
 - **Bridge notifications**: Notifies connected agents on task events.
-- **Agent list**: The `/api/agents` endpoint fetches live agent data from agent-comm.
 
 Without agent-comm, these features are gracefully skipped.
 
 ### What is the TodoWrite bridge?
 
-When configured via hooks, agent-tasks intercepts Claude Code's built-in `TodoWrite` tool calls and syncs them to the pipeline. Todos become tasks in the kanban board.
+When configured via hooks, agent-tasks intercepts Claude Code's built-in `TodoWrite` tool calls and syncs them to the pipeline. Todos become tasks on the `/pipeline` board.
 
 ### Can multiple agents work on the same task?
 
@@ -756,7 +680,7 @@ task_config with action "pipeline", project "my-project", stages ["backlog", "sp
 
 ### What happens to subtasks when a parent is completed?
 
-Subtasks have independent lifecycles. Completing a parent does not auto-complete subtasks. The kanban board shows subtask progress as a percentage bar on the parent card.
+Subtasks have independent lifecycles. Completing a parent does not auto-complete subtasks. The `/pipeline` board shows `done/total subtasks` on the parent's row, and its detail lists each subtask.
 
 ### How do I find the next available task?
 

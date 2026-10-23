@@ -1,7 +1,7 @@
 {
   "name": "agent-tasks",
-  "version": "1.10.13",
-  "description": "Pipeline-driven task management for AI coding agents — stages, dependencies, artifacts, and multi-agent claiming",
+  "version": "2.0.0",
+  "description": "Pipeline-driven task management for AI coding agents — stages, dependencies, artifacts, multi-agent claiming, and a native Claude Code /pipeline pane",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -23,7 +23,7 @@
     "agent-tasks": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc && node scripts/copy-ui.js",
+    "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "start:server": "node dist/server.js",
@@ -36,6 +36,8 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "plugin:check": "claude plugin validate plugin && claude plugin test plugin",
+    "e2e:claude": "npm run build && node tests/e2e-claude/run.mjs",
     "bench:metrics": "vitest run bench/metrics.test.ts",
     "bench:run": "tsx bench/runner.ts",
     "bench:visibility": "tsx bench/visibility/runner.ts",
@@ -52,20 +54,21 @@
   },
   "dependencies": {
     "agent-common": "^1.1.2",
-    "better-sqlite3": "^12.8.0",
-    "morphdom": "^2.7.8",
-    "ws": "^8.20.0"
+    "better-sqlite3": "^12.8.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.59.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.0.0",
-    "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^3.2.4",
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/headless": "^6.0.0",
+    "@xterm/xterm": "^6.0.0",
     "eslint": "^10.1.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
+    "node-pty": "^1.1.0",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
@@ -89,8 +92,8 @@
   ],
   "files": [
     "dist/",
-    "agent-desk-plugin.json",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "mcpName": "io.github.keshrath/agent-tasks",

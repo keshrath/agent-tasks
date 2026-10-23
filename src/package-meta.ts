@@ -2,7 +2,7 @@
 // agent-tasks — package.json metadata (name + version)
 //
 // Thin wrapper around agent-common's readPackageMeta, locked to agent-tasks'
-// own package.json so MCP initialize and WebSocket payloads always read the
+// own package.json so MCP initialize and REST /health always read the
 // authoritative version.
 // =============================================================================
 

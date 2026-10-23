@@ -6,14 +6,18 @@
 src/
 ├── types.ts              # Shared types, error hierarchy (TasksError -> NotFound/Conflict/Validation)
 ├── context.ts            # DI root — creates and wires all services, no global state
-├── package-meta.ts       # Reads name/version from package.json (MCP initialize, WebSocket state)
-├── index.ts              # MCP entry point (stdio JSON-RPC) + dashboard auto-start
-├── server.ts             # HTTP + WebSocket server (standalone or embedded)
+├── package-meta.ts       # Reads name/version from package.json (MCP initialize, REST /health)
+├── lib.ts                # Library exports (agent-tasks/lib)
+├── index.ts              # MCP entry point (stdio JSON-RPC) + REST server auto-start
+├── server.ts             # REST server (standalone or embedded, leader election on the port)
 ├── domain/
 │   ├── tasks.ts          # Pipeline logic, CRUD, search, subtasks, dependencies
+│   ├── task-validator.ts # Task input validation (pure, no DB)
+│   ├── confidence.ts     # Claim-time confidence score (deterministic heuristics)
 │   ├── comments.ts       # Threaded comments
-│   ├── collaborators.ts  # Multi-agent collaboration with roles
-│   ├── approvals.ts      # Stage-gated approval workflows
+│   ├── collaborators.ts  # Collaborator roles (library only, no MCP tool or REST route)
+│   ├── approvals.ts      # Approvals (library only, no MCP tool or REST route)
+│   ├── cleanup.ts        # Retention purge, orphan reaper, stale-agent cleanup
 │   ├── agent-bridge.ts   # Agent-comm notification bridge (soft dep, HTTP, fail-open)
 │   ├── knowledge-bridge.ts # Agent-knowledge integration bridge (soft dep, HTTP, fail-open)
 │   ├── rules.ts          # IDE rule generation (.mdc, CLAUDE.md)
@@ -22,13 +26,10 @@ src/
 ├── storage/
 │   └── database.ts       # SQLite (WAL mode, schema versioning, FK cascades, FTS5)
 ├── transport/
-│   ├── mcp.ts            # 8 MCP tool definitions + dispatch (handlers: mcp-handlers.ts)
-│   ├── rest.ts           # 19 REST endpoints + static file serving
-│   └── ws.ts             # WebSocket event streaming + livereload
-└── ui/
-    ├── index.html        # Dashboard (vanilla HTML)
-    ├── app.js            # Kanban client (vanilla JS, no framework)
-    └── styles.css        # Light/dark theme, responsive layout
+│   ├── mcp.ts            # 8 MCP tool definitions + dispatch
+│   ├── mcp-handlers.ts   # The tool handlers (REST reuses create/get/stage/comment)
+│   └── rest.ts           # 8 REST endpoints (JSON only)
+plugin/                   # Claude Code plugin: .mcp.json + the /pipeline mod (hooks/, types/, tests/)
 ```
 
 ## Design principles
@@ -36,12 +37,10 @@ src/
 - **No frameworks** — no React, Vue, Express, or Fastify. Pure Node.js + TypeScript.
 - **Domain-driven design** — business logic in `domain/`, storage in `storage/`, transport in `transport/`
 - **Dependency injection** — `context.ts` wires all services; no global state
-- **3 runtime deps** — `better-sqlite3`, `uuid`, `ws`
+- **2 runtime deps** — `agent-common`, `better-sqlite3`
 - **Typed errors** — `TasksError` hierarchy with HTTP status codes (400, 404, 409, 422)
 - **Input validation** — runtime type checking on all MCP tool inputs
 - **SQLite with WAL mode** — concurrent reads, single-writer, schema versioning with idempotent migrations
-- **morphdom** — efficient DOM diffing for the dashboard (no virtual DOM framework needed)
-- **marked + DOMPurify + highlight.js** — Markdown rendering with XSS protection and syntax highlighting
 
 ## Architecture diagram
 
@@ -54,13 +53,12 @@ graph TD
     subgraph TASKS["agent-tasks"]
         D["Domain Layer<br/>Tasks, comments, artifacts, approvals"]
         E["Storage Layer<br/>SQLite (WAL, FTS5, schema versioning)"]
-        F["Transport Layer<br/>MCP + REST + WebSocket"]
+        F["Transport Layer<br/>MCP + REST"]
         D --> E
         F --> D
-        E --> WS["WebSocket events"]
     end
 
-    WS --> UI["Dashboard UI<br/>http://localhost:3422"]
+    P["/pipeline pane<br/>(Claude Code mod)"] -->|REST :3422| TASKS
 
     D -->|task:completed| KB["KnowledgeBridge"]
     KB -->|POST /api/knowledge| AK["agent-knowledge<br/>:3423"]
@@ -92,14 +90,14 @@ Listens to task lifecycle events and forwards notifications to agents via agent-
 
 **Cleanup integration:** Also exposes `fetchAgents()` which queries `GET /api/agents` on agent-comm. Used by `CleanupService` in two ways:
 
-- **Heartbeat-based stale detection** (`failStaleAgentTasks`) — runs 10s after startup, then periodically. Queries all `in_progress` tasks with an `assigned_to`. For each unique agent name, checks agent-comm: if the agent is offline, unregistered, or hasn't heartbeated in 30 minutes (configurable via `timeoutMinutes`), all their in-progress tasks are auto-failed with a descriptive reason.
+- **Heartbeat-based stale detection** (`failStaleAgentTasks`) — runs once, 10 s after startup, and on `task_config(action: "cleanup")` with `mode: "stale_agents"` or `"all"`. Queries all `in_progress` tasks with an `assigned_to`. For each unique agent name, checks agent-comm: if the agent is offline, unregistered, or hasn't heartbeated in 30 minutes (configurable via `timeoutMinutes`), all their in-progress tasks are auto-failed with a descriptive reason.
 - **Orphan reaper** (`cancelOrphanedTasks`) — runs on every cleanup cycle. Cancels tasks stuck `in_progress` with no assignee for longer than `AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES` (default: 360 min / 6 hours). Catches tasks that were never claimed by any agent.
 
 **Hooks (5 scripts in `scripts/hooks/`):**
 
 | Hook                    | Event             | What it does                                                                      |
 | ----------------------- | ----------------- | --------------------------------------------------------------------------------- |
-| `session-start.js`      | SessionStart      | Announces the pipeline dashboard URL as session context                           |
+| `session-start.js`      | SessionStart      | Points the model at the MCP tools and the person at the `/pipeline` pane          |
 | `task-cleanup-start.js` | SessionStart      | Opens the DB, finds tasks assigned to agents not online in agent-comm, auto-fails |
 | `pipeline-enforcer.mjs` | UserPromptSubmit  | Checks agent-comm registration + pipeline task existence, injects reminder        |
 | `todowrite-bridge.mjs`  | PreToolUse        | Mirrors Claude Code `TodoWrite` todos into pipeline tasks                         |
@@ -174,23 +172,23 @@ Entries are immediately searchable via `knowledge_search` and visible in the age
 
 ## Database
 
-SQLite with WAL mode at `~/.agent-tasks/agent-tasks.db`. Schema is versioned with automatic migrations (currently V4).
+SQLite with WAL mode at `~/.agent-tasks/agent-tasks.db`. Schema is versioned with automatic migrations (currently V5).
 
 ### Tables
 
 - **tasks** — id, title, description, status, stage, priority, project, assigned_to, parent_id, tags, result, created_by, timestamps
-- **task_dependencies** — task_id -> depends_on_id (DAG with cycle detection)
+- **task_dependencies** — task_id -> depends_on_id + relationship; `blocks` links form a DAG (cycle detection) and are the only ones that block or show as blockers; `related` / `duplicate` rows show as `links`; one row per task pair
 - **task_artifacts** — name + stage + task_id identity; version auto-incremented, previous_id links history
 - **task_comments** — threaded via parent_comment_id; agent_id tracks author
-- **task_collaborators** — task_id + agent_id + role (collaborator/reviewer/watcher)
-- **task_approvals** — task_id + stage + status (pending/approved/rejected); blocks advancement
+- **task_collaborators** — task_id + agent_id + role (collaborator/reviewer/watcher); written by the library service only, no tool
+- **task_approvals** — task_id + stage + status (pending/approved/rejected); a `require_approval` gate checks it, but no tool records an approval
 - **task_search** — FTS5 virtual table with triggers for automatic sync
 
 All tables use foreign key constraints with `ON DELETE CASCADE`.
 
 ### Automatic cleanup
 
-The `task_config(action: "cleanup")` tool and `POST /api/cleanup` endpoint remove completed/cancelled tasks older than a configurable retention period (default: 7 days). This cleans up tasks and all related data (artifacts, comments, collaborators, approvals, dependencies).
+Every agent-tasks process (`CleanupService`, the agent-common cleanup timer) runs the retention purge at startup and then hourly; `task_config(action: "cleanup")` runs it on demand. It removes finished tasks past their retention (completed and failed 7 days, cancelled 1 day; `AGENT_TASKS_COMPLETED_RETENTION_DAYS`, `AGENT_TASKS_FAILED_RETENTION_DAYS`, `AGENT_TASKS_CANCELLED_RETENTION_DAYS`). This cleans up tasks and all related data (artifacts, comments, collaborators, approvals, dependencies).
 
 ## Status transitions
 
@@ -210,12 +208,12 @@ Configurable per project via `task_config(action: "pipeline")`.
 
 ## Cross-process sync
 
-MCP servers run as separate stdio processes (one per Claude Code session). The WebSocket server polls the SQLite database every 2 seconds to detect changes made by other processes. This ensures the dashboard stays in sync across multiple concurrent sessions.
+MCP servers run as separate stdio processes (one per Claude Code session), all on the same SQLite database (WAL). One of them serves the REST API on port 3422, and when it exits another takes over within 5 s; the `/pipeline` pane polls it, so changes from any session show up there within one poll.
 
 ## Development
 
 ```bash
-npm run dev          # Live reload (tsc watch + nodemon)
+npm run dev          # tsc --watch
 npm run lint         # ESLint
 npm run lint:fix     # ESLint with auto-fix
 npm run format       # Prettier
@@ -225,16 +223,20 @@ npm run check        # Full CI: typecheck + lint + format + test
 
 ## Test suites
 
-| Suite                 | Tests | What it covers                                               |
-| --------------------- | ----- | ------------------------------------------------------------ |
-| Domain: Tasks         | ~80   | CRUD, stages, dependencies, subtasks, search, claiming       |
-| Domain: Comments      | ~20   | Threading, agent tracking, task linking                      |
-| Domain: Collaborators | ~20   | Roles, assignment, removal, validation                       |
-| Domain: Approvals     | ~30   | Request, approve, reject, review cycles, stage gating        |
-| Domain: Artifacts     | ~25   | Versioning, per-stage, previous_id linking                   |
-| Domain: Events        | ~10   | Pub/sub, event types, error isolation                        |
-| Domain: Edge cases    | ~40   | Boundary values, validation, concurrency, data integrity     |
-| Transport: MCP        | ~35   | All 16 tools, input validation, error formatting             |
-| Transport: REST       | ~30   | All 19 endpoints, query params, error codes                  |
-| Integration           | ~25   | Multi-agent workflows, pipeline traversal, dependency chains |
-| E2E                   | ~22   | Server startup, WebSocket state, REST + WS interaction       |
+| Suite                                                                                                             | Tests | What it covers                                                                 |
+| ----------------------------------------------------------------------------------------------------------------- | ----- | ------------------------------------------------------------------------------ |
+| `tests/tasks.test.ts`                                                                                             | 102   | CRUD, stages, dependencies, artifacts, claiming, gates                         |
+| `tests/mcp.test.ts`                                                                                               | 130   | The 8 MCP tools, input validation, error formatting                            |
+| `tests/rest.test.ts`                                                                                              | 31    | The 8 REST endpoints, the request guard, error codes                           |
+| `tests/rest-leader.test.ts`                                                                                       | 2     | REST leader election: retry and take over                                      |
+| `tests/cleanup.test.ts`                                                                                           | 18    | Retention purge, orphan reaper, stale agents                                   |
+| `tests/hooks/hooks.test.ts`                                                                                       | 18    | The command hook scripts, fail-open                                            |
+| `tests/comments.test.ts`, `subtasks`, `search`, `events`, `validate`, `rules`, `confidence`, `stage-instructions` | 69    | Their domain services                                                          |
+| `tests/approvals.test.ts`, `collaborators`                                                                        | 21    | The library-only approval and collaborator services                            |
+| `tests/knowledge-bridge.test.ts`                                                                                  | 5     | Pushing learnings/decisions to agent-knowledge                                 |
+| `tests/manifest.test.ts`                                                                                          | 3     | One version across package.json, server.json, the plugin                       |
+| `tests/e2e/`                                                                                                      | 13    | Full pipeline workflows, confidence flow                                       |
+| `bench/metrics.test.ts`                                                                                           | 20    | Benchmark metric helpers                                                       |
+| `tests/e2e-claude/`                                                                                               | 19    | The `/pipeline` pane in the real CLI (`npm run e2e:claude`, skipped otherwise) |
+
+`npm test` runs 432 tests across 21 files; the pane's own tests in `plugin/tests/` run under `npm run plugin:check`.

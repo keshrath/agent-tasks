@@ -53,10 +53,12 @@ export class CommentService {
     return comment;
   }
 
-  list(taskId: number, limit = 100, offset = 0): TaskComment[] {
+  /** The newest `limit` comments, oldest first. */
+  list(taskId: number, limit = 100): TaskComment[] {
     return this.db.queryAll<TaskComment>(
-      'SELECT * FROM task_comments WHERE task_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?',
-      [taskId, Math.min(limit, 500), offset],
+      `SELECT * FROM (SELECT * FROM task_comments WHERE task_id = ? ORDER BY id DESC LIMIT ?)
+       ORDER BY id ASC`,
+      [taskId, Math.min(limit, 500)],
     );
   }
 
@@ -79,15 +81,6 @@ export class CommentService {
     const rows = this.db.queryAll<{ task_id: number; cnt: number }>(
       `SELECT task_id, COUNT(*) as cnt FROM task_comments WHERE task_id IN (${placeholders}) GROUP BY task_id`,
       taskIds,
-    );
-    const counts: Record<number, number> = {};
-    for (const r of rows) counts[r.task_id] = r.cnt;
-    return counts;
-  }
-
-  countByTask(): Record<number, number> {
-    const rows = this.db.queryAll<{ task_id: number; cnt: number }>(
-      'SELECT task_id, COUNT(*) as cnt FROM task_comments GROUP BY task_id',
     );
     const counts: Record<number, number> = {};
     for (const r of rows) counts[r.task_id] = r.cnt;

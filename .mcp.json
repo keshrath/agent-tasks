@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "agent-tasks": {
-      "command": "npx",
-      "args": ["-y", "agent-tasks@^1.10.10"]
-    }
-  }
-}

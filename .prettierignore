@@ -3,3 +3,4 @@ node_modules/
 *.db
 package-lock.json
 .claude/worktrees/
+plugin/.claude-plugin/types/

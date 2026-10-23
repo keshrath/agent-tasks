@@ -13,52 +13,37 @@ import { startMcpServer } from 'agent-common';
 import { createContext } from './context.js';
 import { readPackageMeta } from './package-meta.js';
 import { tools, createToolHandler } from './transport/mcp.js';
-import { startDashboard, type DashboardServer } from './server.js';
+import { serveRestWhenFree, type RestLeader } from './server.js';
 
-const DASHBOARD_PORT = parseInt(process.env.AGENT_TASKS_PORT ?? '3422', 10);
+const REST_PORT = parseInt(process.env.AGENT_TASKS_PORT ?? '3422', 10);
 
 const SERVER_INFO = readPackageMeta();
 
 const INSTRUCTIONS =
   process.env.AGENT_TASKS_INSTRUCTIONS !== '0'
     ? '\n\n---\nPIPELINE: Tasks flow through stages: backlog → spec → plan → implement → test → review → done. ' +
-      'Always advance tasks through stages (task_advance). Attach artifacts at each stage (task_add_artifact). ' +
-      'Use task_next to pick up unblocked work. Add comments (task_comment) to discuss decisions.'
+      'Always advance tasks through stages (task_stage action "advance"). Attach artifacts at each stage (task_artifact). ' +
+      'Use task_list with next: true to pick up unblocked work. Discuss decisions with task_artifact type "comment".'
     : '';
 
 const appContext = createContext();
 const handleTool = createToolHandler(appContext);
 
-let dashboard: DashboardServer | null = null;
-let dashboardStarted = false;
-
-function tryStartDashboard(): void {
-  if (dashboardStarted) return;
-  dashboardStarted = true;
-  startDashboard(appContext, DASHBOARD_PORT)
-    .then((dashboardServer) => {
-      dashboard = dashboardServer;
-    })
-    .catch((err) => {
-      process.stderr.write(
-        '[agent-tasks] Dashboard start failed: ' +
-          (err instanceof Error ? err.message : String(err)) +
-          '\n',
-      );
-    });
-}
+let rest: RestLeader | null = null;
 
 startMcpServer({
   serverInfo: SERVER_INFO,
   tools,
   handleTool,
-  onInitialize: tryStartDashboard,
+  onInitialize: () => {
+    rest ??= serveRestWhenFree(appContext, REST_PORT);
+  },
   formatResult: (result) => JSON.stringify(result, null, 2) + INSTRUCTIONS,
   logLabel: 'agent-tasks',
 });
 
 function cleanup(): void {
-  if (dashboard) dashboard.close();
+  rest?.close();
   appContext.close();
 }
 process.on('SIGINT', () => {

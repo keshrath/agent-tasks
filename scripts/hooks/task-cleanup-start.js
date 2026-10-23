@@ -4,8 +4,16 @@
 // Stale Task Cleanup (SessionStart hook)
 //
 // On session start, finds tasks assigned to sessions that are no longer running
-// (no online agent in agent-comm DB) and auto-fails them.
+// (no live agent in agent-comm DB) and auto-fails them.
 // Catches tasks orphaned by crashes/kills where Stop hook never fired.
+//
+// Two guards keep the sweep from killing live work (mirrors
+// task-cleanup-stop.js):
+// 1. An agent counts as alive when its status is 'online' OR its
+//    last_heartbeat is fresh — status can lag behind a heartbeat timeout.
+// 2. A task is only reaped after an idle grace window: tasks updated recently
+//    are actively being worked, even if the assignee name doesn't match a
+//    registered agent (claim names and comm names can legitimately differ).
 // =============================================================================
 
 import { existsSync } from 'fs';
@@ -14,19 +22,29 @@ import { homedir } from 'os';
 import Database from 'better-sqlite3';
 
 const DB_PATH = process.env.AGENT_TASKS_DB || join(homedir(), '.agent-tasks', 'agent-tasks.db');
+const COMM_DB_PATH = process.env.AGENT_COMM_DB || join(homedir(), '.agent-comm', 'agent-comm.db');
+const GRACE_MINUTES = parseInt(process.env.AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES ?? '60', 10);
+const HEARTBEAT_FRESH_MINUTES = parseInt(
+  process.env.AGENT_TASKS_HEARTBEAT_FRESH_MINUTES ?? '15',
+  10,
+);
 
-function getActiveSessions() {
-  const agentCommDb = join(homedir(), '.agent-comm', 'agent-comm.db');
-  const active = new Set();
+// Timestamps in both DBs are stored as UTC 'YYYY-MM-DD HH:MM:SS' strings.
+function utcCutoff(minutesAgo) {
+  return new Date(Date.now() - minutesAgo * 60000).toISOString().replace('T', ' ').slice(0, 19);
+}
+
+function getLiveAgentNames() {
   try {
-    const db = new Database(agentCommDb, { readonly: true, fileMustExist: true });
-    const rows = db.prepare(`SELECT name FROM agents WHERE status = 'online'`).all();
+    const db = new Database(COMM_DB_PATH, { readonly: true, fileMustExist: true });
+    const rows = db
+      .prepare(`SELECT name FROM agents WHERE status = 'online' OR last_heartbeat >= ?`)
+      .all(utcCutoff(HEARTBEAT_FRESH_MINUTES));
     db.close();
-    for (const row of rows) {
-      if (row.name) active.add(row.name);
-    }
-  } catch {}
-  return active;
+    return new Set(rows.map((r) => r.name));
+  } catch {
+    return new Set();
+  }
 }
 
 function main() {
@@ -53,24 +71,26 @@ function run() {
 
   const db = new Database(DB_PATH, { readonly: false });
 
-  const assignees = db
+  const openTasks = db
     .prepare(
-      `SELECT DISTINCT assigned_to FROM tasks
-     WHERE assigned_to IS NOT NULL AND status IN ('pending', 'in_progress')`,
+      `SELECT id, assigned_to, updated_at, created_at FROM tasks
+       WHERE assigned_to IS NOT NULL AND status IN ('pending', 'in_progress')`,
     )
-    .pluck()
     .all();
 
-  if (!assignees.length) {
+  if (!openTasks.length) {
     db.close();
     console.log(JSON.stringify({}));
     return;
   }
 
-  const activeSessions = getActiveSessions();
-  const staleAssignees = assignees.filter((a) => !activeSessions.has(a));
+  const liveAgents = getLiveAgentNames();
+  const graceCutoff = utcCutoff(GRACE_MINUTES);
+  const staleTasks = openTasks.filter(
+    (t) => !liveAgents.has(t.assigned_to) && (t.updated_at || t.created_at || '') < graceCutoff,
+  );
 
-  if (!staleAssignees.length) {
+  if (!staleTasks.length) {
     db.close();
     console.log(JSON.stringify({}));
     return;
@@ -81,13 +101,13 @@ function run() {
     `UPDATE tasks SET status = 'failed',
        result = 'Session "' || ? || '" no longer running (stale task cleanup on session start)',
        updated_at = ?
-     WHERE assigned_to = ? AND status IN ('pending', 'in_progress')`,
+     WHERE id = ? AND status IN ('pending', 'in_progress')`,
   );
 
   let cleaned = 0;
   const cleanAll = db.transaction(() => {
-    for (const assignee of staleAssignees) {
-      const result = failStmt.run(assignee, now, assignee);
+    for (const task of staleTasks) {
+      const result = failStmt.run(task.assigned_to, now, task.id);
       cleaned += result.changes;
     }
   });
@@ -95,9 +115,7 @@ function run() {
   db.close();
 
   if (cleaned > 0) {
-    process.stderr.write(
-      `[task-cleanup-start] Auto-failed ${cleaned} task(s) from ${staleAssignees.length} dead session(s)\n`,
-    );
+    process.stderr.write(`[task-cleanup-start] Auto-failed ${cleaned} stale task(s)\n`);
   }
 
   console.log(JSON.stringify({}));

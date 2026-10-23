@@ -1,11 +1,11 @@
 # Privacy Policy — agent-tasks
 
-**Last updated:** 2026-04-15
+**Last updated:** 2026-10-10
 
 ## What data this plugin accesses
 
-- **Local filesystem only.** Maintains a local SQLite database at `~/.claude/agent-tasks.db` (configurable via `AGENT_TASKS_DB`) holding tasks, stages, dependencies, per-stage artifacts (specs, plans, test results, decisions, learnings, comments, review notes), claimer assignments, approvals, and collaborators.
-- **Runs a local dashboard.** An HTTP + WebSocket server binds to `http://localhost:3422` (configurable via `AGENT_TASKS_PORT`) for the Kanban dashboard and REST API. Never exposed to the public internet by this plugin.
+- **Local filesystem only.** Maintains a local SQLite database at `~/.agent-tasks/agent-tasks.db` (configurable via `AGENT_TASKS_DB`) holding tasks, stages, dependencies, per-stage artifacts (specs, plans, test results, decisions, learnings, comments, review notes), claimer assignments, approvals, and collaborators.
+- **Runs a local REST API.** An HTTP server binds to `http://127.0.0.1:3422` (configurable via `AGENT_TASKS_PORT`) for the Claude Code `/pipeline` pane and the hook scripts. Never exposed to the public internet by this plugin.
 - **No telemetry.** The plugin does not collect or transmit usage data.
 - **No server-side storage by us.** All data stays on your machine.
 
@@ -19,8 +19,8 @@ Task titles, descriptions, artifact bodies, and comments are stored verbatim in 
 
 ## Data retention
 
-- Tasks, artifacts, comments, dependencies: persisted locally until you delete them via `task_delete` or the dashboard.
-- Automatic cleanup: orphaned tasks from dead sessions (no matching PID) are auto-failed by the `SessionStart` / `Stop` hooks when installed.
+- Tasks, artifacts, comments, dependencies: persisted locally until you delete them via `task_delete` or the `/pipeline` pane, or until the retention purge removes finished tasks past their retention (completed and failed 7 days, cancelled 1 day by default). Every agent-tasks process runs that purge at startup and then hourly; `task_config(action: "cleanup")` runs it on demand.
+- Automatic cleanup: open tasks assigned to a session that agent-comm no longer reports online are auto-failed by the `SessionStart` / `Stop` hooks when installed.
 - FTS5 full-text search index: rebuilt automatically from task content; no separate data copy leaves the DB.
 
 ## Contact

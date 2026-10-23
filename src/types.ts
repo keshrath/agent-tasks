@@ -129,6 +129,12 @@ export interface TaskDependency {
   readonly relationship: TaskRelationshipType;
 }
 
+export interface TaskLink {
+  readonly task: Task;
+  readonly relationship: Exclude<TaskRelationshipType, 'blocks'>;
+  readonly direction: 'outgoing' | 'incoming';
+}
+
 // ---------------------------------------------------------------------------
 // Pipeline
 // ---------------------------------------------------------------------------

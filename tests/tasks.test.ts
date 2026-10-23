@@ -162,45 +162,6 @@ describe('task CRUD', () => {
   });
 });
 
-describe('activity timestamps', () => {
-  it('uses the task timestamp when no child activity exists', () => {
-    const task = ctx.tasks.create({ title: 'Task activity' }, 'agent-1');
-    const taskTimestamp = '2026-01-01 12:00:00';
-    ctx.db.run('UPDATE tasks SET updated_at = ? WHERE id = ?', [taskTimestamp, task.id]);
-
-    expect(ctx.tasks.getLastActivityByTask()).toEqual({ [task.id]: taskTimestamp });
-  });
-
-  it('uses the newest timestamp across task, comment, and artifact activity', () => {
-    const task = ctx.tasks.create({ title: 'Child activity' }, 'agent-1');
-    const oldTimestamp = '2026-01-01 12:00:00';
-    const commentTimestamp = '2026-01-01 13:00:00';
-    const artifactTimestamp = '2026-01-01 14:00:00';
-
-    ctx.db.run('UPDATE tasks SET updated_at = ? WHERE id = ?', [oldTimestamp, task.id]);
-    const comment = ctx.comments.add(task.id, 'agent-2', 'Recent comment');
-    ctx.db.run('UPDATE task_comments SET created_at = ? WHERE id = ?', [
-      commentTimestamp,
-      comment.id,
-    ]);
-    const artifact = ctx.tasks.addArtifact(task.id, 'notes', 'Recent artifact', 'agent-2');
-    ctx.db.run('UPDATE task_artifacts SET created_at = ? WHERE id = ?', [
-      artifactTimestamp,
-      artifact.id,
-    ]);
-
-    expect(ctx.tasks.getLastActivityByTask()[task.id]).toBe(artifactTimestamp);
-
-    const newestCommentTimestamp = '2026-01-01 15:00:00';
-    ctx.db.run('UPDATE task_comments SET created_at = ? WHERE id = ?', [
-      newestCommentTimestamp,
-      comment.id,
-    ]);
-
-    expect(ctx.tasks.getLastActivityByTask()[task.id]).toBe(newestCommentTimestamp);
-  });
-});
-
 describe('claiming', () => {
   it('claims a task and advances from backlog', () => {
     const task = ctx.tasks.create({ title: 'Claim me' }, 'agent-1');
@@ -309,7 +270,7 @@ describe('regression', () => {
     const task = ctx.tasks.create({ title: 'Regress me' }, 'agent-1');
     ctx.tasks.claim(task.id, 'agent-1');
     ctx.tasks.advance(task.id, 'review');
-    const regressed = ctx.tasks.regress(task.id, 'implement', 'Tests failed');
+    const regressed = ctx.tasks.regress(task.id, 'implement', 'reviewer', 'Tests failed');
     expect(regressed.stage).toBe('implement');
     expect(regressed.status).toBe('in_progress');
   });
@@ -318,11 +279,12 @@ describe('regression', () => {
     const task = ctx.tasks.create({ title: 'Reject me' }, 'agent-1');
     ctx.tasks.claim(task.id, 'agent-1');
     ctx.tasks.advance(task.id, 'review');
-    ctx.tasks.regress(task.id, 'implement', 'Code quality');
+    ctx.tasks.regress(task.id, 'implement', 'reviewer', 'Code quality');
     const artifacts = ctx.tasks.getArtifacts(task.id, 'review');
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0].name).toBe('rejection');
     expect(artifacts[0].content).toContain('Code quality');
+    expect(artifacts[0].created_by).toBe('reviewer');
   });
 });
 
@@ -381,6 +343,19 @@ describe('dependencies', () => {
     expect(() => ctx.tasks.advance(task.id)).toThrow('Blocked by incomplete dependencies');
   });
 
+  it('blocks completion while a dependency is open, allows it once it is done', () => {
+    const dep = ctx.tasks.create({ title: 'Dependency' }, 'agent-1');
+    const task = ctx.tasks.create({ title: 'Blocked' }, 'agent-1');
+    ctx.tasks.addDependency(task.id, dep.id);
+    ctx.tasks.claim(task.id, 'agent-1');
+    expect(() => ctx.tasks.complete(task.id, 'done')).toThrow('Blocked by incomplete dependencies');
+    expect(ctx.tasks.getById(task.id)!.status).toBe('in_progress');
+
+    ctx.tasks.claim(dep.id, 'agent-2');
+    ctx.tasks.complete(dep.id, 'dep done');
+    expect(ctx.tasks.complete(task.id, 'done').status).toBe('completed');
+  });
+
   it('allows advancement when dependency is done', () => {
     const dep = ctx.tasks.create({ title: 'Dependency' }, 'agent-1');
     const task = ctx.tasks.create({ title: 'Not blocked' }, 'agent-1');
@@ -429,6 +404,15 @@ describe('dependencies', () => {
     const related = ctx.tasks.create({ title: 'Related' }, 'agent-1');
     const task = ctx.tasks.create({ title: 'Main' }, 'agent-1');
     ctx.tasks.addDependency(task.id, related.id, 'related');
+    expect(ctx.tasks.getDependencies(task.id)).toMatchObject({
+      blockers: [],
+      blocking: [],
+      links: [{ task: { id: related.id }, relationship: 'related', direction: 'outgoing' }],
+    });
+    expect(ctx.tasks.getDependencies(related.id)).toMatchObject({
+      blocking: [],
+      links: [{ task: { id: task.id }, relationship: 'related', direction: 'incoming' }],
+    });
 
     ctx.tasks.claim(task.id, 'agent-1');
     const advanced = ctx.tasks.advance(task.id);
@@ -453,7 +437,7 @@ describe('dependencies', () => {
     ctx.tasks.claim(task.id, 'agent-1');
     expect(() => ctx.tasks.advance(task.id)).toThrow('Blocked by incomplete dependencies');
 
-    const deps = ctx.tasks.getAllDependencies();
+    const deps = ctx.tasks.getDependenciesForTasks([task.id]);
     const found = deps.find((d) => d.task_id === task.id && d.depends_on === dep.id);
     expect(found?.relationship).toBe('blocks');
   });
@@ -711,18 +695,6 @@ describe('artifacts', () => {
     expect(notes1.version).toBe(1);
     expect(spec2.version).toBe(2);
     expect(spec2.previous_id).toBe(spec1.id);
-  });
-
-  it('counts artifacts per task', () => {
-    const t1 = ctx.tasks.create({ title: 'T1' }, 'agent-1');
-    const t2 = ctx.tasks.create({ title: 'T2' }, 'agent-1');
-    ctx.tasks.addArtifact(t1.id, 'a', 'content', 'agent-1');
-    ctx.tasks.addArtifact(t1.id, 'b', 'content', 'agent-1');
-    ctx.tasks.addArtifact(t2.id, 'c', 'content', 'agent-1');
-
-    const counts = ctx.tasks.getArtifactCounts();
-    expect(counts[t1.id]).toBe(2);
-    expect(counts[t2.id]).toBe(1);
   });
 });
 

@@ -7,7 +7,8 @@
 // and auto-fails them. Never blocks — Claude Code Stop hooks can't reliably
 // derive the stopping session's agent-comm name, so we can't nag "your" tasks
 // without false-positives. Dead-session sweep is safe and idempotent and
-// complements the SessionStart hook's own sweep.
+// complements the SessionStart hook's own sweep. Without a readable agent-comm
+// DB nobody can be told apart from a dead session, so the sweep is skipped.
 // =============================================================================
 
 import { existsSync } from 'fs';
@@ -16,7 +17,7 @@ import { homedir } from 'os';
 import Database from 'better-sqlite3';
 
 const DB_PATH = process.env.AGENT_TASKS_DB || join(homedir(), '.agent-tasks', 'agent-tasks.db');
-const COMM_DB_PATH = join(homedir(), '.agent-comm', 'agent-comm.db');
+const COMM_DB_PATH = process.env.AGENT_COMM_DB || join(homedir(), '.agent-comm', 'agent-comm.db');
 
 function getOnlineAgentNames() {
   try {
@@ -25,7 +26,7 @@ function getOnlineAgentNames() {
     db.close();
     return new Set(rows.map((r) => r.name));
   } catch {
-    return new Set();
+    return null;
   }
 }
 
@@ -45,12 +46,12 @@ function main() {
 }
 
 function run() {
-  if (!existsSync(DB_PATH)) {
+  const onlineAgents = existsSync(DB_PATH) ? getOnlineAgentNames() : null;
+  if (!onlineAgents) {
     console.log(JSON.stringify({}));
     return;
   }
 
-  const onlineAgents = getOnlineAgentNames();
   const db = new Database(DB_PATH, { readonly: false });
 
   const allOpenTasks = db

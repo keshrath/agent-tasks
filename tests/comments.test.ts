@@ -34,6 +34,12 @@ describe('comments', () => {
     expect(comments[2].content).toBe('Third');
   });
 
+  it('keeps the newest comments when capped, still oldest first', () => {
+    const task = ctx.tasks.create({ title: 'T' }, 'agent-1');
+    for (const n of [1, 2, 3, 4]) ctx.comments.add(task.id, 'agent-1', `c${n}`);
+    expect(ctx.comments.list(task.id, 2).map((c) => c.content)).toEqual(['c3', 'c4']);
+  });
+
   it('supports threaded replies', () => {
     const task = ctx.tasks.create({ title: 'T' }, 'agent-1');
     const root = ctx.comments.add(task.id, 'agent-1', 'Root comment');
@@ -70,7 +76,7 @@ describe('comments', () => {
     ctx.comments.add(t1.id, 'agent-2', 'B');
     ctx.comments.add(t2.id, 'agent-1', 'C');
 
-    const counts = ctx.comments.countByTask();
+    const counts = ctx.comments.countByTaskIds([t1.id, t2.id]);
     expect(counts[t1.id]).toBe(2);
     expect(counts[t2.id]).toBe(1);
   });

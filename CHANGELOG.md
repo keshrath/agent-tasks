@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-10-23
+
+The web dashboard is gone. The board now lives inside Claude Code: the agent-tasks plugin adds a `/pipeline` pane beside the conversation.
+
+### Added
+
+- **`/pipeline` pane** (Claude Code 2.1.289+, a mod in `plugin/hooks/`): the board by stage, recently finished tasks, a new-task form, task detail with artifacts and comments and the actions for a task in progress (advance, send back, complete, fail), cancel and delete, a status line entry, toasts when a task finishes or reaches review. Claiming stays with the agents. It reads and writes through the REST API.
+- **REST**: `GET /api/board` (what the pane polls) and `POST /api/tasks/:id/stage` (the `task_stage` actions); they replace the dashboard-only `GET /api/overview` and `PUT /api/tasks/:id/stage`.
+- **`AGENT_TASKS_USER`**: who the `/pipeline` pane acts as (`created_by`, comment author, `by`); the OS user when unset.
+- **`links` in a task's dependencies** (`task_get`, `GET /api/tasks/:id`): the `related` and `duplicate` links, each with the other task and a direction.
+- **The plugin moved to `plugin/`** (`plugin/.claude-plugin/plugin.json`, `plugin/.mcp.json` running `agent-tasks@^2`); the marketplace entry points there.
+- `tests/manifest.test.ts`: `package.json`, `server.json` and the plugin manifest stay on one version, and the plugin's MCP entry pins the package major.
+
+### Removed
+
+- **The web dashboard** (`src/ui/`), the WebSocket transport and its UI livereload, static file serving, `agent-desk-plugin.json`, `docs/DASHBOARD.md` and its screenshots, the Playwright dashboard test, and the `ws`, `morphdom` and `@types/ws` dependencies.
+- **REST routes nothing calls any more**: `GET /api/tasks` (the list), `PUT /api/tasks/:id`, `GET`/`POST /api/tasks/:id/artifacts`, `GET /api/tasks/:id/{subtasks,comments,dependencies}`, `GET /api/dependencies`, `GET /api/search`, `GET /api/agents` and `POST /api/cleanup`. The MCP tools cover all of them (`task_list`, `task_update`, `task_artifact`, `task_get` with `include`, `task_list` with `query`, `task_config` with `action: "cleanup"`).
+- **The REST rate limiter.** The server binds loopback only, so every caller shares one address and a few `/pipeline` panes polling at once would have hit its 100-requests-a-minute cap.
+
+### Changed
+
+- **The MCP processes serve a REST API, not a dashboard**: `startDashboard` is `startRestServer` (`src/server.ts`). A process that loses the port election no longer logs `EADDRINUSE`; it retries every 5 s, so another session takes over the REST API when the serving one exits.
+- **The pipeline footer and stage-gate errors name the real tools** (`task_stage`, `task_artifact`, `task_list` with `next: true`) instead of tools removed in 1.x (`task_advance`, `task_add_artifact`, `task_next`, `task_comment`).
+- **`task_stage` complete checks dependencies** like advance: a task whose `blocks` dependency is still open can no longer be completed.
+- **The REST API refuses any request that carries an `Origin` header** (403), loopback origins included. Its callers (the pane, the hook scripts) are not browsers, so no web page on this machine can reach it.
+- **`GET /api/tasks/:id` returns the `task_get` shape** (dependencies, claim status, artifacts, `comments_count`) and takes `?include=subtasks,comments,transitive_deps`; it used to return the bare task row.
+- **A task's `blockers` / `blocking`** (`task_get`, `GET /api/tasks/:id`) list `blocks` links only; `related` and `duplicate` links moved to `links` instead of showing up as blockers.
+- **`task_get` and `task_artifact` (decision) answer a missing task with not found** (404 over REST) instead of a validation error (422).
+- **`task_get` with `include: ["comments"]`** returns the newest `limit` comments (default 100), oldest first, instead of the oldest ones.
+- **A rejection artifact names who sent the task back** (the MCP session, or `by` over REST) instead of `system`.
+- **`session-start.js`** points at the MCP tools and `/pipeline` instead of a dashboard URL.
+- **`task-cleanup-stop.js` skips its sweep when agent-comm's DB cannot be read** (it used to fail every assigned open task on every Stop) and reads `AGENT_COMM_DB` like the SessionStart hook.
+
 ## [1.10.11] - 2026-04-15
 
 ### Added
