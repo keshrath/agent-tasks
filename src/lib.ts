@@ -40,9 +40,6 @@ export type {
   SearchResult,
   EventType,
   TasksEvent,
-  JsonRpcRequest,
-  JsonRpcResponse,
-  ToolDefinition,
 } from './types.js';
 
 // Error classes

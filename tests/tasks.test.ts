@@ -778,6 +778,16 @@ describe('stage gates', () => {
     expect(() => ctx.tasks.advance(task.id)).toThrow('Stage gate: at least one comment required');
   });
 
+  it('blocks complete on the same gate that blocks advance', () => {
+    ctx.tasks.setPipelineConfig('gatedc', ['backlog', 'spec', 'plan', 'done']);
+    ctx.tasks.setGateConfig('gatedc', { require_comment: true });
+    const task = ctx.tasks.create({ title: 'GatedC', project: 'gatedc' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    expect(() => ctx.tasks.complete(task.id, 'done')).toThrow('Stage gate');
+    ctx.comments.add(task.id, 'agent-1', 'Some work done');
+    expect(ctx.tasks.complete(task.id, 'done').status).toBe('completed');
+  });
+
   it('allows advance when require_comment is true and comment exists', () => {
     ctx.tasks.setPipelineConfig('gated2', ['backlog', 'spec', 'plan', 'done']);
     ctx.tasks.setGateConfig('gated2', { require_comment: true });
@@ -1036,11 +1046,11 @@ describe('stage gates combinations', () => {
     );
     ctx.tasks.claim(task.id, 'agent-1');
 
-    expect(() => ctx.tasks.advance(task.id)).toThrow('at least 3 artifact(s) required');
+    expect(() => ctx.tasks.advance(task.id)).toThrow('at least 3 more artifact(s) required');
 
     ctx.tasks.addArtifact(task.id, 'art-1', 'Content 1', 'agent-1', 'spec');
     ctx.tasks.addArtifact(task.id, 'art-2', 'Content 2', 'agent-1', 'spec');
-    expect(() => ctx.tasks.advance(task.id)).toThrow('at least 3 artifact(s) required');
+    expect(() => ctx.tasks.advance(task.id)).toThrow('at least 1 more artifact(s) required');
 
     ctx.tasks.addArtifact(task.id, 'art-3', 'Content 3', 'agent-1', 'spec');
     const advanced = ctx.tasks.advance(task.id);

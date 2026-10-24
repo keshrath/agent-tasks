@@ -114,8 +114,8 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       await t.key('3');
       await t.waitFor(/New task/);
       await landsOn(t, 'Title'); // the New tab starts in its first field
-      // Digits in a field are text: the header drops them and says how out instead.
-      const typing = await t.waitFor(/Tab leaves the field · Esc to the prompt/);
+      // Digits in a field are text: the header drops them; in New, Tab goes to the next field.
+      const typing = await t.waitFor(/Tab next field · Esc to the prompt/);
       expect(typing).not.toMatch(/1: Board/);
       expect(typing).toMatch(/Board\s+Done\s+New\s+Refresh/);
       await t.focus('Create'); // on a button they switch tabs again

@@ -55,6 +55,18 @@ export type AgentTasksRef = {
   isBlocked: boolean;
 };
 
+/** What the stage gate still needs before the task leaves its stage: the server's `gate_needs`. */
+export type AgentTasksGate = {
+  comment: boolean;
+  /** Any artifact at all in this stage. */
+  artifact: boolean;
+  /** Named artifacts still missing in this stage. */
+  artifacts: string[];
+  /** How many more artifacts this stage needs. */
+  more: number;
+  approval: boolean;
+};
+
 /** One task's detail view (GET /api/tasks/:id with subtasks and comments). */
 export type AgentTasksDetail = {
   id: number;
@@ -75,6 +87,8 @@ export type AgentTasksDetail = {
   stages: string[];
   blockers: AgentTasksRef[];
   blocking: AgentTasksRef[];
+  /** Null when nothing holds it in its stage, or when it is closed. */
+  gate: AgentTasksGate | null;
   /** Tasks linked without blocking (`related`, `duplicate`), either way round. */
   links: (AgentTasksRef & { relationship: string })[];
   subtasks: AgentTasksRef[];
@@ -105,6 +119,11 @@ export type AgentTasksForm = {
    * field keeps its text itself: drawn back from here, a redraw behind fast typing loses keys.
    */
   words: string;
+  /**
+   * Words the field draws once: a submit the gate refused clears the field, and these put the
+   * submitted words back. Unchanged while the person types, so no redraw fights the keys.
+   */
+  seed?: string;
 };
 
 /** The New tab's fields as typed. */

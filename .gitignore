@@ -6,6 +6,7 @@ dist/
 
 # --- Local data & secrets ----------------------------------------------------
 *.db
+!tests/fixtures/*.db
 *.db-wal
 *.db-shm
 .env

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AppContext } from '../src/context.js';
 import { createTestContext } from './helpers.js';
 import { createToolHandler, tools } from '../src/transport/mcp.js';
@@ -900,6 +900,44 @@ describe('task_get', () => {
     expect(result.artifacts).toEqual([]);
   });
 
+  it('says what the stage gate still needs, null once met or closed', () => {
+    ctx.tasks.setGateConfig('gated', {
+      require_comment: true,
+      gates: { backlog: { require_artifacts: ['spec'] } },
+    });
+    const task = handle('task_create', { title: 'Gated', project: 'gated' }) as { id: number };
+    const get = () => handle('task_get', { task_id: task.id }) as { gate_needs: unknown };
+    expect(get().gate_needs).toEqual({
+      stage: 'backlog',
+      comment: true,
+      artifact: false,
+      artifacts: ['spec'],
+      min_artifacts: 0,
+      approval: false,
+    });
+    ctx.comments.add(task.id, 'agent-1', 'looked at it');
+    ctx.tasks.addArtifact(task.id, 'spec', 'the spec', 'agent-1', 'backlog');
+    expect(get().gate_needs).toBeNull();
+    handle('task_stage', { action: 'cancel', task_id: task.id, reason: 'not needed' });
+    expect(get().gate_needs).toBeNull();
+  });
+
+  it('includes the transitive dependency chain when asked', () => {
+    const a = ctx.tasks.create({ title: 'A' }, 'test');
+    const b = ctx.tasks.create({ title: 'B' }, 'test');
+    const c = ctx.tasks.create({ title: 'C' }, 'test');
+    ctx.tasks.addDependency(a.id, b.id);
+    ctx.tasks.addDependency(b.id, c.id);
+    const result = handle('task_get', { task_id: a.id, include: ['transitive_deps'] }) as {
+      transitive_deps: { blockers_transitive: Array<{ id: number }>; depth_blockers: number };
+    };
+    expect(result.transitive_deps.blockers_transitive.map((t) => t.id).sort()).toEqual(
+      [b.id, c.id].sort(),
+    );
+    expect(result.transitive_deps.depth_blockers).toBe(2);
+    expect(handle('task_get', { task_id: a.id })).not.toHaveProperty('transitive_deps');
+  });
+
   it('includes subtasks when requested', () => {
     const parent = handle('task_create', { title: 'Parent' }) as { id: number };
     handle('task_create', { title: 'Child 1', parent_id: parent.id });
@@ -1534,6 +1572,53 @@ describe('task_config', () => {
     }) as { success: boolean; name: string };
     expect(result.success).toBe(true);
     expect(result.name).toBe('cfg-agent');
+  });
+
+  it('cleanup mode stale_agents fails nothing while agent-comm cannot be reached', async () => {
+    const t = ctx.tasks.create({ title: 'Claimed' }, 'test');
+    ctx.tasks.claim(t.id, 'gone-agent');
+    const result = (await handle('task_config', {
+      action: 'cleanup',
+      mode: 'stale_agents',
+      timeout_minutes: 5,
+    })) as { stale_agents: { failed: unknown[]; checked: number } };
+    expect(result.stale_agents.failed).toEqual([]);
+    expect(typeof result.stale_agents.checked).toBe('number');
+    expect(ctx.tasks.getById(t.id)!.status).toBe('in_progress');
+  });
+
+  it('cleanup mode stale_agents fails the tasks of agents agent-comm reports gone or silent', async () => {
+    const live = ctx.tasks.create({ title: 'Live' }, 'test');
+    const silent = ctx.tasks.create({ title: 'Silent' }, 'test');
+    const gone = ctx.tasks.create({ title: 'Gone' }, 'test');
+    ctx.tasks.claim(live.id, 'live-agent');
+    ctx.tasks.claim(silent.id, 'silent-agent');
+    ctx.tasks.claim(gone.id, 'gone-agent');
+    const now = new Date().toISOString();
+    const old = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    vi.spyOn(ctx.agentBridge, 'fetchAgents').mockResolvedValue([
+      { name: 'live-agent', status: 'online', last_heartbeat: now },
+      { name: 'silent-agent', status: 'online', last_heartbeat: old },
+    ]);
+    const result = (await handle('task_config', {
+      action: 'cleanup',
+      mode: 'stale_agents',
+      timeout_minutes: 5,
+    })) as { stale_agents: { failed: { id: number }[]; checked: number } };
+    expect(result.stale_agents.failed.map((t) => t.id).sort()).toEqual([silent.id, gone.id].sort());
+    expect(result.stale_agents.checked).toBe(3);
+    expect(ctx.tasks.getById(live.id)!.status).toBe('in_progress');
+    expect(ctx.tasks.getById(silent.id)!.result).toContain('has not heartbeated');
+    expect(ctx.tasks.getById(gone.id)!.result).toContain('no longer registered');
+  });
+
+  it('cleanup mode all runs the retention purge and the stale-agent sweep', async () => {
+    const result = (await handle('task_config', { action: 'cleanup', mode: 'all' })) as {
+      retention: { purgedTasks: number };
+      stale_agents: { failed: unknown[]; checked: number };
+    };
+    expect(result.retention.purgedTasks).toBe(0);
+    expect(result.stale_agents).toMatchObject({ failed: [] });
   });
 
   it('runs cleanup', () => {

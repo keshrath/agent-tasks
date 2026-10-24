@@ -13,6 +13,19 @@ afterEach(() => {
 });
 
 describe('subtasks', () => {
+  it('inherits the parent project and priority unless given its own', () => {
+    const parent = ctx.tasks.create({ title: 'Parent', project: 'web', priority: 7 }, 'agent-1');
+    const child = ctx.tasks.create({ title: 'Child', parent_id: parent.id }, 'agent-1');
+    expect(child.project).toBe('web');
+    expect(child.priority).toBe(7);
+    const own = ctx.tasks.create(
+      { title: 'Own', parent_id: parent.id, project: 'api', priority: 1 },
+      'agent-1',
+    );
+    expect(own.project).toBe('api');
+    expect(own.priority).toBe(1);
+  });
+
   it('creates a subtask with parent_id', () => {
     const parent = ctx.tasks.create({ title: 'Parent' }, 'agent-1');
     const child = ctx.tasks.create({ title: 'Child', parent_id: parent.id }, 'agent-1');

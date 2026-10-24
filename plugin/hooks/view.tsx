@@ -8,6 +8,7 @@ import type {
   AgentTasksDetail,
   AgentTasksDraft,
   AgentTasksForm,
+  AgentTasksGate,
   AgentTasksRef,
   AgentTasksRoute,
   AgentTasksSnapshot,
@@ -64,8 +65,39 @@ const color = (c: string | false | undefined) => (c ? { color: c } : {});
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const clip = (s: string, n: number) =>
-  s.length > n ? `${s.slice(0, Math.max(1, n - 1)).trimEnd()}…` : s;
+/** Terminal columns of one code point: wide East Asian and emoji take two, marks none. */
+function charCols(ch: string): number {
+  const c = ch.codePointAt(0)!;
+  if ((c >= 0x200b && c <= 0x200f) || (c >= 0xfe00 && c <= 0xfe0f) || /\p{M}/u.test(ch)) return 0;
+  if (/\p{Emoji_Presentation}/u.test(ch)) return 2;
+  return (c >= 0x1100 && c <= 0x115f) ||
+    (c >= 0x2e80 && c <= 0xa4cf && c !== 0x303f) ||
+    (c >= 0xac00 && c <= 0xd7a3) ||
+    (c >= 0xf900 && c <= 0xfaff) ||
+    (c >= 0xfe30 && c <= 0xfe4f) ||
+    (c >= 0xff00 && c <= 0xff60) ||
+    (c >= 0xffe0 && c <= 0xffe6) ||
+    (c >= 0x20000 && c <= 0x3fffd)
+    ? 2
+    : 1;
+}
+
+/** Display width in terminal columns, which is what wraps a line; `length` counts UTF-16 units. */
+export const cols = (s: string) => [...s].reduce((n, ch) => n + charCols(ch), 0);
+
+/** `s` cut to `n` columns with an ellipsis. */
+export function clip(s: string, n: number): string {
+  if (cols(s) <= n) return s;
+  let out = '';
+  let used = 0;
+  for (const ch of s) {
+    const w = charCols(ch);
+    if (used + w > Math.max(1, n - 1)) break;
+    out += ch;
+    used += w;
+  }
+  return `${out.trimEnd()}…`;
+}
 const firstLine = (s: string) =>
   s
     .split('\n')
@@ -120,6 +152,32 @@ export function tally(open: AgentTasksTask[]) {
   };
 }
 
+/** What the stage gate asks for, in words: "a comment and artifact review-notes". */
+export function gateText(g: AgentTasksGate): string {
+  const parts = [
+    g.comment && 'a comment',
+    g.artifacts.length > 0 &&
+      `${g.artifacts.length === 1 ? 'artifact' : 'artifacts'} ${g.artifacts.join(', ')}`,
+    g.artifact && 'an artifact',
+    g.more > 0 && plural(g.more, 'more artifact'),
+    g.approval && 'an approval',
+  ].filter((p): p is string => typeof p === 'string');
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]!;
+}
+
+/**
+ * The gate's line under the actions: what it needs and who gives it. A comment is added in the
+ * field below; artifacts come from an agent; no tool records an approval.
+ */
+export function gateHint(g: AgentTasksGate, stage: string): string {
+  const who = [
+    g.comment && 'add the comment below',
+    (g.artifact || g.artifacts.length > 0 || g.more > 0) && 'an agent attaches artifacts',
+    g.approval && 'an approval cannot be given from here',
+  ].filter((p): p is string => typeof p === 'string');
+  return `Needs ${gateText(g)} before it leaves ${stage}: ${who.join('; ')}.`;
+}
+
 /** The board's summary line as text: the status line entry reads the same. */
 export function headline(open: AgentTasksTask[]): string {
   const n = tally(open);
@@ -171,9 +229,47 @@ export function boardOrder(
   return [...tasks].sort((a, b) => at(a.stage) - at(b.stage) || byWork(a, b));
 }
 
+/** Rows a stage nobody works on (a backlog) shows before it folds the rest away. */
+export const FOLD_ROWS = 10;
+
+/**
+ * The board's groups as drawn: open tasks matching `filter` by stage, and how many rows each
+ * folds away. A stage where nothing is in progress (a backlog) folds past FOLD_ROWS, so a long
+ * queue never buries the work in flight below it; a find shows every match.
+ */
+export function boardGroups(
+  snap: AgentTasksSnapshot,
+  filter: string,
+  expanded: string[],
+): { stage: string; tasks: AgentTasksTask[]; hidden: number }[] {
+  const shown = boardOrder(
+    snap.open.filter((t) => matches(t, filter)),
+    snap,
+  );
+  const stages = stageOrder(snap);
+  const groups = stages
+    .map((stage) => ({ stage, tasks: shown.filter((t) => t.stage === stage) }))
+    .filter((g) => g.tasks.length > 0);
+  const stray = shown.filter((t) => !stages.includes(t.stage));
+  if (stray.length) groups.push({ stage: 'other stages', tasks: stray });
+  return groups.map((g) => {
+    const folds =
+      filter === '' &&
+      g.tasks.length > FOLD_ROWS + 2 &&
+      g.tasks.every((t) => t.status !== 'in_progress') &&
+      !expanded.includes(`stage:${g.stage}`);
+    return folds
+      ? { ...g, tasks: g.tasks.slice(0, FOLD_ROWS), hidden: g.tasks.length - FOLD_ROWS }
+      : { ...g, hidden: 0 };
+  });
+}
+
 /** The stages a task can still move through (its pipeline without `cancelled`). */
 const activeStages = (d: Pick<AgentTasksDetail, 'stages'>) =>
   d.stages.filter((s) => s !== 'cancelled');
+
+/** Complete's key names the stage it completes from, for the same reason as `advance:<stage>`. */
+export const completeKey = (stage: string) => `complete:${stage}`;
 
 /**
  * The key of the action that moves a task on: what the focus lands on in its detail.
@@ -190,7 +286,7 @@ export function nextStep(d: AgentTasksDetail): string | null {
   if (idx < 0) return null;
   // The key names the stage it moves to: a key the tree before the move also drew would
   // take the ring there, and the redraw would leave it on whatever then sits in that place.
-  return idx >= stages.length - 2 ? 'ask:complete' : `advance:${stages[idx + 1]}`;
+  return idx >= stages.length - 2 ? completeKey(d.stage) : `advance:${stages[idx + 1]}`;
 }
 
 /**
@@ -202,9 +298,10 @@ export const foldKey = (part: string, isOpen: boolean) => `${part}:${isOpen ? 'o
 
 /**
  * Refresh's key names whether the server is up: the tabs before it come and go with it, which
- * would move a ring kept by its place, so Refresh is drawn anew and lands it itself.
+ * would move a ring kept by its place, so Refresh is drawn anew and lands it itself. Up, it
+ * also names `rev`: a button only the board after a bump draws, which a landing waits on.
  */
-export const refreshKey = (isUp: boolean) => (isUp ? 'refresh' : 'retry');
+export const refreshKey = (isUp: boolean, rev = 0) => (isUp ? `refresh:${rev}` : 'retry');
 
 type Look = { mark: string; tone: string | undefined; word: string };
 
@@ -276,7 +373,7 @@ export function packParts(parts: Part[], width: number, sep = '·'): Part[][] {
   let used = 0;
   for (const p of parts) {
     const line = lines.at(-1);
-    const len = partText(p).length;
+    const len = cols(partText(p));
     if (line && used + sep.length + 2 + len <= width) {
       line.push(p);
       used += sep.length + 2 + len;
@@ -363,6 +460,8 @@ const KEYS = [
 const UNFOCUSED = ['ctrl+x tab to work this pane from the keyboard', 'ctrl+x tab: keyboard'];
 /** In a text field the hotkeys type into it: the hint says how out instead. */
 const TYPING = ['Tab leaves the field · Esc to the prompt', 'Tab leaves · Esc to the prompt'];
+/** In a New field Tab goes on to the next one. */
+const TYPING_NEW = ['Tab next field · Esc to the prompt', 'Tab next · Esc to the prompt'];
 /** The text fields' keys: Find, the New fields, the comment field, an action form's field. */
 export const isField = (key: string | null) =>
   key !== null && /^(find|new-\w+|comment|form):/.test(key);
@@ -372,7 +471,7 @@ export const isField = (key: string | null) =>
  */
 const FINDS = ['id, title, agent, project or tag', 'id, title, agent, project'];
 const fitting = (hints: string[], width: number) =>
-  hints.find((h) => h.length <= width) ?? hints.at(-1)!;
+  hints.find((h) => cols(h) <= width) ?? hints.at(-1)!;
 
 /** An outcome's tone, by the mark `act` in register.tsx leads it with: ✓ done, ✗ failed. */
 const noticeTone = (notice: string) =>
@@ -433,6 +532,7 @@ export function Pane(p: PaneProps) {
         filter={p.filter}
         rev={p.rev}
         width={width}
+        expanded={p.expanded}
       />
     );
   else if (route.tab === 'done')
@@ -476,11 +576,11 @@ export function Pane(p: PaneProps) {
             </Button>
           ))}
           <Button
-            key={refreshKey(snap.isUp)}
+            key={refreshKey(snap.isUp, p.rev)}
             label="Refresh"
             {...(isTyping ? {} : { hotkey: 'r' })}
             plain
-            {...af(p.landing, refreshKey(snap.isUp))}
+            {...af(p.landing, refreshKey(snap.isUp, p.rev))}
             onPress={on.refresh}
           />
         </Box>
@@ -494,7 +594,16 @@ export function Pane(p: PaneProps) {
           <Text {...noticeTone(p.notice)}>{p.notice}</Text>
         ) : (
           <Text dimColor wrap="truncate">
-            {fitting(isTyping ? TYPING : p.isFocused ? KEYS : UNFOCUSED, width)}
+            {fitting(
+              isTyping
+                ? p.focused?.startsWith('new-')
+                  ? TYPING_NEW
+                  : TYPING
+                : p.isFocused
+                  ? KEYS
+                  : UNFOCUSED,
+              width,
+            )}
           </Text>
         )}
       </Box>
@@ -576,11 +685,13 @@ function Board({
   filter,
   rev,
   width,
+  expanded,
 }: ViewProps & {
   snap: AgentTasksSnapshot;
   filter: string;
   rev: number;
   width: number;
+  expanded: string[];
 }) {
   const { Box, Text, Button, Input } = el;
   if (snap.open.length === 0)
@@ -602,17 +713,9 @@ function Board({
         />
       </Box>
     );
-  const shown = boardOrder(
-    snap.open.filter((t) => matches(t, filter)),
-    snap,
-  );
   const n = tally(snap.open);
-  const stages = stageOrder(snap);
-  const groups = stages
-    .map((s) => ({ stage: s, tasks: shown.filter((t) => t.stage === s) }))
-    .filter((g) => g.tasks.length > 0);
-  const stray = shown.filter((t) => !stages.includes(t.stage));
-  if (stray.length) groups.push({ stage: 'other stages', tasks: stray });
+  const groups = boardGroups(snap, filter, expanded);
+  const shownCount = groups.reduce((sum, g) => sum + g.tasks.length + g.hidden, 0);
   const isFiltered = filter !== '';
 
   return (
@@ -625,10 +728,14 @@ function Board({
             { text: plural(n.open, 'open task'), bold: true },
             `${n.working} in progress`,
             n.blocked > 0 && { text: `${n.blocked} blocked`, color: WARN },
-            isFiltered && { text: `${shown.length} shown`, color: ACCENT },
+            isFiltered && { text: `${shownCount} shown`, color: ACCENT },
           ]}
         />
-        <Parts el={el} width={width} parts={groups.map((g) => `${g.stage} ${g.tasks.length}`)} />
+        <Parts
+          el={el}
+          width={width}
+          parts={groups.map((g) => `${g.stage} ${g.tasks.length + g.hidden}`)}
+        />
       </Box>
       {Input && (
         <Box flexDirection="column">
@@ -650,34 +757,49 @@ function Board({
           )}
         </Box>
       )}
-      {shown.length === 0 && <Text dimColor>No open task matches.</Text>}
-      {groups.map((g) => (
-        <Box key={`stage:${g.stage}`} flexDirection="column">
-          <Heading el={el} title={cap(g.stage)} aside={String(g.tasks.length)} />
-          {g.tasks.map((t) => (
-            <Row
-              key={`row:${t.id}`}
-              el={el}
-              on={on}
-              auto={auto}
-              t={t}
-              width={width}
-              facts={[
-                t.blocked_by.length > 0 && {
-                  text: `waits for ${t.blocked_by.map((b) => `#${b}`).join(', ')}`,
-                  color: WARN,
-                },
-                t.assigned_to ?? 'unclaimed',
-                t.subtasks && `${t.subtasks.done}/${t.subtasks.total} subtasks`,
-                t.parent_id !== null && `part of #${t.parent_id}`,
-                t.project,
-                ...tagsFound(t, filter).map((tag) => ({ text: `tag ${tag}`, color: ACCENT })),
-                ago(t.updated_at),
-              ]}
-            />
-          ))}
-        </Box>
-      ))}
+      {shownCount === 0 && <Text dimColor>No open task matches.</Text>}
+      {groups.map((g) => {
+        const isUnfolded = g.hidden === 0 && expanded.includes(`stage:${g.stage}`);
+        // Unfolded, the toggle stays where it was: the rows it showed follow it.
+        const at = isUnfolded ? Math.min(FOLD_ROWS, g.tasks.length) : g.tasks.length;
+        const row = (t: AgentTasksTask) => (
+          <Row
+            key={`row:${t.id}`}
+            el={el}
+            on={on}
+            auto={auto}
+            t={t}
+            width={width}
+            facts={[
+              t.blocked_by.length > 0 && {
+                text: `waits for ${t.blocked_by.map((b) => `#${b}`).join(', ')}`,
+                color: WARN,
+              },
+              t.assigned_to ?? 'unclaimed',
+              t.subtasks && `${t.subtasks.done}/${t.subtasks.total} subtasks`,
+              t.parent_id !== null && `part of #${t.parent_id}`,
+              t.project,
+              ...tagsFound(t, filter).map((tag) => ({ text: `tag ${tag}`, color: ACCENT })),
+              ago(t.updated_at),
+            ]}
+          />
+        );
+        return (
+          <Box key={`stage:${g.stage}`} flexDirection="column">
+            <Heading el={el} title={cap(g.stage)} aside={String(g.tasks.length + g.hidden)} />
+            {g.tasks.slice(0, at).map(row)}
+            {(g.hidden > 0 || isUnfolded) && (
+              <Button
+                key={foldKey(`stage:${g.stage}`, isUnfolded)}
+                plain
+                label={g.hidden > 0 ? `▸ ${g.hidden} more in ${g.stage}` : `▾ Fold ${g.stage}`}
+                onPress={() => on.toggle(`stage:${g.stage}`)}
+              />
+            )}
+            {g.tasks.slice(at).map(row)}
+          </Box>
+        );
+      })}
     </Box>
   );
 }
@@ -830,7 +952,7 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
   const step = nextStep(d);
   const isLive = isOpen(d.status);
   const isWorking = d.status === 'in_progress';
-  const atEnd = step === 'ask:complete';
+  const atEnd = step === completeKey(d.stage);
   const descLines = d.description.split('\n');
   const isDescFolding = descLines.length >= DESC_LINES + DESC_FOLD;
   const isDescOpen = expanded.includes('desc') || !isDescFolding;
@@ -888,9 +1010,7 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
         <Box flexDirection="column" borderStyle="round" borderColor={BAD} paddingX={1}>
           <Text color={BAD}>Delete #{d.id} with its artifacts and comments? There is no undo.</Text>
           <Box columnGap={1}>
-            <Button key="confirm-yes" onPress={() => on.remove(d.id)}>
-              <Text color={BAD}>Delete</Text>
-            </Button>
+            <Button key="confirm-yes" label="Delete" onPress={() => on.remove(d.id)} />
             <Button
               key="confirm-no"
               label="Never mind"
@@ -900,7 +1020,15 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
           </Box>
         </Box>
       ) : form?.task === d.id ? (
-        <ActionForm el={el} on={on} auto={auto} d={d} form={form} />
+        <Box flexDirection="column">
+          <ActionForm el={el} on={on} auto={auto} d={d} form={form} />
+          {/* Complete passes the gate too: its form says what it holds for. */}
+          {form.action === 'complete' && d.gate && (
+            <Text color={WARN} wrap="wrap">
+              {gateHint(d.gate, d.stage)}
+            </Text>
+          )}
+        </Box>
       ) : (
         <Box flexDirection="column">
           <Box flexWrap="wrap" columnGap={1}>
@@ -909,16 +1037,18 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
                 key={`advance:${stages[idx + 1]}`}
                 {...af(auto, `advance:${stages[idx + 1]}`)}
                 label={`Advance › ${stages[idx + 1]}`}
-                {...(step === `advance:${stages[idx + 1]}` ? { variant: 'primary' as const } : {})}
+                {...(step === `advance:${stages[idx + 1]}` && !d.gate
+                  ? { variant: 'primary' as const }
+                  : {})}
                 onPress={() => on.advance(d.id, stages[idx + 1]!)}
               />
             )}
             {isWorking && waiting.length === 0 && (
               <Button
-                key="ask:complete"
-                {...af(auto, 'ask:complete')}
+                key={completeKey(d.stage)}
+                {...af(auto, completeKey(d.stage))}
                 label="Complete"
-                {...(atEnd ? { variant: 'primary' as const } : {})}
+                {...(atEnd && !d.gate ? { variant: 'primary' as const } : {})}
                 onPress={() => on.ask(d.id, 'complete')}
               />
             )}
@@ -937,9 +1067,7 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
               {isLive && (
                 <Button key="ask:cancel" label="Cancel" onPress={() => on.ask(d.id, 'cancel')} />
               )}
-              <Button key="ask-delete" onPress={() => on.askDelete(d.id)}>
-                <Text color={BAD}>Delete</Text>
-              </Button>
+              <Button key="ask-delete" label="Delete" onPress={() => on.askDelete(d.id)} />
             </Box>
           </Box>
           {d.status === 'pending' && (
@@ -947,6 +1075,11 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
               {d.assigned_to
                 ? `Waiting for ${d.assigned_to} to start it.`
                 : 'Unclaimed: it moves on once an agent claims it.'}
+            </Text>
+          )}
+          {isWorking && waiting.length === 0 && d.gate && (
+            <Text color={WARN} wrap="wrap">
+              {gateHint(d.gate, d.stage)}
             </Text>
           )}
           {isWorking && waiting.length > 0 && (
@@ -1181,6 +1314,7 @@ function ActionForm({
             key={`form:${form.action}`}
             {...af(auto, `form:${form.action}`)}
             placeholder={f.hint}
+            {...(form.seed ? { value: form.seed } : {})}
             submitLabel={f.submit}
             onInput={on.type}
             onSubmit={(v) => on.finish(d.id, form.action, v)}

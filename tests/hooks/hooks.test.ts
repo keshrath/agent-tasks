@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
 import { createContext } from '../../src/context.js';
+import { startRestServer } from '../../src/server.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -119,6 +120,57 @@ describe('task-cleanup-start.js', () => {
     const { code, json } = await runHook('task-cleanup-start.js', 'junk', { env: isolatedEnv });
     expect(code).toBe(0);
     expect(json).toEqual({});
+  });
+
+  it('fails only idle tasks whose assignee is neither online nor heartbeating', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-tasks-start-'));
+    try {
+      const ctx = createContext({ path: join(dir, 'agent-tasks.db') });
+      const ids: Record<string, number> = {};
+      for (const who of ['online', 'beating', 'gone', 'gone-but-busy', 'unclaimed']) {
+        ids[who] = ctx.tasks.create({ title: who }, 'test').id;
+        if (who !== 'unclaimed') ctx.tasks.claim(ids[who]!, who === 'gone-but-busy' ? 'gone' : who);
+      }
+      ctx.db.run(`UPDATE tasks SET updated_at = datetime('now', '-3 hours') WHERE id != ?`, [
+        ids['gone-but-busy'],
+      ]);
+      ctx.close();
+      const comm = new Database(join(dir, 'agent-comm.db'));
+      comm.exec(`CREATE TABLE agents (name TEXT, status TEXT, last_heartbeat TEXT)`);
+      comm.exec(`INSERT INTO agents VALUES
+        ('online', 'online', datetime('now', '-2 days')),
+        ('beating', 'offline', datetime('now', '-1 minutes')),
+        ('gone', 'offline', datetime('now', '-2 days'))`);
+      comm.close();
+
+      const { code, json } = await runHook('task-cleanup-start.js', '{}', {
+        env: {
+          ...isolatedEnv,
+          AGENT_TASKS_DB: join(dir, 'agent-tasks.db'),
+          AGENT_COMM_DB: join(dir, 'agent-comm.db'),
+        },
+      });
+
+      expect(code).toBe(0);
+      expect(json).toEqual({});
+      const db = new Database(join(dir, 'agent-tasks.db'), { readonly: true });
+      const rows = db.prepare('SELECT title, status, result FROM tasks').all() as {
+        title: string;
+        status: string;
+        result: string | null;
+      }[];
+      db.close();
+      expect(Object.fromEntries(rows.map((r) => [r.title, r.status]))).toEqual({
+        online: 'in_progress',
+        beating: 'in_progress',
+        gone: 'failed',
+        'gone-but-busy': 'in_progress',
+        unclaimed: 'pending',
+      });
+      expect(rows.find((r) => r.title === 'gone')?.result).toContain('no longer running');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -271,6 +323,58 @@ describe('pipeline-enforcer.mjs', () => {
     expect(obj.hookSpecificOutput?.hookEventName).toBe('UserPromptSubmit');
     expect(obj.hookSpecificOutput?.additionalContext).toMatch(/PIPELINE REQUIRED/);
   });
+
+  function world(): { dir: string; env: Record<string, string>; taskId: number } {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-tasks-enforcer-'));
+    const ctx = createContext({ path: join(dir, 'agent-tasks.db') });
+    const taskId = ctx.tasks.create({ title: 'Work' }, 'test').id;
+    ctx.close();
+    const comm = new Database(join(dir, 'agent-comm.db'));
+    comm.exec(`CREATE TABLE agents (name TEXT, status TEXT, last_heartbeat TEXT)`);
+    comm.exec(`INSERT INTO agents VALUES ('worker', 'online', datetime('now'))`);
+    comm.close();
+    return {
+      dir,
+      taskId,
+      env: {
+        ...isolatedEnv,
+        AGENT_TASKS_DB: join(dir, 'agent-tasks.db'),
+        AGENT_COMM_DB: join(dir, 'agent-comm.db'),
+      },
+    };
+  }
+
+  const WORK = {
+    prompt:
+      'refactor the authentication module to use JWT tokens instead of sessions across all endpoints and update the test suite',
+  };
+
+  it('names the registered session without a task, and the real tool to claim with', async () => {
+    const w = world();
+    try {
+      const { json } = await runHook('pipeline-enforcer.mjs', WORK, { env: w.env });
+      const text = (json as { hookSpecificOutput: { additionalContext: string } })
+        .hookSpecificOutput.additionalContext;
+      expect(text).toContain('Session "worker" has no active pipeline task.');
+      expect(text).toContain('task_stage action "claim"');
+      expect(text).not.toContain('task_claim');
+    } finally {
+      rmSync(w.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('stays quiet once the session holds a task', async () => {
+    const w = world();
+    try {
+      const ctx = createContext({ path: w.env.AGENT_TASKS_DB });
+      ctx.tasks.claim(w.taskId, 'worker');
+      ctx.close();
+      const { json } = await runHook('pipeline-enforcer.mjs', WORK, { env: w.env });
+      expect(json).toEqual({});
+    } finally {
+      rmSync(w.dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -315,6 +419,41 @@ describe('todowrite-bridge.mjs', () => {
     );
     expect(code).toBe(0);
     expect(json).toEqual({});
+  });
+
+  it('turns open todos into tasks through the REST server, through its request guard', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-tasks-todo-'));
+    const ctx = createContext({ path: join(dir, 'agent-tasks.db') });
+    const server = await startRestServer(ctx, 0);
+    try {
+      const { code, json } = await runHook(
+        'todowrite-bridge.mjs',
+        {
+          tool_name: 'TodoWrite',
+          tool_input: {
+            todos: [
+              { id: '1', content: 'write the guard', status: 'pending', priority: 'high' },
+              { id: '2', content: 'test it', status: 'in_progress', priority: 'low' },
+              { id: '3', content: 'already done', status: 'completed' },
+            ],
+          },
+        },
+        { env: { ...isolatedEnv, AGENT_TASKS_URL: `http://localhost:${server.port}` } },
+      );
+      expect(code).toBe(0);
+      expect(json).toEqual({});
+      const tasks = ctx.tasks.list({ project: 'claude-todos' });
+      expect(
+        tasks.map((t) => [t.title, t.priority, t.created_by]).sort((a, b) => b[1] - a[1]),
+      ).toEqual([
+        ['write the guard', 5, 'todowrite-bridge'],
+        ['test it', 1, 'todowrite-bridge'],
+      ]);
+    } finally {
+      server.close();
+      ctx.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

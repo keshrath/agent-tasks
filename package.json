@@ -1,6 +1,6 @@
 {
   "name": "agent-tasks",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Pipeline-driven task management for AI coding agents — stages, dependencies, artifacts, multi-agent claiming, and a native Claude Code /pipeline pane",
   "type": "module",
   "main": "dist/index.js",
@@ -38,6 +38,7 @@
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
     "plugin:check": "claude plugin validate plugin && claude plugin test plugin",
     "e2e:claude": "npm run build && node tests/e2e-claude/run.mjs",
+    "manual:record": "npm run build && tsx tests/e2e-claude/manual.ts",
     "bench:metrics": "vitest run bench/metrics.test.ts",
     "bench:run": "tsx bench/runner.ts",
     "bench:visibility": "tsx bench/visibility/runner.ts",
@@ -53,7 +54,7 @@
     ]
   },
   "dependencies": {
-    "agent-common": "^1.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
     "better-sqlite3": "^12.8.0"
   },
   "devDependencies": {
@@ -61,14 +62,18 @@
     "@playwright/test": "^1.59.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.0.0",
+    "@types/pngjs": "^6.0.5",
     "@vitest/coverage-v8": "^3.2.4",
     "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/headless": "^6.0.0",
     "@xterm/xterm": "^6.0.0",
     "eslint": "^10.1.0",
+    "gifenc": "^1.0.3",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "node-pty": "^1.1.0",
+    "pngjs": "^7.0.0",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",

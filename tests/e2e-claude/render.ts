@@ -10,10 +10,14 @@ import { join } from 'node:path';
 import { chromium } from '@playwright/test';
 
 const require = createRequire(import.meta.url);
-const XTERM_JS = readFileSync(require.resolve('@xterm/xterm/lib/xterm.js'), 'utf8');
-const XTERM_CSS = readFileSync(require.resolve('@xterm/xterm/css/xterm.css'), 'utf8');
+export const XTERM_JS = readFileSync(require.resolve('@xterm/xterm/lib/xterm.js'), 'utf8');
+export const XTERM_CSS = readFileSync(require.resolve('@xterm/xterm/css/xterm.css'), 'utf8');
+export const UNICODE_JS = readFileSync(
+  require.resolve('@xterm/addon-unicode11/lib/addon-unicode11.js'),
+  'utf8',
+);
 
-const THEME = {
+export const THEME = {
   background: '#1e1e2e',
   foreground: '#cdd6f4',
   cursor: '#1e1e2e',
@@ -58,6 +62,7 @@ export async function renderShots(dir: string, labels?: string[]): Promise<strin
         <body><div id="t"></div></body></html>`,
       );
       await page.addScriptTag({ content: XTERM_JS });
+      await page.addScriptTag({ content: UNICODE_JS });
       await page.evaluate(
         ([s, theme]) =>
           new Promise<void>((done) => {
@@ -65,7 +70,10 @@ export async function renderShots(dir: string, labels?: string[]): Promise<strin
               Terminal: new (o: object) => {
                 open(el: HTMLElement): void;
                 write(d: string, cb: () => void): void;
+                loadAddon(a: object): void;
+                unicode: { activeVersion: string };
               };
+              Unicode11Addon: { Unicode11Addon: new () => object };
             };
             const term = new w.Terminal({
               cols: s.cols,
@@ -76,6 +84,8 @@ export async function renderShots(dir: string, labels?: string[]): Promise<strin
               cursorBlink: false,
               allowProposedApi: true,
             });
+            term.loadAddon(new w.Unicode11Addon.Unicode11Addon());
+            term.unicode.activeVersion = '11';
             term.open(document.getElementById('t')!);
             term.write(s.data, () => setTimeout(done, 100));
           }),
@@ -127,6 +137,7 @@ export async function renderVideo(
       </body></html>`,
     );
     await page.addScriptTag({ content: XTERM_JS });
+    await page.addScriptTag({ content: UNICODE_JS });
     const total = (frames.at(-1)?.at ?? 0) + 3_000;
     await page.evaluate(
       ([fs, cs, theme, s]) =>
@@ -136,7 +147,10 @@ export async function renderVideo(
               open(el: HTMLElement): void;
               reset(): void;
               write(d: string): void;
+              loadAddon(a: object): void;
+              unicode: { activeVersion: string };
             };
+            Unicode11Addon: { Unicode11Addon: new () => object };
           };
           const term = new w.Terminal({
             cols: s.cols,
@@ -147,6 +161,8 @@ export async function renderVideo(
             cursorBlink: false,
             allowProposedApi: true,
           });
+          term.loadAddon(new w.Unicode11Addon.Unicode11Addon());
+          term.unicode.activeVersion = '11';
           term.open(document.getElementById('t')!);
           const caption = document.getElementById('c')!;
           const start = performance.now();

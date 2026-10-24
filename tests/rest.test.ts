@@ -231,6 +231,28 @@ describe('GET /api/tasks/:id', () => {
     ]);
   });
 
+  it('gives the transitive dependency chain with include=transitive_deps', async () => {
+    const top = ctx.tasks.create({ title: 'Top' }, 'test');
+    const mid = ctx.tasks.create({ title: 'Mid' }, 'test');
+    const low = ctx.tasks.create({ title: 'Low' }, 'test');
+    ctx.tasks.addDependency(top.id, mid.id);
+    ctx.tasks.addDependency(mid.id, low.id);
+    const body = await (await api(`/api/tasks/${top.id}?include=transitive_deps`)).json();
+    expect(body.transitive_deps.depth_blockers).toBe(2);
+    expect(
+      body.transitive_deps.blockers_transitive.map((t: { id: number }) => t.id).sort(),
+    ).toEqual([mid.id, low.id].sort());
+  });
+
+  it('says what the stage gate still needs (gate_needs), what the pane reads', async () => {
+    ctx.tasks.setGateConfig('rest-gated', { require_comment: true });
+    const task = ctx.tasks.create({ title: 'Gated', project: 'rest-gated' }, 'test');
+    const get = async () => (await (await api(`/api/tasks/${task.id}`)).json()).gate_needs;
+    expect(await get()).toMatchObject({ stage: 'backlog', comment: true, artifacts: [] });
+    ctx.comments.add(task.id, 'agent-1', 'looked at it');
+    expect(await get()).toBeNull();
+  });
+
   it('returns 404 for non-existent task', async () => {
     const res = await api('/api/tasks/99999');
     expect(res.status).toBe(404);

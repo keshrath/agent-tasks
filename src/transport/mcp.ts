@@ -1,20 +1,21 @@
 // =============================================================================
 // agent-tasks — MCP transport
 //
-// Maps MCP tool calls to the TaskService. Thin adapter — validation lives
-// in the domain layer, not here.
+// Maps MCP tool calls to the TaskService over the official MCP SDK. Thin
+// adapter — validation lives in the domain layer, not here.
 // =============================================================================
 
+import { Server, type Tool } from '@modelcontextprotocol/server';
 import type { AppContext } from '../context.js';
-import type { ToolDefinition } from '../types.js';
-import { ValidationError } from '../types.js';
+import { readPackageMeta } from '../package-meta.js';
+import { TasksError, ValidationError } from '../types.js';
 import { handlers, type SessionState } from './mcp-handlers.js';
 
 // ---------------------------------------------------------------------------
 // Tool definitions (8 tools)
 // ---------------------------------------------------------------------------
 
-export const tools: ToolDefinition[] = [
+export const tools: Tool[] = [
   {
     name: 'task_create',
     description:
@@ -367,4 +368,46 @@ export function createToolHandler(ctx: AppContext): ToolHandler {
     if (!handler) throw new ValidationError(`Unknown tool: ${name}`);
     return handler(ctx, args, session);
   };
+}
+
+// ---------------------------------------------------------------------------
+// MCP server
+// ---------------------------------------------------------------------------
+
+/** Appended to every tool result so a client keeps the stage lifecycle in mind. */
+export const PIPELINE_FOOTER =
+  '\n\n---\nPIPELINE: Tasks flow through stages: backlog → spec → plan → implement → test → review → done. ' +
+  'Always advance tasks through stages (task_stage action "advance"). Attach artifacts at each stage (task_artifact). ' +
+  'Use task_list with next: true to pick up unblocked work. Discuss decisions with task_artifact type "comment".';
+
+export interface McpServerOptions {
+  /** Called once the client finished the initialize handshake. */
+  onInitialized?: () => void;
+  /** Append PIPELINE_FOOTER to tool results (AGENT_TASKS_INSTRUCTIONS=0 turns it off). */
+  footer?: boolean;
+}
+
+/**
+ * The MCP server: the 8 tools, each result as pretty JSON text (plus the footer), a
+ * failure as `Error [CODE]: message` with isError.
+ */
+export function createMcpServer(ctx: AppContext, options: McpServerOptions = {}): Server {
+  const { name, version } = readPackageMeta();
+  const server = new Server({ name, version }, { capabilities: { tools: {} } });
+  const handleTool = createToolHandler(ctx);
+  const footer = options.footer === false ? '' : PIPELINE_FOOTER;
+
+  server.setRequestHandler('tools/list', () => ({ tools }));
+  server.setRequestHandler('tools/call', async (req) => {
+    try {
+      const result = await handleTool(req.params.name, req.params.arguments ?? {});
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) + footer }] };
+    } catch (err) {
+      const code = err instanceof TasksError ? err.code : 'UNKNOWN_ERROR';
+      const message = err instanceof Error ? err.message : String(err);
+      return { content: [{ type: 'text', text: `Error [${code}]: ${message}` }], isError: true };
+    }
+  });
+  server.oninitialized = () => options.onInitialized?.();
+  return server;
 }

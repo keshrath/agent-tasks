@@ -1,14 +1,11 @@
 // =============================================================================
 // agent-tasks — Cleanup service
 //
-// Extends agent-common's CleanupService base for timer scheduling. Adds:
+// Hourly retention sweep (run()), plus:
 //   - agent-bridge integration (fails in-progress tasks whose agent is stale)
 //   - purgeAll() limited to completed and cancelled tasks
-//   - start()/stop() wrapper methods (the agent-common base uses
-//     startTimer/stopTimer, but context.ts wires cleanup.start()/stop())
 // =============================================================================
 
-import { CleanupService as KitCleanupService } from 'agent-common';
 import type { Db } from '../storage/database.js';
 import type { AgentBridge } from './agent-bridge.js';
 import type { Task } from '../types.js';
@@ -33,17 +30,30 @@ export interface TasksCleanupStats extends Record<string, number> {
   purgedApprovals: number;
 }
 
-export class CleanupService extends KitCleanupService<TasksCleanupStats> {
+const RUN_EVERY_MS = 60 * 60 * 1000;
+
+export class CleanupService {
+  private timer: ReturnType<typeof setInterval> | null = null;
+
   constructor(
-    db: Db,
-    retentionDays: number = 30,
+    private readonly db: Db,
+    private readonly retentionDays: number = 30,
     private readonly agentBridge?: AgentBridge,
-  ) {
-    super(db, { retentionDays, autoStart: false });
-  }
+  ) {}
 
   start(): void {
-    this.startTimer();
+    if (this.timer) return;
+    this.run();
+    this.timer = setInterval(() => {
+      try {
+        this.run();
+      } catch (err) {
+        process.stderr.write(
+          `[agent-tasks] Cleanup error: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+    }, RUN_EVERY_MS);
+    this.timer.unref();
     this.cancelOrphanedTasks();
     setTimeout(() => {
       this.failStaleAgentTasks().catch(() => {});
@@ -51,7 +61,8 @@ export class CleanupService extends KitCleanupService<TasksCleanupStats> {
   }
 
   stop(): void {
-    this.stopTimer();
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
   }
 
   run(): TasksCleanupStats {
@@ -97,7 +108,7 @@ export class CleanupService extends KitCleanupService<TasksCleanupStats> {
     };
   }
 
-  override purgeAll(): TasksCleanupStats {
+  purgeAll(): TasksCleanupStats {
     const tasks = this.db.run(
       `DELETE FROM tasks WHERE status IN ('completed', 'cancelled') OR stage IN ('done', 'cancelled')`,
     );

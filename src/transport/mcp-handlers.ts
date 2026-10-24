@@ -157,6 +157,8 @@ export function handleGet(ctx: AppContext, args: Record<string, unknown>): unkno
     dependencies: deps,
     claim_status: claimStatus,
     collaborators,
+    gate_needs:
+      task.status === 'pending' || task.status === 'in_progress' ? ctx.tasks.gateNeeds(task) : null,
   };
 
   if (include.includes('subtasks')) {

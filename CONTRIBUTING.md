@@ -50,11 +50,12 @@ In a typical development session, run `npm run dev` in one terminal to watch Typ
 The test suite uses [Vitest](https://vitest.dev/) with in-memory SQLite databases. Each test gets a fresh context via `createTestContext()` from `tests/helpers.ts`.
 
 ```bash
-npm test              # Run all tests (432 across 21 files)
+npm test              # Run all tests (472 across 25 files)
 npm run test:watch    # Watch mode — reruns on file changes
 npm run test:coverage # Coverage report (v8 provider)
 npm run plugin:check  # the /pipeline mod: claude plugin validate + test
 npm run e2e:claude    # the /pipeline pane in the real Claude Code CLI, with screenshots
+npm run manual:record # the user manual's screenshots and GIFs, from the real Claude Code CLI
 ```
 
 ### Full quality check
@@ -197,6 +198,8 @@ The Claude Code pane is a mod in `plugin/` (`hooks/register.tsx` + `view.tsx`, f
 
 `npm run e2e:claude` (`tests/e2e-claude/`, gated by `AGENT_TASKS_E2E_CLAUDE=1`) builds, then drives `claude` in a pseudo-terminal (node-pty, rendered by @xterm/headless) against a scratch world: its own SQLite file seeded through the domain, `node dist/server.js` on a free port, and a copy of `plugin/` whose `.mcp.json` runs this checkout on that database. `--setting-sources project,local` and `--strict-mcp-config` keep your installed plugins, hooks and MCP servers out; your `~/.agent-tasks` database and port 3422 are never touched. Every flow is checked on the screen text and on the REST state after it: the board by stage with the blocked marker and the status entry, the tab hotkeys, Done and a failed task's error, a task's detail (stage strip, description, subtasks, an artifact unfolded, a comment sent as `AGENT_TASKS_USER`), `/pipeline <id>` and `/pipeline <text>`, Advance, Send back with a reason, Complete with a result, Fail (and Never mind), Cancel, Delete behind its confirmation, a blocked task that cannot move on, the New form walked with Enter, Find (a project name too), toasts and the status entry after changes from another session, a narrow dock (110 columns), the inline layout, and the server going away with Refresh bringing it back. Where the focus ring lands after each move is asserted too. It needs a logged-in `claude` on PATH; slash commands and the pane make no model calls, so a run costs no tokens and takes about six minutes. Screenshots land in `~/.claude/tmp/pane-shots-tasks/e2e/` (`AGENT_TASKS_E2E_SHOTS` overrides), rendered by Playwright's Chromium (`npx playwright install chromium` once).
 
+`npm run manual:record` (`tests/e2e-claude/manual.ts`) uses the same harness to record the pictures of the user manual's §4: it plays scripted scenes against the same seeded world and writes the stills as PNG and the flows as GIF to `docs/images/manual/`. `record.ts` samples the screen while a scene plays (a sample counts once it has held for one more sample, so a half-drawn screen never makes a frame), replays the frames in xterm.js in Chromium, and encodes the GIF in pure JS (gifenc, pngjs): one palette per clip, unchanged pixels transparent, the docked pane cropped out of the screen. Lines about the account (usage limits) are blanked. Re-record after a change to the pane, and check the pictures before committing.
+
 For visual work, drive one session by hand and look at each step: `npx tsx tests/e2e-claude/drive.ts [cols] [rows]` (`FULLSCREEN=1` for the docked layout) starts a scratch world and serves `curl -s localhost:47331 -d '{"op":"shot","label":"x"}'` (ops: `pipeline`, `key`, `type`, `press`, `focus`, `wait`, `screen`, `shot`, `ids`, `sync`, `quit`). `sync` copies `plugin/hooks` and `plugin/types` into the session's plugin and runs `/reload-plugins`. Keys sent while the pane does not hold the keyboard go to the prompt and start a model turn, and keys sent while `/pipeline` still runs are queued for the prompt: wait for its answer first.
 
 `npx tsx tests/e2e-claude/tutorial.ts --docs` records the tutorial: a scripted fullscreen session with captions, filmed to `~/.claude/tmp/pane-shots-tasks/tutorial/pipeline-tutorial.webm` (Playwright records a replay, no ffmpeg) with one still per step, copied to `docs/images/tutorial/` for `docs/TUTORIAL.md`; `--render` films the last recording again. Re-record it when the pane changes.
@@ -219,7 +222,7 @@ For visual work, drive one session by hand and look at each step: `npx tsx tests
 
 Schema changes go in `src/storage/database.ts`. Follow this pattern:
 
-1. Append a new `{ version: N, up }` entry to the `migrations` array (agent-common's runner applies them in version order and records the version in `_meta`)
+1. Append a new `{ version: N, up }` entry to the `migrations` array (`createDb` applies them in version order and records the version in `_meta`)
 2. Never edit an old migration
 3. Migrations **must be idempotent** — use `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ADD COLUMN` with existence checks
 4. All tables use foreign keys with `ON DELETE CASCADE`

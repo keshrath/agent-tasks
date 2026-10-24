@@ -3,12 +3,11 @@
 //
 // Lightweight HTTP API using only node:http. No framework dependencies.
 // The JSON API the Claude Code /pipeline pane and the hook scripts call.
-// None of them is a browser, so a request carrying an Origin header is refused:
-// no web page, loopback or not, reaches a handler.
+// Host, Origin and Content-Type are checked by the request guard (guard.ts)
+// before a request reaches the router.
 // =============================================================================
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { json, readBody as kitReadBody, ValidationError as KitValidationError } from 'agent-common';
 import type { AppContext } from '../context.js';
 import { readPackageMeta } from '../package-meta.js';
 import { TasksError, ValidationError } from '../types.js';
@@ -22,15 +21,36 @@ import {
 
 const MAX_BODY_SIZE = 131_072;
 
-async function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  try {
-    return await kitReadBody(req, MAX_BODY_SIZE);
-  } catch (err) {
-    if (err instanceof KitValidationError) {
-      throw new ValidationError(err.message);
-    }
-    throw err;
-  }
+function json(res: ServerResponse, data: unknown, status = 200): void {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.end(JSON.stringify(data));
+}
+
+/** The request's JSON object body, at most MAX_BODY_SIZE bytes. */
+function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_SIZE) reject(new ValidationError('Request body too large'));
+      else chunks.push(chunk);
+    });
+    req.on('end', () => {
+      try {
+        const body: unknown = JSON.parse(Buffer.concat(chunks).toString());
+        if (typeof body === 'object' && body !== null && !Array.isArray(body)) {
+          resolve(body as Record<string, unknown>);
+        } else reject(new ValidationError('Request body must be a JSON object'));
+      } catch {
+        reject(new ValidationError('Invalid JSON in request body'));
+      }
+    });
+    req.on('error', reject);
+  });
 }
 
 function actor(body: Record<string, unknown>, key: string): SessionState {
@@ -162,10 +182,6 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   }
 
   return (req: IncomingMessage, res: ServerResponse) => {
-    if (req.headers.origin !== undefined) {
-      json(res, { error: 'Forbidden origin' }, 403);
-      return;
-    }
     const url = new URL(req.url!, `http://${req.headers.host}`);
 
     for (const r of routes) {

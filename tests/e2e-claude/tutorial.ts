@@ -12,7 +12,8 @@
 
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { ClaudeTerm, SHOTS_DIR, sleep, startWorld } from './harness.js';
+import { ClaudeTerm, RECORDING, SHOTS_DIR, sleep, startWorld } from './harness.js';
+import { capture } from './record.js';
 import { renderShots, renderVideo, type Caption, type Frame } from './render.js';
 
 const OUT = join(SHOTS_DIR, '..', 'tutorial');
@@ -25,7 +26,7 @@ type Recording = { frames: Frame[]; captions: Caption[]; steps: Step[] };
 
 /** The scripted session: each step captions what comes, plays it, and keeps a still. */
 async function record(): Promise<Recording> {
-  const world = await startWorld();
+  const world = await startWorld(undefined, RECORDING);
   const { ids } = world;
   // Full repaints: without them the headless terminal keeps stale cells beside the pane.
   const t = new ClaudeTerm(world, COLS, ROWS, {
@@ -36,7 +37,7 @@ async function record(): Promise<Recording> {
   const rec: Recording = { frames: [], captions: [], steps: [] };
   const t0 = Date.now();
   const recorder = setInterval(() => {
-    const data = t.serialize();
+    const data = capture(t);
     if (rec.frames.at(-1)?.data !== data) rec.frames.push({ at: Date.now() - t0, data });
   }, 80);
 
@@ -47,7 +48,7 @@ async function record(): Promise<Recording> {
     rec.steps.push({ label, text });
     writeFileSync(
       join(OUT, `${String(rec.steps.length).padStart(2, '0')}-${label}.ansi`),
-      JSON.stringify({ cols: COLS, rows: ROWS, data: t.serialize() }),
+      JSON.stringify({ cols: COLS, rows: ROWS, data: capture(t) }),
     );
   };
   // Typed like a person, so the video shows it.

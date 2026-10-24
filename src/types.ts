@@ -148,6 +148,19 @@ export interface PipelineConfig {
   readonly updated_at: string;
 }
 
+/** What a stage gate still needs before a task may leave `stage`; see TaskService.gateNeeds. */
+export interface GateNeeds {
+  stage: string;
+  comment: boolean;
+  /** Any artifact at all in this stage (the project-wide `require_artifact`). */
+  artifact: boolean;
+  /** Named artifacts still missing in this stage. */
+  artifacts: string[];
+  /** How many more artifacts this stage needs. */
+  min_artifacts: number;
+  approval: boolean;
+}
+
 export interface StageGate {
   require_artifacts?: string[];
   require_min_artifacts?: number;
@@ -250,32 +263,4 @@ export class ValidationError extends TasksError {
     super(message, 'VALIDATION_ERROR', 422);
     this.name = 'ValidationError';
   }
-}
-
-// ---------------------------------------------------------------------------
-// JSON-RPC (MCP transport)
-// ---------------------------------------------------------------------------
-
-export interface JsonRpcRequest {
-  jsonrpc: '2.0';
-  id: number | string;
-  method: string;
-  params?: Record<string, unknown>;
-}
-
-export interface JsonRpcResponse {
-  jsonrpc: '2.0';
-  id: number | string | null;
-  result?: unknown;
-  error?: { code: number; message: string; data?: unknown };
-}
-
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: {
-    type: 'object';
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
 }

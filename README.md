@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-brightgreen)](https://nodejs.org/)
-[![Tests](https://img.shields.io/badge/tests-432%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-472%20passing-brightgreen)]()
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-8-purple)]()
 [![REST Endpoints](https://img.shields.io/badge/REST-8%20endpoints-orange)]()
 
@@ -10,7 +10,9 @@
 
 Built for AI coding agents (Claude Code, Codex CLI, Gemini CLI, Aider) but works equally well with any MCP client or REST consumer.
 
-![The /pipeline pane beside a Claude Code conversation](docs/images/tutorial/02-open.png)
+![/pipeline opens the board beside a Claude Code conversation; Tab and Enter open a task](docs/images/manual/hero.gif)
+
+The [user manual](docs/USER-MANUAL.md#4-the-pipeline-pane) shows every view and action of the pane, with screenshots and short clips from the real CLI.
 
 2.0 replaced the web dashboard with the `/pipeline` pane inside Claude Code; there is no browser UI, WebSocket or agent-desk plugin any more.
 
@@ -18,7 +20,7 @@ Built for AI coding agents (Claude Code, Codex CLI, Gemini CLI, Aider) but works
 
 - The dashboard on http://localhost:3422 is gone: open the board with `/pipeline` in Claude Code (install the plugin, below). The agent-desk Tasks tab is gone with it.
 - REST: `GET /api/overview` and `PUT /api/tasks/:id/stage` are gone (use `GET /api/board` and `POST /api/tasks/:id/stage` with `{"action": "advance"}`), and so are the routes nothing called; see [the REST API](#rest-api-8-endpoints).
-- A 1.x process still holding port 3422 answers the pane with 404s: restart the Claude Code sessions (or kill the old `agent-tasks` process) so a 2.x process takes the port.
+- A 1.x process still holding port 3422 is named by the pane (`An older agent-tasks (1.10.13) holds the port`) and in the status line (`old server 1.10.13 on the port`): end the Claude Code sessions still running it (or kill the old `agent-tasks` process) so a 2.x process takes the port, then Refresh.
 
 ---
 
@@ -141,7 +143,7 @@ DELETE /api/tasks/:id                 Delete a task
 ## Testing
 
 ```bash
-npm test              # vitest: 432 tests across 21 files
+npm test              # vitest: 472 tests across 25 files
 npm run test:watch    # Watch mode
 npm run test:coverage # Coverage report
 npm run check         # Full CI: typecheck + lint + format + test
@@ -161,6 +163,11 @@ npm run e2e:claude    # the pane in the real Claude Code CLI (see CONTRIBUTING.m
 | `AGENT_TASKS_USER`                       | the OS user                     | Who the `/pipeline` pane acts as (`created_by`, comment author, `by`)          |
 | `AGENT_TASKS_INSTRUCTIONS`               | enabled                         | Set to `0` to disable response-embedded instructions                           |
 | `AGENT_TASKS_RETENTION_DAYS`             | `30`                            | Days the cleanup keeps resolved approval records                               |
+| `AGENT_TASKS_COMPLETED_RETENTION_DAYS`   | `7`                             | Days a completed task is kept (and listed under the pane's Done) before purge  |
+| `AGENT_TASKS_FAILED_RETENTION_DAYS`      | `7`                             | Days a failed task is kept before purge                                        |
+| `AGENT_TASKS_CANCELLED_RETENTION_DAYS`   | `1`                             | Days a cancelled task is kept before purge                                     |
+| `AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES`     | `360`                           | Minutes before an in-progress task with no assignee is cancelled               |
+| `AGENT_TASKS_COMM_TIMEOUT_MS`            | `5000`                          | Timeout of the cleanup's agent-comm requests                                   |
 | `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES` | `60`                            | `task-cleanup-start.js`: idle minutes before a dead session's task is failed   |
 | `AGENT_TASKS_HEARTBEAT_FRESH_MINUTES`    | `15`                            | `task-cleanup-start.js`: an agent with a heartbeat this recent counts as alive |
 | `AGENT_COMM_URL`                         | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications                                   |
@@ -183,7 +190,7 @@ npm run e2e:claude    # the pane in the real Claude Code CLI (see CONTRIBUTING.m
 ## Documentation
 
 - [Tutorial](docs/TUTORIAL.md) — the `/pipeline` pane step by step, recorded from the real CLI
-- [User Manual](docs/USER-MANUAL.md) — every tool, the pipeline, gates, cleanup
+- [User Manual](docs/USER-MANUAL.md) — the `/pipeline` pane view by view (screenshots and GIFs), every tool, the pipeline, gates, cleanup
 - [API Reference](docs/API.md) — all 8 MCP tools and the REST endpoints
 - [Hooks](docs/hooks.md) — the Claude Code command hooks `scripts/setup.js` installs
 - [Architecture](docs/ARCHITECTURE.md) — source structure, design principles, database schema

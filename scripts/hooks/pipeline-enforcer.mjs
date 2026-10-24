@@ -105,7 +105,7 @@ function enforce(reason) {
     JSON.stringify({
       hookSpecificOutput: {
         hookEventName: 'UserPromptSubmit',
-        additionalContext: `PIPELINE REQUIRED: ${reason}\n\nBefore doing this work, you MUST:\n1. Ensure you are registered with comm_register\n2. Create a task with task_create OR claim one with task_claim\n\nDo NOT start writing code or making changes until you have a pipeline task assigned to your session.`,
+        additionalContext: `PIPELINE REQUIRED: ${reason}\n\nBefore doing this work, you MUST:\n1. Ensure you are registered with comm_register\n2. Create a task with task_create OR claim one with task_stage action \"claim\"\n\nDo NOT start writing code or making changes until you have a pipeline task assigned to your session.`,
       },
     }),
   );

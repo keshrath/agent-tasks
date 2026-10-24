@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-10-24
+
+No agent-common any more, stage gates said before they refuse, and the `/pipeline` pane tested end to end in the real Claude Code CLI.
+
+### Added
+
+- **`gate_needs`** on `task_get` and `GET /api/tasks/:id`: what the current stage's gate still asks for (a comment, artifacts, more artifacts, an approval), or null. The `/pipeline` pane says it under the actions, and who gives it: the comment in the field below, artifacts from an agent.
+- **The pane folds a long backlog**: a stage nobody works on shows 10 rows and `▸ N more in <stage>`, so a long queue never buries the work in flight; unfolded, the focus is on the first row it showed; a find shows every match.
+- **The pane keeps its place**: after Esc and ctrl+x tab the focus is back on the control the person left, not on the view's first one.
+- **The real-CLI suites** (`npm run e2e:claude`, `tests/e2e-claude/`): the pane's board, detail and actions by keyboard and mouse, resilience (takeover, server down, an older server on the port), and a real `claude -p` calling every MCP tool and action; `COVERAGE.md` maps every control to its test.
+- **The user manual's `/pipeline` chapter** with screenshots and short GIFs recorded from the real CLI (`npm run manual:record`).
+
+### Changed
+
+- **No agent-common dependency.** MCP over stdio uses the official SDK (`@modelcontextprotocol/server`); the REST server, its request guard (`src/transport/guard.ts`) and the SQLite wrapper are this package's own. Existing databases open unchanged.
+- **MCP errors carry their real code** (`NOT_FOUND`, `CONFLICT`, `VALIDATION_ERROR`) in `Error [CODE]: message`; agent-common reported every agent-tasks error as `UNKNOWN_ERROR`.
+- **The REST server starts once the client has initialized** (`notifications/initialized`), and **an MCP process exits when its client closes stdin**, so the port passes to a live session instead of a stray process.
+- **`task_stage` complete honours the stage gate** like advance: a gated task can no longer skip to done.
+- **Subtasks inherit the parent's project and priority** unless given their own, as `task_create` says.
+- **Stage-gate errors state the fact only** (`Stage gate: at least one comment required before advancing from 'spec'.`), no tool hints; they read the same in the pane and to agents.
+- **The pane never lands the focus in a text field** when `/pipeline` opens or moves to a view: what the person types next is not taken as a comment. The comment field gets it only after a press the gate refused for want of one. Advance and Complete are not drawn as the main step while a gate holds. A refusal the gate line explains says only `✗ #N can't leave <stage> yet`, and a refused Complete keeps its form and typed result.
+- **The pane measures text in terminal columns**: wide (CJK) and emoji titles no longer wrap a row.
+- `pipeline-enforcer.mjs` tells the model to use `task_stage` action `claim` (`task_claim` does not exist).
+
+### Fixed
+
+- The focus after Advance into the stage before done landed on Send back instead of Complete.
+- `/pipeline <id>` for a task that does not exist did not say so.
+- The Delete buttons' focus highlight covered only the word, not the button.
+- Right after `/pipeline`, the focus sat in the Find field for an instant: keys typed then could land in it.
+- When the server came back by itself, the focus was left on a tab instead of a task.
+
 ## [2.0.0] - 2026-10-23
 
 The web dashboard is gone. The board now lives inside Claude Code: the agent-tasks plugin adds a `/pipeline` pane beside the conversation.

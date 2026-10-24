@@ -2,6 +2,8 @@
 
 A walk through the pane in the real Claude Code CLI, with the pane docked beside the conversation (the fullscreen layout). Every picture below is a frame of a recorded session against a scratch board; `npx tsx tests/e2e-claude/tutorial.ts --docs` records it again, writes a captioned video (`pipeline-tutorial.webm`) and the stills to `~/.claude/tmp/pane-shots-tasks/tutorial/`, and copies the stills here.
 
+This is the guided walk. The [user manual](USER-MANUAL.md#4-the-pipeline-pane) is the reference: every view, action and state of the pane, with a screenshot each and a short clip of every flow.
+
 The pane is keyboard-first. A few keys get you everywhere:
 
 | Key                  | Does                                                 |
@@ -13,7 +15,7 @@ The pane is keyboard-first. A few keys get you everywhere:
 | `r`                  | refresh                                              |
 | `Esc` / `ctrl+x tab` | give the keyboard back to the prompt / take it again |
 
-While the focus is in a text field, digits and letters go into the field, and the line under the tabs says `Tab leaves the field` instead of the keys; `Tab` leaves it. With the mouse (fullscreen layout), a click presses a button.
+While the focus is in a text field, digits and letters go into the field, and the line under the tabs says `Tab leaves the field` instead of the keys (`Tab next field` in the New form); `Tab` leaves it. With the mouse (fullscreen layout), a click presses a button.
 
 ## 1. Open it
 
@@ -53,7 +55,7 @@ Agents claim tasks with `task_stage`; the pane has no Claim, and a task nobody c
 
 ![Back in spec](images/tutorial/09-sent-back.png)
 
-In its last stage the next step is `Complete`, which asks for the result. `Fail` asks what went wrong, `Cancel` why it is dropped. `Enter` in the field, or the form's own button (`Complete`, `Fail`, `Cancel task`, `Send back`), does it; `Never mind` closes the form. `Delete` (in red) asks first, with the focus on `Never mind`. The line under the tabs says how it went (`✓ #13 completed`, `✗ #14 failed`, `– #15 cancelled`) and clears itself after a few seconds or at the next move.
+In its last stage the next step is `Complete`, which asks for the result. `Fail` asks what went wrong, `Cancel` why it is dropped. `Enter` in the field, or the form's own button (`Complete`, `Fail`, `Cancel task`, `Send back`), does it; `Never mind` closes the form. `Delete` asks first, in a red box, with the focus on `Never mind`. The line under the tabs says how it went (`✓ #13 completed`, `✗ #14 failed`, `– #15 cancelled`) and clears itself after a few seconds or at the next move.
 
 ![Complete asks for the result](images/tutorial/10-complete.png)
 
@@ -83,7 +85,7 @@ On the board, Find narrows it to the tasks whose id, title, assignee, project or
 
 ## 6. Give the keyboard back
 
-`Esc` hands the keyboard back to the prompt; the pane stays open and keeps refreshing. `ctrl+x tab` takes it again.
+`Esc` hands the keyboard back to the prompt; the pane stays open and keeps refreshing. `ctrl+x tab` takes it again, with the focus where you left it.
 
 ![The prompt has the keyboard](images/tutorial/17-esc.png)
 

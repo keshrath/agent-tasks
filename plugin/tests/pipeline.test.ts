@@ -1,7 +1,8 @@
 import type { On } from 'claude-code';
 import { expect, mock, test, type TestBody } from 'claude-code/testing';
 
-import { isField, packParts } from '../hooks/view';
+import type { AgentTasksSnapshot, AgentTasksTask } from '../types';
+import { boardGroups, clip, cols, gateHint, isField, packParts } from '../hooks/view';
 
 type Row = {
   id: number;
@@ -18,6 +19,8 @@ type Row = {
   created_by: string;
   created_at: string;
   updated_at: string;
+  /** What the server's task_get says the stage gate still needs. */
+  gate_needs?: unknown;
 };
 
 const STAGES = ['backlog', 'spec', 'plan', 'implement', 'test', 'review', 'done'];
@@ -168,6 +171,13 @@ function server(on: On, world: World) {
     if (one && m?.[2] === '/stage') {
       const a = body?.action;
       const at = STAGES.indexOf(one.stage);
+      if ((a === 'advance' || a === 'complete') && one.gate_needs)
+        return reply(
+          {
+            error: `Stage gate: at least one comment required before advancing from '${one.stage}'.`,
+          },
+          422,
+        );
       if (a === 'advance') {
         if ((world.deps ?? []).some((d) => d.task_id === one.id))
           return reply({ error: 'Blocked by incomplete dependencies: #2' }, 409);
@@ -341,7 +351,7 @@ test('advance and complete as the person, the next step offered first', async ($
   expect(await ui.find({ type: 'Text', text: /#2 moved to test/ })).toBeDefined();
   await ui.press({ key: 'advance:review' });
   expect(await ui.find({ key: 'advance:done' })).toBeUndefined(); // review: the next step is done
-  await ui.press({ key: 'ask:complete' });
+  await ui.press({ key: 'complete:review' });
   await ui.input({ key: 'form:complete', text: '  ' });
   expect(await ui.find({ type: 'Text', text: /a result is needed/ })).toBeDefined();
   await ui.input({ key: 'form:complete', text: 'pane merged' });
@@ -394,6 +404,65 @@ test('summary parts break between parts, no line ending or starting on the separ
   ]);
   expect(packParts(['a', 'b'], 5)).toEqual([['a', 'b']]);
   expect(packParts(['a', 'b'], 4)).toEqual([['a'], ['b']]);
+  expect(packParts(['設計', '実装'], 9)).toEqual([['設計'], ['実装']]);
+});
+
+test('a long backlog folds past ten rows; a find or a stage at work never does', () => {
+  const t = (id: number, stage: string, status: 'pending' | 'in_progress'): AgentTasksTask => ({
+    id,
+    title: `Task ${id}`,
+    stage,
+    status,
+    priority: 0,
+    project: null,
+    assigned_to: null,
+    tags: [],
+    parent_id: null,
+    result: null,
+    updated_at: '2026-10-09 20:00:00',
+    blocked_by: [],
+    subtasks: null,
+  });
+  const snap: AgentTasksSnapshot = {
+    isUp: true,
+    origin: '',
+    old: null,
+    stages: STAGES,
+    pipelines: {},
+    open: [
+      ...Array.from({ length: 30 }, (_, i) => t(i + 1, 'backlog', 'pending')),
+      ...Array.from({ length: 13 }, (_, i) => t(i + 100, 'implement', 'in_progress')),
+    ],
+    recent: [],
+    me: 'mathi',
+  };
+  const [backlog, implement] = boardGroups(snap, '', []);
+  expect(backlog).toMatchObject({ stage: 'backlog', hidden: 20 });
+  expect(backlog!.tasks).toHaveLength(10);
+  expect(implement).toMatchObject({ stage: 'implement', hidden: 0 });
+  expect(implement!.tasks).toHaveLength(13);
+  expect(boardGroups(snap, '', ['stage:backlog'])[0]).toMatchObject({ hidden: 0 });
+  expect(boardGroups(snap, 'Task', [])[0]).toMatchObject({ hidden: 0 });
+});
+
+test('a gate says what it needs and who gives it', () => {
+  const g = { comment: false, artifact: false, artifacts: [], more: 0, approval: false };
+  expect(gateHint({ ...g, comment: true }, 'spec')).toBe(
+    'Needs a comment before it leaves spec: add the comment below.',
+  );
+  expect(gateHint({ ...g, artifacts: ['design'] }, 'spec')).toBe(
+    'Needs artifact design before it leaves spec: an agent attaches artifacts.',
+  );
+});
+
+test('widths count terminal columns: wide characters two, marks none', () => {
+  expect(cols('abc')).toBe(3);
+  expect(cols('設計書')).toBe(6);
+  expect(cols('ship 🚀')).toBe(7);
+  expect(cols('é')).toBe(1);
+  expect(clip('設計書のレビュー', 7)).toBe('設計書…');
+  expect(cols(clip('設計書のレビュー', 7))).toBeLessThanOrEqual(7);
+  expect(clip('short', 10)).toBe('short');
 });
 
 test('send back picks the stage; fail and cancel need their words; delete asks first', async ($, on) => {
@@ -433,7 +502,7 @@ test('a blocked task offers no advance or complete and says what it waits for; b
   await $.command.run({ command: 'pipeline', args: '2', ...RUN });
   const ui = await mount($);
   expect(await ui.find({ key: 'advance:test' })).toBeUndefined();
-  expect(await ui.find({ key: 'ask:complete' })).toBeUndefined();
+  expect(await ui.find({ key: 'complete:implement' })).toBeUndefined();
   expect(await ui.find({ key: 'ask:fail' })).toBeDefined();
   expect(await ui.find({ type: 'Text', text: /It moves on once #1 is done/ })).toBeDefined();
   await ui.press({ key: 'dep:1' });
@@ -528,6 +597,67 @@ test('a toast says what finished or reached review since the last poll', async (
   expect(s.toasts).toHaveLength(1);
 });
 
+test('a stage gate is said up front: what it needs before the task leaves its stage', async ($, on) => {
+  const gate = {
+    stage: 'implement',
+    comment: true,
+    artifact: false,
+    artifacts: ['review-notes'],
+    min_artifacts: 0,
+    approval: false,
+  };
+  server(on, {
+    tasks: BOARD().map((t) => (t.id === 2 ? { ...t, gate_needs: gate } : t)),
+  });
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+  await $.command.run({ command: 'pipeline', args: '2', ...RUN });
+  const ui = await mount($);
+  expect(
+    await ui.find({
+      type: 'Text',
+      text: /Needs a comment and artifact review-notes before it leaves implement: add the comment below; an agent attaches artifacts\./,
+    }),
+  ).toBeDefined();
+  // Advance stays (the server is the authority and says why it refuses), but is not the one
+  // to press: no primary while the gate holds.
+  // The ring lands on it, never in the comment field: what is typed next would be a comment.
+  const advance = await ui.find({ key: 'advance:test' });
+  expect(advance?.props.variant).toBeUndefined();
+  expect(advance?.props.autoFocus).toBe(true);
+});
+
+test('a refusal the gate hint explains says only that it held; Complete keeps its words', async ($, on) => {
+  const gate = {
+    stage: 'implement',
+    comment: true,
+    artifact: false,
+    artifacts: [],
+    min_artifacts: 0,
+    approval: false,
+  };
+  const s = server(on, {
+    tasks: BOARD().map((t) => (t.id === 2 ? { ...t, gate_needs: gate } : t)),
+  });
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+  await $.command.run({ command: 'pipeline', args: '2', ...RUN });
+  const ui = await mount($);
+  await ui.press({ key: 'advance:test' });
+  expect(await ui.find({ type: 'Text', text: /✗ #2 can't leave implement yet/ })).toBeDefined();
+  expect(await ui.find({ type: 'Text', text: /Stage gate:/ })).toBeUndefined();
+  await ui.press({ key: 'complete:implement' });
+  await ui.input({ key: 'form:complete', text: 'shipped', kind: 'change' });
+  await ui.press({ key: 'form-submit' });
+  expect(await ui.find({ type: 'Text', text: /✗ #2 can't leave implement yet/ })).toBeDefined();
+  // The form stays with its words, and says under it what the gate holds for.
+  expect(await ui.find({ key: 'form-submit' })).toBeDefined();
+  expect((await ui.find({ key: 'form:complete' }))?.props.value).toBe('shipped');
+  expect(
+    await ui.find({ type: 'Text', text: /Needs a comment before it leaves implement/ }),
+  ).toBeDefined();
+  await ui.press({ key: 'form-submit' });
+  expect(s.calls.at(-1)?.body).toMatchObject({ action: 'complete', result: 'shipped' });
+});
+
 test('the Done tab lists finished tasks with their result', async ($, on) => {
   server(on, { tasks: BOARD() });
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
@@ -537,7 +667,7 @@ test('the Done tab lists finished tasks with their result', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /merged/ })).toBeDefined();
   await ui.press({ key: 'open:4' });
   expect(await ui.find({ key: 'back' })).toMatchObject({ props: { label: '‹ Done' } });
-  expect(await ui.find({ key: 'ask:complete' })).toBeUndefined();
+  expect(await ui.find({ key: 'complete:done' })).toBeUndefined();
 });
 
 test('server down: what to do, offline in the status line, a Refresh that says it tried', async ($, on) => {
@@ -561,7 +691,7 @@ test('an agent-tasks from before the board on the port is named, not taken for n
   const s = server(on, { tasks: BOARD(), old: '1.9.3' });
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
   const out = await $.command.run({ command: 'pipeline', args: '', ...RUN });
-  expect(out.text).toContain('agent-tasks 1.9.3 holds http://127.0.0.1:3422');
+  expect(out.text).toContain('version 1.9.3 holds http://127.0.0.1:3422');
   expect(s.status.at(-1)).toBe('old server 1.9.3 on the port');
   const ui = await mount($);
   expect(await ui.find({ type: 'Text', text: /An older agent-tasks \(1\.9\.3\)/ })).toBeDefined();

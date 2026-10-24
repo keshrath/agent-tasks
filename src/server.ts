@@ -7,14 +7,15 @@
 // Can be started manually: node dist/server.js [--port 3422] [--db path]
 // Or auto-started from the MCP server via leader election: the first process
 // to bind the port serves it, the others retry, so one of them takes over when
-// the serving process exits. Built on agent-common's startDashboard for the
-// bind, request guard and EADDRINUSE handling.
+// the serving process exits. Binds 127.0.0.1 (AGENT_TASKS_HOST overrides) and
+// runs every request through the request guard.
 // =============================================================================
 
-import { startDashboard as startKitServer } from 'agent-common';
-import type { Server } from 'http';
+import { createServer, type Server } from 'http';
+import type { AddressInfo } from 'net';
 import { createContext, type AppContext } from './context.js';
 import { createRouter } from './transport/rest.js';
+import { createRequestGuard, type RequestGuard } from './transport/guard.js';
 import type { DbOptions } from './storage/database.js';
 
 export interface RestServer {
@@ -29,12 +30,22 @@ function getCliArgAfterFlag(argv: string[], flag: string): string | undefined {
   return argv[i + 1];
 }
 
+/** Listens on `port` (0 picks a free one); rejects with code EADDRINUSE when it is taken. */
 export function startRestServer(ctx: AppContext, port = 3422): Promise<RestServer> {
-  return startKitServer({
-    port,
-    host: process.env.AGENT_TASKS_HOST,
-    handler: createRouter(ctx),
-    banner: (p) => `agent-tasks REST API: http://localhost:${p}`,
+  const host = process.env.AGENT_TASKS_HOST || '127.0.0.1';
+  const route = createRouter(ctx);
+  let guard: RequestGuard;
+  const httpServer = createServer((req, res) => {
+    if (!guard(req, res)) route(req, res);
+  });
+  return new Promise((resolve, reject) => {
+    httpServer.once('error', reject);
+    httpServer.listen(port, host, () => {
+      const bound = (httpServer.address() as AddressInfo).port;
+      guard = createRequestGuard(bound, host);
+      process.stderr.write(`agent-tasks REST API: http://localhost:${bound}\n`);
+      resolve({ httpServer, port: bound, close: () => httpServer.close() });
+    });
   });
 }
 

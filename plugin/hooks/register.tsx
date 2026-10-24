@@ -13,6 +13,7 @@ import type {
   AgentTasksDetail,
   AgentTasksDraft,
   AgentTasksForm,
+  AgentTasksGate,
   AgentTasksRef,
   AgentTasksSnapshot,
   AgentTasksStatus,
@@ -21,10 +22,13 @@ import type {
 } from '../types';
 import {
   Pane,
+  boardGroups,
   boardOrder,
+  FOLD_ROWS,
   foldKey,
   headline,
   matches,
+  completeKey,
   nextStep,
   priorityOf,
   refreshKey,
@@ -70,6 +74,19 @@ type Json = Record<string, any>;
 
 const list = (v: unknown): Json[] => (Array.isArray(v) ? (v as Json[]) : []);
 const text = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
+
+/** The server's `gate_needs`: what holds the task in its stage. */
+function gateOf(v: unknown): AgentTasksGate | null {
+  if (!v || typeof v !== 'object') return null;
+  const g = v as Json;
+  return {
+    comment: Boolean(g.comment),
+    artifact: Boolean(g.artifact),
+    artifacts: list(g.artifacts).map(String),
+    more: Number(g.min_artifacts ?? 0),
+    approval: Boolean(g.approval),
+  };
+}
 const STATUSES: AgentTasksStatus[] = ['pending', 'in_progress', 'completed', 'failed', 'cancelled'];
 const status = (v: unknown): AgentTasksStatus =>
   STATUSES.includes(v as AgentTasksStatus) ? (v as AgentTasksStatus) : 'pending';
@@ -237,6 +254,20 @@ function changes(prev: AgentTasksSnapshot, next: AgentTasksSnapshot): string | n
   return `${shown}${said.length > 3 ? ` · +${said.length - 3} more` : ''}`;
 }
 
+/** Where the ring was when the server went away: back up, it goes there again if drawn. */
+let beforeDown: string | null = null;
+
+/**
+ * The board (or task) back after the server was away: the ring returns where it was, else
+ * lands as on a fresh open. Refresh is drawn anew as the server comes back, and the ring kept
+ * by its place would otherwise sit on a tab.
+ */
+async function landBack($: EngineInterface) {
+  const was = beforeDown;
+  beforeDown = null;
+  if (!(was && (await focusOn($, was)))) await land($);
+}
+
 /** Polls by number: one that answers after a later one was drawn is dropped, not drawn over it. */
 let polls = 0;
 let drawnPoll = 0;
@@ -257,8 +288,14 @@ async function refresh($: EngineInterface, quiet = false) {
   $.ui.status(
     next.isUp ? headline(next.open) : next.old ? `old server ${next.old} on the port` : 'offline',
   );
-  if (prev?.isUp && !next.isUp) void land($);
-  if (prev && !prev.isUp && next.isUp) await say($, null);
+  if (prev?.isUp && !next.isUp) {
+    beforeDown = await read($, focused);
+    void land($);
+  }
+  if (prev && !prev.isUp && next.isUp) {
+    await say($, null);
+    void landBack($);
+  }
   if (!quiet && prev?.isUp && next.isUp && !(await read($, busy))) {
     const said = changes(prev, next);
     if (said) $.ui.toast(said);
@@ -300,6 +337,7 @@ async function loadDetail($: EngineInterface, id: number) {
     stages: list(pipeline.stages).map(String),
     blockers: list(deps.blockers).map((x) => ref(x, blocked)),
     blocking: list(deps.blocking).map((x) => ref(x, blocked)),
+    gate: gateOf(t.gate_needs),
     links: list(deps.links).map((l) => ({
       ...ref((l.task ?? {}) as Json, blocked),
       relationship: String(l.relationship ?? ''),
@@ -346,7 +384,7 @@ async function loadView($: EngineInterface) {
   } catch (err) {
     if ((err as { status?: number }).status !== 404) throw err;
     await update($, route, (x) => ({ ...x, task: null, trail: [] }));
-    say($, `✗ there is no task #${r.task}`);
+    await say($, `✗ there is no task #${r.task}`);
     void land($);
   }
 }
@@ -368,21 +406,23 @@ async function say($: EngineInterface, said: string | null) {
 
 /**
  * Runs one action with its busy line and outcome, then reloads and lands the focus: on `to`'s
- * key when given (the comment field after a comment), else where `landing` says. The busy
- * line stays until the reload is drawn: a poll answering meanwhile does not toast the action.
+ * key when it names one (told whether the action went through), else where `landing` says.
+ * The busy line stays until the reload is drawn: a poll answering meanwhile does not toast it.
  * The outcome leads with its mark: ✓ done, or the task's own look (a failed task's ✗).
  */
 async function act(
   $: EngineInterface,
   label: string,
   fn: () => Promise<string>,
-  to?: () => Promise<string>,
+  to?: (ok: boolean) => Promise<string | null>,
 ) {
   await update($, busy, () => label);
   await say($, null);
+  let ok = true;
   try {
     await say($, (await fn()) || null);
   } catch (err) {
+    ok = false;
     await say($, `✗ ${label} failed: ${err instanceof Error ? err.message : String(err)}`);
   }
   const snap = await refresh($, true);
@@ -391,7 +431,8 @@ async function act(
     await say($, `✗ still no board (${new Date().toTimeString().slice(0, 8)})`);
   await loadView($).catch(() => {});
   await update($, busy, () => null);
-  if (to) await focusOn($, await to());
+  const key = to ? await to(ok) : null;
+  if (key) await focusOn($, key);
   else void land($);
 }
 
@@ -414,10 +455,8 @@ async function landing($: EngineInterface, from: number | null): Promise<string 
     const to = from !== null && snap.recent.some((t) => t.id === from) ? from : snap.recent[0]?.id;
     return to !== undefined ? `open:${to}` : 'tab:board';
   }
-  const q = await read($, filter);
-  const shown = boardOrder(
-    snap.open.filter((t) => matches(t, q)),
-    snap,
+  const shown = boardGroups(snap, await read($, filter), await read($, expanded)).flatMap(
+    (g) => g.tasks,
   );
   const to = from !== null && shown.some((t) => t.id === from) ? from : shown[0]?.id;
   if (to !== undefined) return `open:${to}`;
@@ -425,12 +464,26 @@ async function landing($: EngineInterface, from: number | null): Promise<string 
 }
 
 /**
- * Moves the ring and keeps where it went: the pane's own moves do not reach its `ui.focus`
- * hook (the person's do), and the header says when the keys go into a text field.
+ * The keys the pane is moving the ring to right now (moves can overlap: one waits for its
+ * drawing while another starts). Its own moves and its autoFocus taking the ring both reach
+ * `ui.focus` as origin `plugin`; this tells the two apart.
  */
-async function focusOn($: EngineInterface, key: string) {
-  const r = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'not drawn' }));
-  if (!('deny' in r)) await update($, focused, () => key);
+const ownMoves = new Set<string>();
+
+/**
+ * Moves the ring and keeps where it went (the header says when the keys go into a text field);
+ * false when the key was never drawn.
+ */
+async function focusOn($: EngineInterface, key: string): Promise<boolean> {
+  ownMoves.add(key);
+  try {
+    const r = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'not drawn' }));
+    if ('deny' in r) return false;
+    await update($, focused, () => key);
+    return true;
+  } finally {
+    ownMoves.delete(key);
+  }
 }
 
 async function land($: EngineInterface, from: number | null = null) {
@@ -441,11 +494,12 @@ async function land($: EngineInterface, from: number | null = null) {
 /**
  * Lands the ring on a board drawn after the last `rev` bump. A key already drawn is focused at
  * once, and the ring keeps its place, not its key, across a redraw: a row the board before
- * drew too, elsewhere, would take it to whatever then sits there. The Find field's fresh key
- * exists only in the new board, so focusing it waits for that drawing first.
+ * drew too, elsewhere, would take it to whatever then sits there. Refresh's fresh key exists
+ * only in the new board, so focusing it waits for that drawing first; it is a button, never a
+ * field, so nothing typed meanwhile lands in one.
  */
 async function landOnNewBoard($: EngineInterface) {
-  await focusOn($, `find:${await read($, rev)}`);
+  await focusOn($, refreshKey(true, await read($, rev)));
   await land($);
 }
 
@@ -475,7 +529,8 @@ async function open($: EngineInterface, id: number) {
   const trail = r.task !== null && r.task !== id ? [...r.trail, r.task] : r.trail;
   await update($, route, () => ({ ...r, task: id, trail }));
   await reset($);
-  await update($, expanded, () => []);
+  // A task's folds start shut; the board's stay as the person left them.
+  await update($, expanded, (x) => x.filter((p) => p.startsWith('stage:')));
   if ((await read($, detail))?.id !== id) await update($, detail, () => null);
   await loadView($).catch(async (err: Error) => say($, `✗ ${err.message}`));
   void land($);
@@ -503,6 +558,8 @@ async function back($: EngineInterface) {
  */
 async function openPane($: EngineInterface) {
   await $.ui.close({ id: PANE }).catch(() => undefined);
+  // A view the command just set starts at its own landing, not where the last one was left.
+  await update($, focused, () => null);
   return $.ui.open({ id: PANE, title: 'agent-tasks', focus: true, rows: PANE_ROWS });
 }
 
@@ -545,9 +602,23 @@ async function submit($: EngineInterface) {
 /** Closes the open form or confirmation and puts the ring back on the button that opened it. */
 async function dismiss($: EngineInterface) {
   const f = await read($, form);
+  const stage = (await read($, detail))?.stage ?? '';
   await update($, form, () => null);
   await update($, confirm, () => null);
-  await focusOn($, f ? `ask:${f.action}` : 'ask-delete');
+  await focusOn(
+    $,
+    !f ? 'ask-delete' : f.action === 'complete' ? completeKey(stage) : `ask:${f.action}`,
+  );
+}
+
+/** The first row an unfolded stage shows past the folded ones, if the board draws it. */
+async function firstUnfolded($: EngineInterface, stage: string): Promise<number | null> {
+  const snap = await read($, snapshot);
+  if (!snap) return null;
+  const g = boardGroups(snap, await read($, filter), await read($, expanded)).find(
+    (x) => x.stage === stage,
+  );
+  return g?.tasks[FOLD_ROWS]?.id ?? null;
 }
 
 /**
@@ -557,14 +628,33 @@ async function dismiss($: EngineInterface) {
 async function toggle($: EngineInterface, part: string) {
   await update($, expanded, (x) => (x.includes(part) ? x.filter((p) => p !== part) : [...x, part]));
   const isOpen = (await read($, expanded)).includes(part);
+  // A stage unfolded: the ring goes to the first row it showed, which only the new board draws.
+  const shown = isOpen && part.startsWith('stage:') ? await firstUnfolded($, part.slice(6)) : null;
+  if (shown !== null && (await focusOn($, `open:${shown}`))) return;
   await focusOn($, foldKey(part, isOpen));
   if (isOpen && part.startsWith('art:'))
     await $.ui.scroll({ in: PANE, to: { key: `artrow:${part.slice(4)}` } }).catch(() => undefined);
 }
 
 function actions($: EngineInterface): Actions {
-  const run = (label: string, fn: () => Promise<string>, to?: () => Promise<string>) =>
-    void act($, label, fn, to);
+  const run = (
+    label: string,
+    fn: () => Promise<string>,
+    to?: (ok: boolean) => Promise<string | null>,
+  ) => void act($, label, fn, to);
+  // A move the stage gate refused: its hint under the actions already says why, so the notice
+  // only says it held. For want of a comment the comment field is where the person goes; only
+  // then, as a ring landing in a text field would take what is typed next as a comment. A
+  // Complete form stays open with its words, and the bump draws the field anew to wait on.
+  const toCommentIfGated = async (ok: boolean) => {
+    const d = await read($, detail);
+    if (ok || !d?.gate || !(await read($, notice))?.includes('Stage gate')) return null;
+    await say($, `✗ #${d.id} can't leave ${d.stage} yet`);
+    await update($, form, (f) => (f ? { ...f, seed: f.words } : f));
+    if (!d.gate.comment) return null;
+    await update($, rev, (n) => n + 1);
+    return `comment:${await read($, rev)}`;
+  };
   const stage = async (id: number, body: Json) =>
     api($, `/api/tasks/${id}/stage`, 'POST', { ...body, by: (await read($, snapshot))?.me });
   const finish = (id: number, action: AgentTasksForm['action'], words: string) => {
@@ -579,6 +669,8 @@ function actions($: EngineInterface): Actions {
     run(
       `${action} #${id}`,
       async () => {
+        // What was sent, Enter's words included: a refusal puts them back in the field.
+        await update($, form, (f) => (f ? { ...f, words: said } : f));
         if (action === 'regress') {
           const to = (await read($, form))?.stage;
           if (!to) throw new Error('pick the stage to go back to');
@@ -595,7 +687,11 @@ function actions($: EngineInterface): Actions {
         }[action];
       },
       // Sent back, it offers Advance again: the ring goes to the way out, not onto undoing it.
-      action === 'regress' ? async () => 'back' : undefined,
+      action === 'regress'
+        ? async () => 'back'
+        : action === 'complete'
+          ? toCommentIfGated
+          : undefined,
     );
   };
 
@@ -608,10 +704,14 @@ function actions($: EngineInterface): Actions {
     clearFilter: () => void refilter($, ''),
     // The stage the button names: a second press before the redraw is refused, not a skip.
     advance: (id, to) =>
-      run(`advance #${id}`, async () => {
-        const t = await stage(id, { action: 'advance', stage: to });
-        return `✓ #${id} moved to ${t.stage}`;
-      }),
+      run(
+        `advance #${id}`,
+        async () => {
+          const t = await stage(id, { action: 'advance', stage: to });
+          return `✓ #${id} moved to ${t.stage}`;
+        },
+        toCommentIfGated,
+      ),
     ask: (id, action) =>
       void (async () => {
         const d = await read($, detail);
@@ -725,7 +825,7 @@ export const register: Register = (on) => {
       snap.isUp
         ? headline(snap.open)
         : snap.old
-          ? `agent-tasks ${snap.old} holds ${snap.origin} and has no board: end the sessions still running it`
+          ? `version ${snap.old} holds ${snap.origin} and has no board: end the sessions still running it`
           : `nothing answers at ${snap.origin}: is the agent-tasks MCP server connected (/mcp)?`,
     ];
     // The view is set before the pane opens: its autoFocus element is where the ring starts.
@@ -756,7 +856,19 @@ export const register: Register = (on) => {
   });
 
   // Where the person moves the ring (Tab, a click): the header says when keys go into a field.
+  // The pane taking the keyboard back (ctrl+x tab) puts the ring where it was, while drawn;
+  // its autoFocus element is only where a fresh view starts.
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
+    const last = await read($, focused);
+    if (
+      e.origin.kind === 'plugin' &&
+      !ownMoves.has(e.element ?? '') &&
+      last &&
+      last !== e.element
+    ) {
+      const back = await next({ ...e, element: last });
+      if (!('deny' in back)) return back;
+    }
     const r = await next(e);
     if (!('deny' in r)) await update($, focused, () => e.element ?? null);
     return r;
@@ -766,25 +878,40 @@ export const register: Register = (on) => {
     const el = $.ui.resolve(e);
     const snap = await read($, snapshot);
     if (!snap) return <el.Text dimColor>Loading…</el.Text>;
+    // Read together: a drawing that waits on each value in turn leaves the pane blank longer.
+    const [r, q, d, ex, c, f, dr, n, b, no, fo, auto] = await Promise.all([
+      read($, route),
+      read($, filter),
+      read($, detail),
+      read($, expanded),
+      read($, confirm),
+      read($, form),
+      read($, draft),
+      read($, rev),
+      read($, busy),
+      read($, notice),
+      read($, focused),
+      landing($, null),
+    ]);
 
     return (
       <Pane
         el={el}
         snap={snap}
-        route={await read($, route)}
-        filter={await read($, filter)}
-        detail={await read($, detail)}
-        expanded={await read($, expanded)}
-        confirm={await read($, confirm)}
-        form={await read($, form)}
-        draft={await read($, draft)}
-        rev={await read($, rev)}
-        busy={await read($, busy)}
-        notice={await read($, notice)}
-        focused={await read($, focused)}
+        route={r}
+        filter={q}
+        detail={d}
+        expanded={ex}
+        confirm={c}
+        form={f}
+        draft={dr}
+        rev={n}
+        busy={b}
+        notice={no}
+        focused={fo}
         isFocused={e.props.isFocused}
         columns={e.props.bodyColumns}
-        landing={await landing($, null)}
+        landing={auto}
         on={actions($)}
       />
     );

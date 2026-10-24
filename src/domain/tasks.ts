@@ -19,6 +19,7 @@ import type {
   TaskUpdateInput,
   PipelineConfig,
   GateConfig,
+  GateNeeds,
   SearchResult,
 } from '../types.js';
 import { NotFoundError, ConflictError, ValidationError } from '../types.js';
@@ -178,7 +179,14 @@ export class TaskService {
     if (input.project !== undefined) validateProjectName(input.project);
     if (input.tags !== undefined) validateTags(input.tags);
     if (input.assign_to !== undefined) validateAssignee(input.assign_to);
-    if (input.parent_id !== undefined) this.requireTask(input.parent_id);
+    if (input.parent_id !== undefined) {
+      const parent = this.requireTask(input.parent_id);
+      input = {
+        ...input,
+        project: input.project ?? parent.project ?? undefined,
+        priority: input.priority ?? parent.priority,
+      };
+    }
 
     const stages = this.getPipelineStages(input.project);
     const effectiveStage = input.stage || stages[0];
@@ -493,6 +501,7 @@ export class TaskService {
         throw new ConflictError(`Task ${taskId} not in progress (status: ${task.status}).`);
       }
       this.checkDependencies(taskId);
+      this.checkStageGate(task);
 
       const stages = this.getPipelineStages(task.project ?? undefined);
       const doneStage = stages.filter((s) => s !== 'cancelled').pop() ?? 'done';
@@ -1186,93 +1195,71 @@ export class TaskService {
     }
   }
 
-  private checkStageGate(task: Task, inlineComment?: string): void {
+  /**
+   * What the stage gate still needs before the task may leave its stage (advance or complete):
+   * null when nothing. The gate's only reader; `checkStageGate` refuses on it, `task_get` shows it.
+   */
+  gateNeeds(task: Task, inlineComment?: string): GateNeeds | null {
     const gate = this.getGateConfig(task.project ?? undefined);
-    if (!gate) return;
-
-    const exemptStages = gate.exempt_stages ?? [];
-    if (exemptStages.includes(task.stage)) return;
-
-    if (gate.require_comment) {
-      if (!inlineComment) {
-        const commentCount = this.db.queryOne<{ cnt: number }>(
-          `SELECT COUNT(*) as cnt FROM task_comments WHERE task_id = ?`,
-          [task.id],
-        );
-        if (!commentCount || commentCount.cnt === 0) {
-          throw new ValidationError(
-            `Stage gate: at least one comment required before advancing from '${task.stage}'. Add one with task_artifact type "comment" or pass comment to task_stage advance.`,
-          );
-        }
-      }
-    }
-
-    if (gate.require_artifact) {
-      const artifactCount = this.db.queryOne<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM task_artifacts WHERE task_id = ? AND stage = ?`,
-        [task.id, task.stage],
-      );
-      if (!artifactCount || artifactCount.cnt === 0) {
-        throw new ValidationError(
-          `Stage gate: at least one artifact required at stage '${task.stage}' before advancing. Attach one with task_artifact.`,
-        );
-      }
-    }
-
+    if (!gate || (gate.exempt_stages ?? []).includes(task.stage)) return null;
     const stageGate = gate.gates?.[task.stage];
-    if (!stageGate) return;
+    const count = (sql: string, params: unknown[]) =>
+      this.db.queryOne<{ cnt: number }>(sql, params)?.cnt ?? 0;
+    const artifactCount = count(
+      `SELECT COUNT(*) as cnt FROM task_artifacts WHERE task_id = ? AND stage = ?`,
+      [task.id, task.stage],
+    );
+    const needsComment =
+      Boolean(gate.require_comment || stageGate?.require_comment) &&
+      !inlineComment &&
+      count(`SELECT COUNT(*) as cnt FROM task_comments WHERE task_id = ?`, [task.id]) === 0;
+    const names = new Set(
+      this.db
+        .queryAll<TaskArtifact>(`SELECT * FROM task_artifacts WHERE task_id = ? AND stage = ?`, [
+          task.id,
+          task.stage,
+        ])
+        .map((a) => a.name),
+    );
+    const needs: GateNeeds = {
+      stage: task.stage,
+      comment: needsComment,
+      artifact: Boolean(gate.require_artifact) && artifactCount === 0,
+      artifacts: (stageGate?.require_artifacts ?? []).filter((n) => !names.has(n)),
+      min_artifacts: Math.max(0, (stageGate?.require_min_artifacts ?? 0) - artifactCount),
+      approval:
+        Boolean(stageGate?.require_approval) &&
+        count(
+          `SELECT COUNT(*) as cnt FROM task_approvals WHERE task_id = ? AND stage = ? AND status = 'approved'`,
+          [task.id, task.stage],
+        ) === 0,
+    };
+    const isMet =
+      !needs.comment &&
+      !needs.artifact &&
+      needs.artifacts.length === 0 &&
+      needs.min_artifacts === 0 &&
+      !needs.approval;
+    return isMet ? null : needs;
+  }
 
-    if (stageGate.require_comment) {
-      if (!inlineComment) {
-        const commentCount = this.db.queryOne<{ cnt: number }>(
-          `SELECT COUNT(*) as cnt FROM task_comments WHERE task_id = ?`,
-          [task.id],
-        );
-        if (!commentCount || commentCount.cnt === 0) {
-          throw new ValidationError(
-            `Stage gate [${task.stage}]: comment required before advancing. Add one with task_artifact type "comment" or pass comment to task_stage advance.`,
-          );
-        }
-      }
-    }
-
-    if (stageGate.require_artifacts && stageGate.require_artifacts.length > 0) {
-      const artifacts = this.db.queryAll<TaskArtifact>(
-        `SELECT * FROM task_artifacts WHERE task_id = ? AND stage = ?`,
-        [task.id, task.stage],
+  private checkStageGate(task: Task, inlineComment?: string): void {
+    const needs = this.gateNeeds(task, inlineComment);
+    if (!needs) return;
+    const from = `before advancing from '${task.stage}'`;
+    if (needs.comment)
+      throw new ValidationError(`Stage gate: at least one comment required ${from}.`);
+    if (needs.artifact)
+      throw new ValidationError(`Stage gate: at least one artifact required ${from}.`);
+    if (needs.artifacts.length)
+      throw new ValidationError(
+        `Stage gate: required artifacts missing ${from}: ${needs.artifacts.join(', ')}.`,
       );
-      const artifactNames = new Set(artifacts.map((a) => a.name));
-      const missing = stageGate.require_artifacts.filter((n) => !artifactNames.has(n));
-      if (missing.length > 0) {
-        throw new ValidationError(
-          `Stage gate [${task.stage}]: required artifacts missing: ${missing.join(', ')}. Attach one with task_artifact.`,
-        );
-      }
-    }
-
-    if (stageGate.require_min_artifacts !== undefined && stageGate.require_min_artifacts > 0) {
-      const artifactCount = this.db.queryOne<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM task_artifacts WHERE task_id = ? AND stage = ?`,
-        [task.id, task.stage],
+    if (needs.min_artifacts)
+      throw new ValidationError(
+        `Stage gate: at least ${needs.min_artifacts} more artifact(s) required ${from}.`,
       );
-      if (!artifactCount || artifactCount.cnt < stageGate.require_min_artifacts) {
-        throw new ValidationError(
-          `Stage gate [${task.stage}]: at least ${stageGate.require_min_artifacts} artifact(s) required (found ${artifactCount?.cnt ?? 0}). Attach more with task_artifact.`,
-        );
-      }
-    }
-
-    if (stageGate.require_approval) {
-      const approved = this.db.queryOne<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM task_approvals WHERE task_id = ? AND stage = ? AND status = 'approved'`,
-        [task.id, task.stage],
-      );
-      if (!approved || approved.cnt === 0) {
-        throw new ValidationError(
-          `Stage gate [${task.stage}]: approval required before advancing. No MCP tool records approvals (the library's ApprovalService does); drop require_approval with task_config to let agents pass.`,
-        );
-      }
-    }
+    throw new ValidationError(`Stage gate: approval required ${from}.`);
   }
 
   private checkDependencies(taskId: number): void {

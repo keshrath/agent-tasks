@@ -25,9 +25,10 @@ import { pathToFileURL } from 'node:url';
 import pty from 'node-pty';
 import xterm from '@xterm/headless';
 import { SerializeAddon } from '@xterm/addon-serialize';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
-const DIST = join(ROOT, 'dist');
+export const DIST = join(ROOT, 'dist');
 export const SHOTS_DIR =
   process.env.AGENT_TASKS_E2E_SHOTS ??
   join(
@@ -40,13 +41,15 @@ export const SHOTS_DIR =
 /** Stable, so the folder-trust answer is remembered instead of piling up per run. */
 const WORKSPACE = join(tmpdir(), 'agent-tasks-e2e-claude-ws');
 /** Nothing listens here: the bridges to agent-comm and agent-knowledge fail open. */
-const NOWHERE = 'http://127.0.0.1:9';
+export const NOWHERE = 'http://127.0.0.1:9';
 /** Who the pane acts as. */
 export const ME = 'e2e-person';
+/** The recordings' world: a person's name and one address in every picture. */
+export const RECORDING = { me: 'sam', port: 3429 };
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function freePort(): Promise<number> {
+export function freePort(): Promise<number> {
   return new Promise((res, rej) => {
     const s = createServer()
       .once('error', rej)
@@ -58,7 +61,7 @@ function freePort(): Promise<number> {
 }
 
 /** Kills a process with its children; a plain kill on Windows orphans them. */
-function killTree(pid: number | undefined): void {
+export function killTree(pid: number | undefined): void {
   if (!pid) return;
   try {
     if (process.platform === 'win32') execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' });
@@ -104,13 +107,23 @@ export interface Task {
 
 export interface World {
   dir: string;
+  /** The SQLite file the world's server (and the plugin's MCP server) use. */
+  db: string;
   port: number;
   base: string;
   env: Record<string, string>;
   pluginDir: string;
   ids: Ids;
+  /** What the suite's `Extra` seeded, by name. */
+  more: Record<string, number>;
   api: <T = Record<string, unknown>>(method: string, path: string, body?: unknown) => Promise<T>;
   task(id: number): Promise<Task>;
+  /**
+   * Writes the REST server has no route for (artifacts, threaded comments, links), through
+   * the domain on the same file. Pipeline and gate settings belong in an `Extra`: the
+   * server caches them per project.
+   */
+  domain<T>(fn: (c: Ctx) => T): Promise<T>;
   /** Stops the REST server alone (the down view). */
   stopServer(): Promise<void>;
   /** Starts it again on the same port and database. */
@@ -126,21 +139,48 @@ async function health(base: string): Promise<boolean> {
   }
 }
 
-/** The domain surface the seed uses (dist/context.js, loaded at run time). */
-type Ctx = {
+/** The domain surface the seed and `World.domain` use (dist/context.js, loaded at run time). */
+export type Ctx = {
   tasks: {
     create(input: Record<string, unknown>, by: string): { id: number };
-    claim(id: number, by: string): unknown;
+    claim(id: number, by: string, advance?: boolean): unknown;
     advance(id: number): unknown;
     complete(id: number, result: string): unknown;
     fail(id: number, error: string): unknown;
     cancel(id: number, reason: string): unknown;
     addDependency(id: number, dependsOn: number, relationship?: string): unknown;
-    addArtifact(id: number, name: string, content: string, by: string): unknown;
+    addArtifact(id: number, name: string, content: string, by: string, stage?: string): unknown;
+    setPipelineConfig(project: string, stages: string[]): unknown;
+    setGateConfig(project: string, gate: Record<string, unknown>): unknown;
   };
-  comments: { add(id: number, by: string, content: string): unknown };
+  comments: {
+    add(id: number, by: string, content: string, parent?: number): { id: number };
+    list(id: number): unknown[];
+  };
+  /** Raw writes a world needs that no service offers (a task placed past its gates). */
+  db: { run(sql: string, params?: unknown[]): unknown };
   close(): void;
 };
+
+/** More tasks a suite seeds next to the shared ones, before the server starts, by name. */
+export type Extra = (c: Ctx) => Record<string, number>;
+
+/** A domain context on `db`, the bridges pointed nowhere; closed after `fn`. */
+async function withDomain<T>(db: string, fn: (c: Ctx) => T): Promise<T> {
+  const prev = { ...process.env };
+  process.env.AGENT_COMM_URL = NOWHERE;
+  process.env.AGENT_KNOWLEDGE_URL = NOWHERE;
+  const { createContext } = (await import(pathToFileURL(join(DIST, 'context.js')).href)) as {
+    createContext(o: { path: string }): Ctx;
+  };
+  const c = createContext({ path: db });
+  try {
+    return fn(c);
+  } finally {
+    c.close();
+    process.env = prev;
+  }
+}
 
 const PANE_DESCRIPTION = [
   'Drop the web dashboard (UI files, WebSocket, agent-desk plugin) and move the board into a Claude Code mod.',
@@ -164,121 +204,127 @@ const PANE_DESCRIPTION = [
  * subtasks, a blocked task, one in review, an unclaimed backlog across projects, recently
  * finished history, and one task per lifecycle flow the suite drives.
  */
-async function seed(db: string): Promise<Ids> {
-  const prev = { ...process.env };
-  process.env.AGENT_COMM_URL = NOWHERE;
-  process.env.AGENT_KNOWLEDGE_URL = NOWHERE;
-  const { createContext } = (await import(pathToFileURL(join(DIST, 'context.js')).href)) as {
-    createContext(o: { path: string }): Ctx;
-  };
-  const c = createContext({ path: db });
+function seed(c: Ctx): Ids {
   const t = c.tasks;
   const mk = (title: string, o: Record<string, unknown> = {}, by = 'lead') =>
     t.create({ title, ...o }, by).id;
-  try {
-    const pane = mk('Replace the web dashboard with a Claude Code pane', {
-      project: 'agent-tasks',
-      priority: 8,
-      tags: ['ui', 'plugin'],
-      description: PANE_DESCRIPTION,
-    });
-    t.claim(pane, 'agent-pane');
-    t.addArtifact(
-      pane,
-      'spec',
-      '# Spec\n\n- Board by stage\n- Detail with actions\n- **New task** form\n\n```ts\nconst stages = 7;\n```',
-      'agent-pane',
-    );
-    c.comments.add(pane, 'lead', 'Make sure it works docked at 60 columns.');
-    c.comments.add(pane, 'agent-pane', 'Will do; screenshots at 60 and 160.');
-    t.advance(pane);
-    t.advance(pane);
-    const boardView = mk('Pane: board view', { parent_id: pane });
-    const detailView = mk('Pane: detail view', { parent_id: pane });
-    t.claim(boardView, 'agent-board');
-    t.complete(boardView, 'Board drawn by stage');
-    const harness = mk('Write the e2e harness for the real CLI', {
-      project: 'agent-tasks',
-      priority: 5,
-    });
-    t.claim(harness, 'agent-e2e');
-    t.addDependency(harness, pane);
-    const review = mk('Review the REST changes', { project: 'agent-tasks', priority: 3 });
-    t.claim(review, 'reviewer-1');
-    for (let i = 0; i < 4; i++) t.advance(review);
-    const ship = mk('Ship muk_import 19.0 to the customer', {
-      project: 'odoo-addons',
-      priority: 2,
-      tags: ['release'],
-    });
-    const flaky = mk('Investigate flaky knowledge sync on Windows', {
-      project: 'agent-knowledge',
-    });
-    const badges = mk('Tidy the README badges');
-    const screenshots = mk('Migrate the old dashboard screenshots', { project: 'agent-tasks' });
-    t.claim(screenshots, 'agent-docs');
-    t.fail(screenshots, 'The screenshots are gone with the dashboard: nothing left to migrate.');
-    const bump = mk('Bump agent-common to 1.1.2', { project: 'agent-tasks' });
-    t.claim(bump, 'agent-release');
-    t.complete(bump, 'Bumped; loopback bind and request guard in.');
-    const duplicate = mk('Duplicate of the dashboard task', { project: 'agent-tasks' });
-    t.cancel(duplicate, `duplicate of #${pane}`);
-    t.addDependency(duplicate, pane, 'duplicate');
+  const pane = mk('Replace the web dashboard with a Claude Code pane', {
+    project: 'agent-tasks',
+    priority: 8,
+    tags: ['ui', 'plugin'],
+    description: PANE_DESCRIPTION,
+  });
+  t.claim(pane, 'agent-pane');
+  t.addArtifact(
+    pane,
+    'spec',
+    '# Spec\n\n- Board by stage\n- Detail with actions\n- **New task** form\n\n```ts\nconst stages = 7;\n```',
+    'agent-pane',
+  );
+  c.comments.add(pane, 'lead', 'Make sure it works docked at 60 columns.');
+  c.comments.add(pane, 'agent-pane', 'Will do; screenshots at 60 and 160.');
+  t.advance(pane);
+  t.advance(pane);
+  // Subtasks take the parent's priority unless given one: these sort among the plain backlog.
+  const boardView = mk('Pane: board view', { parent_id: pane, priority: 0 });
+  const detailView = mk('Pane: detail view', { parent_id: pane, priority: 0 });
+  t.claim(boardView, 'agent-board');
+  t.complete(boardView, 'Board drawn by stage');
+  const harness = mk('Write the e2e harness for the real CLI', {
+    project: 'agent-tasks',
+    priority: 5,
+  });
+  t.claim(harness, 'agent-e2e');
+  t.addDependency(harness, pane);
+  const review = mk('Review the REST changes', { project: 'agent-tasks', priority: 3 });
+  t.claim(review, 'reviewer-1');
+  for (let i = 0; i < 4; i++) t.advance(review);
+  const ship = mk('Ship muk_import 19.0 to the customer', {
+    project: 'odoo-addons',
+    priority: 2,
+    tags: ['release'],
+  });
+  const flaky = mk('Investigate flaky knowledge sync on Windows', {
+    project: 'agent-knowledge',
+  });
+  const badges = mk('Tidy the README badges');
+  const screenshots = mk('Migrate the old dashboard screenshots', { project: 'agent-tasks' });
+  t.claim(screenshots, 'agent-docs');
+  t.fail(screenshots, 'The screenshots are gone with the dashboard: nothing left to migrate.');
+  const bump = mk('Bump agent-common to 1.1.2', { project: 'agent-tasks' });
+  t.claim(bump, 'agent-release');
+  t.complete(bump, 'Bumped; loopback bind and request guard in.');
+  const duplicate = mk('Duplicate of the dashboard task', { project: 'agent-tasks' });
+  t.cancel(duplicate, `duplicate of #${pane}`);
+  t.addDependency(duplicate, pane, 'duplicate');
 
-    // One task per flow the suite drives, so no test depends on another's leftovers.
-    const changelog = mk('Write the CHANGELOG 2.0.0 entry', { project: 'release', priority: 4 });
-    t.claim(changelog, 'agent-docs');
-    const serverJson = mk('Bump server.json to 2.0.0', { project: 'release', priority: 4 });
-    t.claim(serverJson, 'agent-release');
-    for (let i = 0; i < 4; i++) t.advance(serverJson);
-    const wsTests = mk('Port the WebSocket tests', { project: 'release' });
-    t.claim(wsTests, 'agent-ws');
-    t.advance(wsTests);
-    t.advance(wsTests);
-    const restyle = mk('Restyle the kanban columns', { project: 'release' });
-    const darkMode = mk('Dark-mode toggle for the dashboard', { project: 'release' });
+  // One task per flow the suite drives, so no test depends on another's leftovers.
+  const changelog = mk('Write the CHANGELOG 2.0.0 entry', { project: 'release', priority: 4 });
+  t.claim(changelog, 'agent-docs');
+  const serverJson = mk('Bump server.json to 2.0.0', { project: 'release', priority: 4 });
+  t.claim(serverJson, 'agent-release');
+  for (let i = 0; i < 4; i++) t.advance(serverJson);
+  const wsTests = mk('Port the WebSocket tests', { project: 'release' });
+  t.claim(wsTests, 'agent-ws');
+  t.advance(wsTests);
+  t.advance(wsTests);
+  const restyle = mk('Restyle the kanban columns', { project: 'release' });
+  const darkMode = mk('Dark-mode toggle for the dashboard', { project: 'release' });
 
-    return {
-      pane,
-      boardView,
-      detailView,
-      harness,
-      review,
-      ship,
-      flaky,
-      badges,
-      screenshots,
-      bump,
-      duplicate,
-      changelog,
-      serverJson,
-      wsTests,
-      restyle,
-      darkMode,
-    };
-  } finally {
-    c.close();
-    process.env = prev;
-  }
+  return {
+    pane,
+    boardView,
+    detailView,
+    harness,
+    review,
+    ship,
+    flaky,
+    badges,
+    screenshots,
+    bump,
+    duplicate,
+    changelog,
+    serverJson,
+    wsTests,
+    restyle,
+    darkMode,
+  };
 }
 
 /** Scratch database + REST server, seeded; the plugin copy pointed at them. */
-export async function startWorld(): Promise<World> {
+export async function startWorld(
+  extra?: Extra,
+  {
+    bare = false,
+    port: fixedPort,
+    me = ME,
+  }: {
+    bare?: boolean;
+    /** A set port instead of a free one: the recordings show the same address each run. */
+    port?: number;
+    /** Who the pane acts as. */
+    me?: string;
+  } = {},
+): Promise<World> {
   const dir = mkdtempSync(join(tmpdir(), 'agent-tasks-e2e-claude-'));
   const db = join(dir, 'tasks.db');
-  const [port, mcpPort] = [await freePort(), await freePort()];
+  const [port, mcpPort] = [fixedPort ?? (await freePort()), await freePort()];
   const base = `http://127.0.0.1:${port}`;
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     AGENT_TASKS_PORT: String(port),
-    AGENT_TASKS_USER: ME,
+    AGENT_TASKS_USER: me,
     AGENT_COMM_URL: NOWHERE,
     AGENT_KNOWLEDGE_URL: NOWHERE,
   };
   // A Claude Code session running this suite must not leak its session markers into the child.
   for (const k of Object.keys(env)) if (/^(CLAUDECODE|CLAUDE_CODE_)/.test(k)) delete env[k];
 
-  const ids = await seed(db);
+  // `bare`: no shared tasks, an empty board (`ids` is then empty too).
+  const [ids, more] = await withDomain(
+    db,
+    (c) => [bare ? ({} as Ids) : seed(c), extra?.(c) ?? {}] as const,
+  );
 
   let server: ChildProcess | null = null;
   const startServer = async () => {
@@ -346,13 +392,16 @@ export async function startWorld(): Promise<World> {
 
   return {
     dir,
+    db,
     port,
     base,
     env,
     pluginDir,
     ids,
+    more,
     api,
     task: (id) => api<Task>('GET', `/api/tasks/${id}`),
+    domain: (fn) => withDomain(db, fn),
     stopServer,
     startServer,
     async stop() {
@@ -395,9 +444,16 @@ export class ClaudeTerm {
   ) {
     this.term = new xterm.Terminal({ cols, rows, allowProposedApi: true });
     this.term.loadAddon(this.serializer as never);
+    // Unicode 11 widths, as Claude Code lays text out: an emoji takes two columns.
+    this.term.loadAddon(new Unicode11Addon() as never);
+    this.term.unicode.activeVersion = '11';
   }
 
-  async start(): Promise<void> {
+  /**
+   * Starts it and waits for the plugin's status entry (`ready`): its session.start ran, so
+   * /pipeline is registered. The default is a board's counts.
+   */
+  async start(ready = /agent-tasks: .*\d+ (in progress|open|pending)/): Promise<void> {
     mkdirSync(WORKSPACE, { recursive: true });
     const exe = process.platform === 'win32' ? 'claude.exe' : 'claude';
     this.proc = pty.spawn(
@@ -419,8 +475,6 @@ export class ClaudeTerm {
       },
     );
     this.proc.onData((d) => this.term.write(d));
-    // The plugin's status entry: its session.start ran, so /pipeline is registered.
-    const ready = /agent-tasks: .*\d+ (in progress|open|pending)/;
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
       const s = this.text();
@@ -468,6 +522,26 @@ export class ClaudeTerm {
     return this.screen().replace(/[«»]/g, '');
   }
 
+  /**
+   * How the first cell showing `label` (searched from column `from` on) is drawn: its
+   * foreground colour (-1 for the terminal's default), dim and bold.
+   */
+  style(label: string, from = 0): { fg: number; dim: boolean; bold: boolean } {
+    const b = this.term.buffer.active;
+    const lines = this.text().split('\n');
+    for (let y = 0; y < lines.length; y++) {
+      const x = lines[y]!.indexOf(label, from);
+      if (x < 0) continue;
+      const cell = b.getLine(b.viewportY + y)!.getCell(x)!;
+      return {
+        fg: cell.isFgDefault() ? -1 : cell.getFgColor(),
+        dim: cell.isDim() !== 0,
+        bold: cell.isBold() !== 0,
+      };
+    }
+    throw new Error(`nothing on the screen shows ${label}:\n${this.screen()}`);
+  }
+
   async waitFor(re: RegExp, ms = 20_000): Promise<string> {
     const deadline = Date.now() + ms;
     while (Date.now() < deadline) {
@@ -485,9 +559,10 @@ export class ClaudeTerm {
     }
   }
 
-  async type(text: string): Promise<void> {
+  /** Writes `text`, then waits `pause` ms (the manual's recordings type key by key). */
+  async type(text: string, pause = 400): Promise<void> {
     this.proc!.write(text);
-    await sleep(400);
+    await sleep(pause);
   }
 
   /**
@@ -582,6 +657,32 @@ export class ClaudeTerm {
     await sleep(300);
   }
 
+  /**
+   * A mouse click (left button, SGR encoding) on the first cell showing `label`, searched from
+   * `from` columns on (the docked pane sits right of the conversation). The fullscreen layout
+   * reports clicks to the pane; the inline one does not take the mouse. Like an Enter, a click
+   * that lands while the pane redraws is now and then dropped: when nothing on the screen
+   * moves for 4 s, it is clicked again.
+   */
+  async click(label: string, from = 0): Promise<void> {
+    await this.settle();
+    const lines = this.text().split('\n');
+    const y = lines.findIndex((l) => l.indexOf(label, from) >= 0);
+    if (y < 0) throw new Error(`nothing to click shows ${label}:\n${this.screen()}`);
+    const [col, row] = [lines[y]!.indexOf(label, from) + Math.ceil(label.length / 2), y + 1];
+    const press = async () => {
+      this.proc!.write(`\x1b[<0;${col};${row}M`);
+      await sleep(60);
+      this.proc!.write(`\x1b[<0;${col};${row}m`);
+    };
+    const before = this.screen();
+    await press();
+    const deadline = Date.now() + 4_000;
+    while (Date.now() < deadline && this.screen() === before) await sleep(100);
+    if (this.screen() === before) await press();
+    await sleep(300);
+  }
+
   /** The whole screen as escape sequences: what a renderer replays. */
   serialize(): string {
     return this.serializer.serialize();
@@ -607,4 +708,40 @@ export class ClaudeTerm {
     }
     this.term.dispose();
   }
+}
+
+/** The ring settles where the plugin lands it after a move. */
+export async function landsOn(t: ClaudeTerm, label: string | RegExp, ms = 5_000): Promise<void> {
+  const hit = () => {
+    const f = t.focused();
+    return f !== null && (typeof label === 'string' ? f.includes(label) : label.test(f));
+  };
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline && !hit()) await sleep(100);
+  if (!hit()) throw new Error(`the ring is not on ${label}:\n${t.screen()}`);
+}
+
+/** Polls the REST server until `check` holds for the task (the pane acts asynchronously). */
+export async function until(
+  w: World,
+  id: number,
+  check: (t: Task) => boolean,
+  ms = 10_000,
+): Promise<Task> {
+  const deadline = Date.now() + ms;
+  let last: Task | null = null;
+  while (Date.now() < deadline) {
+    last = await w.task(id);
+    if (check(last)) return last;
+    await sleep(200);
+  }
+  throw new Error(`#${id} never got there: ${JSON.stringify(last)}`);
+}
+
+/** The status line entry: the text the plugin hands `$.ui.status`, under the prompt. */
+export function statusEntry(t: ClaudeTerm): string | null {
+  const lines = t.text().split('\n');
+  const prompt = lines.findLastIndex((l) => l.startsWith('❯'));
+  const below = lines.slice(prompt + 1).join('\n');
+  return /agent-tasks: ([^\n]+)/.exec(below)?.[1]?.trim() ?? null;
 }

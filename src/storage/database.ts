@@ -1,31 +1,79 @@
 // =============================================================================
 // agent-tasks — Storage layer
 //
-// Thin wrapper around agent-common's createDb. Resolves the DB path from
-// options / AGENT_TASKS_DB env / default ~/.agent-tasks/agent-tasks.db and
-// supplies the schema as an ordered Migration[] so the runner in agent-common
-// handles version bookkeeping (via the _meta table).
+// better-sqlite3 with WAL pragmas. The DB path comes from options /
+// AGENT_TASKS_DB env / default ~/.agent-tasks/agent-tasks.db; the schema is an
+// ordered list of migrations whose version is kept in _meta.schema_version.
 // =============================================================================
 
-import type Database from 'better-sqlite3';
+import Database from 'better-sqlite3';
 import { homedir } from 'os';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
-import { createDb as createKitDb, type Db, type Migration } from 'agent-common';
 
-export type { Db } from 'agent-common';
+export interface Db {
+  readonly raw: Database.Database;
+  run(sql: string, params?: unknown[]): Database.RunResult;
+  queryAll<T>(sql: string, params?: unknown[]): T[];
+  queryOne<T>(sql: string, params?: unknown[]): T | null;
+  transaction<T>(fn: () => T): T;
+  close(): void;
+}
 
 export interface DbOptions {
   path?: string;
   verbose?: boolean;
 }
 
+interface Migration {
+  version: number;
+  up: (db: Database.Database) => void;
+}
+
 export function createDb(options: DbOptions = {}): Db {
-  return createKitDb({
-    path: resolveDbPath(options.path),
-    migrations,
-    verbose: options.verbose,
+  const raw = new Database(resolveDbPath(options.path), {
+    verbose: options.verbose ? (msg) => process.stderr.write(`[sql] ${msg}\n`) : undefined,
   });
+  raw.pragma('journal_mode = WAL');
+  raw.pragma('busy_timeout = 5000');
+  raw.pragma('synchronous = NORMAL');
+  raw.pragma('foreign_keys = ON');
+  migrate(raw);
+
+  return {
+    raw,
+    run: (sql, params = []) => raw.prepare(sql).run(...params),
+    queryAll: <T>(sql: string, params: unknown[] = []) => raw.prepare(sql).all(...params) as T[],
+    queryOne: <T>(sql: string, params: unknown[] = []) =>
+      (raw.prepare(sql).get(...params) as T | undefined) ?? null,
+    transaction: <T>(fn: () => T) => raw.transaction(fn)(),
+    close() {
+      if (raw.open) raw.close();
+    },
+  };
+}
+
+/** The schema version this DB is at (0 for a fresh file). */
+export function schemaVersion(raw: Database.Database): number {
+  raw.exec(`CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  const row = raw.prepare(`SELECT value FROM _meta WHERE key = 'schema_version'`).get() as
+    | { value: string }
+    | undefined;
+  return row ? parseInt(row.value, 10) : 0;
+}
+
+/** Applies every migration newer than the DB's version, in one transaction. */
+function migrate(raw: Database.Database): void {
+  const from = schemaVersion(raw);
+  raw.transaction(() => {
+    for (const m of migrations) {
+      if (m.version <= from) continue;
+      m.up(raw);
+      raw
+        .prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`)
+        .run(String(m.version));
+    }
+  })();
 }
 
 function resolveDbPath(path?: string): string {
@@ -39,7 +87,7 @@ function resolveDbPath(path?: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Migrations — version-ordered, applied by agent-common's runner
+// Migrations — in version order; add a new one, never edit an old one
 // ---------------------------------------------------------------------------
 
 const migrations: Migration[] = [
