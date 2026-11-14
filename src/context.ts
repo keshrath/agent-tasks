@@ -14,6 +14,7 @@ import { ApprovalService } from './domain/approvals.js';
 import { AgentBridge } from './domain/agent-bridge.js';
 import { KnowledgeBridge } from './domain/knowledge-bridge.js';
 import { CleanupService } from './domain/cleanup.js';
+import { HolderService } from './domain/holders.js';
 
 export interface AppContext {
   readonly db: Db;
@@ -25,6 +26,7 @@ export interface AppContext {
   readonly agentBridge: AgentBridge;
   readonly knowledgeBridge: KnowledgeBridge;
   readonly cleanup: CleanupService;
+  readonly holders: HolderService;
   close(): void;
 }
 
@@ -40,7 +42,8 @@ export function createContext(dbOptions?: DbOptions): AppContext {
   const agentBridge = new AgentBridge(events);
   const knowledgeBridge = new KnowledgeBridge(db, events);
   const retentionDays = parseInt(process.env.AGENT_TASKS_RETENTION_DAYS ?? '30', 10);
-  const cleanup = new CleanupService(db, retentionDays, agentBridge);
+  const cleanup = new CleanupService(db, retentionDays);
+  const holders = new HolderService(db, events);
 
   agentBridge.start();
   knowledgeBridge.start();
@@ -56,6 +59,7 @@ export function createContext(dbOptions?: DbOptions): AppContext {
     agentBridge,
     knowledgeBridge,
     cleanup,
+    holders,
     close() {
       if (closed) return;
       closed = true;

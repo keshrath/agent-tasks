@@ -132,16 +132,17 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       expect(quoted).toMatch(/\[implement, agent-pane\]/);
       // Pending: the highest priority first (the ship task is p2, the rest p0).
       expect(quoted).toMatch(/6 pending, highest priority first: #\d+ "Ship muk_import/);
-      expect(quoted).toMatch(/Claim a task \(task_stage\) before working on it/);
+      // The pipeline reminder is off here: the block says how to claim, and does not ask it.
+      expect(quoted).toMatch(/A task is claimed with task_stage action "claim"/);
       await t.waitFor(/❯\s*$/m, MIN);
     });
 
-    it('/pipeline answers with the board summary and opens the pane', async () => {
+    it('/pipeline opens the pane and puts no line in the transcript; the board has the summary', async () => {
       await t.pipeline();
       const s = await t.waitFor(/Backlog \d+/);
-      expect(s).toMatch(
-        /⎿\s+agent-tasks: 12 open tasks · 6 in progress · 1 blocked|⎿\s+12 open tasks · 6 in progress · 1 blocked/,
-      );
+      // The pane says it: the command answers nothing the model would read on every /pipeline.
+      expect(s).not.toMatch(/⎿\s+(agent-tasks: )?12 open tasks/);
+      expect(s).toMatch(/12 open tasks · 6 in progress · 1 blocked/);
       // The stage counts, in pipeline order, under the summary.
       expect(s).toMatch(/backlog 6 · spec 2 · implement 2 · review 2/);
       // In each stage, work in progress first, then by priority, then oldest first.
@@ -169,13 +170,13 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       expect(flakyRow).not.toMatch(/\bp0\b/);
     });
 
-    it('Tab and shift+Tab walk the rows; above the first row is Find', async () => {
-      await landsOn(t, `#${w.ids.ship} Ship`);
+    it('the ring starts on the first task in progress; Tab and shift+Tab walk the rows; above the first row is Find', async () => {
+      await landsOn(t, `#${w.ids.harness} Write the e2e harness`);
       await t.key('TAB');
-      await landsOn(t, `#${w.ids.detailView} Pane: detail view`);
-      await t.key('TAB');
-      await landsOn(t, `#${w.ids.flaky} Investigate`);
+      await landsOn(t, `#${w.ids.changelog} Write the CHANGELOG`);
       await t.key('SHIFTTAB', 2);
+      await landsOn(t, `#${w.ids.darkMode} Dark-mode toggle`); // the backlog's last row
+      await t.key('SHIFTTAB', 5);
       await landsOn(t, `#${w.ids.ship} Ship`);
       await t.key('SHIFTTAB');
       await landsOn(t, 'Find');
@@ -251,7 +252,7 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       shot(t, 'find-tag');
       await t.press('Clear the filter');
       await t.waitFor(/Find: id, title/);
-      await landsOn(t, `#${w.ids.ship} Ship`);
+      await landsOn(t, `#${w.ids.harness} Write the e2e harness`); // the whole board again
     });
 
     it('back from a task opened on the board lands on its row', async () => {
@@ -275,13 +276,17 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       await t.key('ESC');
       await t.pipeline('zzz-nothing');
       const s = await t.waitFor(/No open task matches/);
-      expect(s).toMatch(/0 open tasks match "zzz-nothing"/);
+      expect(s).toMatch(/no open task matches "zzz-nothing"/);
       expect(s).toMatch(/0 shown/);
       await landsOn(t, 'Clear the filter');
+      // Nothing shown: no empty line of stage counts under the summary.
+      expect(
+        paneLines(t).some((l) => /^\s*$/.test(l) === false && /^(backlog|spec) \d/.test(l)),
+      ).toBe(false);
       shot(t, 'no-match');
       await t.enter();
       await t.waitFor(/Find: id, title/);
-      await landsOn(t, `#${w.ids.ship} Ship`);
+      await landsOn(t, `#${w.ids.harness} Write the e2e harness`);
       expect(paneLines(t).join(' ')).not.toMatch(/\d+ shown/);
     });
 
@@ -296,9 +301,11 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       expect(t.text()).toMatch(/Investigate flaky knowledge sync on Windows/);
       await t.click('‹ Board', x);
       await t.waitFor(/Backlog \d+/);
+      const before = (await w.api<{ open: unknown[] }>('GET', '/api/board')).open.length;
       await w.api('POST', '/api/tasks', { title: 'Clicked into view', created_by: 'agent-y' });
       await t.click('Refresh', x);
-      await t.waitFor(/Clicked into view/, 4_000);
+      // Counted at once (the backlog, now past seven, folds the new row away).
+      await t.waitFor(new RegExp(`${before + 1} open tasks`), 4_000);
 
       await t.click('New', x);
       await t.waitFor(/New task/);
@@ -317,7 +324,10 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       const x = paneColumn(t);
       await t.click('✕', x);
       await gone(t, /1: Board|Recently finished|‹ Board/);
-      expect(statusEntry(t)).toMatch(/open tasks/); // the status entry stays
+      // The status entry stays: the last act's outcome while it lasts, then the headline.
+      const deadline = Date.now() + 15_000;
+      while (!/open tasks/.test(statusEntry(t) ?? '') && Date.now() < deadline) await sleep(250);
+      expect(statusEntry(t)).toMatch(/open tasks/);
       await t.pipeline();
       await t.waitFor(/Backlog \d+/);
       await landsOn(t, /#\d+ /);
@@ -400,14 +410,14 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
     it('↑ and ↓ scroll the board without moving the ring', async () => {
       await t.press('‹ Board');
       await t.waitFor(/Proofread the FAQ/);
-      // Its digit puts the ring on the first row; the pane scrolls just far enough to show
-      // it, the tab bar above stays out of view until ↑ scrolls there.
+      // Its digit puts the ring on the first task in progress, past the folded backlog; ↑ and
+      // ↓ scroll the pane around it.
       await t.key('1');
-      await landsOn(t, `#${w.more.long} Write the migration guide`);
+      await landsOn(t, `#${w.ids.harness} Write the e2e harness`);
       await t.key('UP', 10);
       await t.waitFor(/1: Board/);
       const ring = t.focused();
-      expect(ring).toMatch(/Write the migration guide/);
+      expect(ring).toMatch(/Write the e2e harness/);
       await t.key('DOWN', 15);
       await t.settle();
       expect(t.text()).not.toMatch(/1: Board/);
@@ -436,28 +446,28 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       expect(lines[row + 1]).toMatch(/^\s+unclaimed · i18n · /);
     });
 
-    it('the long backlog folds past ten rows; Enter unfolds it and folds it again', async () => {
+    it('the long backlog folds past five rows; Enter unfolds it and folds it again', async () => {
       await t.key('1');
-      await t.waitFor(/▸ 43 more in backlog/);
-      // Ten rows of it are drawn, the rest only counted: the stages at work stay in reach.
+      await t.waitFor(/▸ 48 more/);
+      // Five rows of it are drawn, the rest only counted: the stages at work stay in reach.
       expect(t.text()).toMatch(/Backlog 53/);
       expect(t.text()).not.toMatch(/Bulk task 45/);
-      await t.focus('▸ 43 more in backlog', 40);
+      await t.focus('▸ 48 more', 40);
       await t.enter();
-      await t.waitFor(/▾ Fold backlog/);
+      await t.waitFor(/▾ Show less/);
       // The ring goes to the first row the unfold showed, right under the toggle, which stays
       // where it was: the rows asked for are in view, not scrolled past.
       await landsOn(t, /^○ #\d+ /);
       const lines = t.text().split('\n');
-      const toggle = lines.findIndex((l) => l.includes('▾ Fold backlog'));
+      const toggle = lines.findIndex((l) => l.includes('▾ Show less'));
       const row = lines.findIndex((l) => l.includes(`${t.focused()}`.slice(2, 30)));
       expect(toggle).toBeGreaterThan(-1);
       expect(row).toBe(toggle + 1);
       await t.key('SHIFTTAB');
-      await landsOn(t, '▾ Fold backlog');
+      await landsOn(t, '▾ Show less');
       await t.enter();
-      await t.waitFor(/▸ 43 more in backlog/);
-      await landsOn(t, '▸ 43 more in backlog');
+      await t.waitFor(/▸ 48 more/);
+      await landsOn(t, '▸ 48 more');
     });
   });
 
@@ -488,11 +498,29 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       shot(t, 'empty');
     });
 
-    it('Done says nothing finished yet; its digit again lands on the Board tab', async () => {
+    it('a task made elsewhere takes the ring to its row, never into Find; gone again, back to New task', async () => {
+      await landsOn(t, 'New task');
+      const made = await w.api<{ id: number }>('POST', '/api/tasks', {
+        title: 'Made in another session',
+        created_by: 'agent-x',
+      });
+      // Within a poll New task is gone: the ring goes to the row, not to the field above it.
+      await landsOn(t, `#${made.id} Made in another session`, 15_000);
+      await t.waitFor(/1: Board\s+2: Done/); // the hotkeys are live: no field holds the keys
+      shot(t, 'empty-relanded');
+      await w.api('DELETE', `/api/tasks/${made.id}`);
+      await t.waitFor(/Nothing open on the board\./, 15_000);
+      await landsOn(t, 'New task', 15_000);
+    });
+
+    it('Done says nothing finished yet, why, and offers the board', async () => {
       await t.key('2');
       await t.waitFor(/Nothing finished yet\./);
-      await t.key('2');
-      await landsOn(t, 'Board');
+      // Wrapped in the pane: the words, whatever the line breaks.
+      expect(paneLines(t).join(' ').replace(/\s+/g, ' ')).toMatch(
+        /Tasks land here once they are completed, failed or cancelled\./,
+      );
+      await landsOn(t, /^\[ Board \]$/);
       shot(t, 'empty-done');
     });
 
@@ -558,8 +586,10 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
     it('Done rows keep who, where and the result on their own lines', async () => {
       await t.key('2');
       const s = await t.waitFor(/Recently finished/);
-      // Facts and result are each cut to their one line, never wrapped.
-      expect(s).toMatch(/completed \S+ · agent-release · agen/);
+      // Facts are whole (one that does not fit is left out, never cut), the result cut to its
+      // one line; neither wraps.
+      expect(s).toMatch(/completed \S+ · agent-release/);
+      expect(s).not.toMatch(/ · agen…|· \S*…\s*$/m);
       expect(s).toMatch(/Bumped; loopback bind/);
       expect(s).not.toMatch(/│\s*(?:tasks|request guard)/);
       shot(t, 'narrow-done');
@@ -579,17 +609,22 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       shot(t, 'narrow-new');
     });
 
-    it('New: Clear empties what was typed and starts over in Title', async () => {
+    it('New: Clear empties what was typed and keeps the ring on Clear', async () => {
+      await t.key('3'); // the tab pressed again: to type
       await landsOn(t, 'Title');
       await t.type('Half a thought');
-      await t.enter();
+      await t.waitFor(/Title\s+Half a thought/);
+      await t.key('TAB');
       await landsOn(t, 'Project');
       await t.type('scratch');
+      await t.waitFor(/Project\s+scratch/);
       await t.press('Clear');
-      const s = await t.waitFor(/Title\s+what needs doing/);
-      expect(s).toMatch(/Project\s+groups the board/);
-      expect(s).not.toMatch(/Half a thought|scratch/);
-      await landsOn(t, 'Title');
+      // The emptied form, both fields drawn anew: waited for whole, not read off the first
+      // frame that shows one of them.
+      await t.waitFor(/Title\s+what needs doing[\s\S]*Project\s+groups the board/);
+      await gone(t, /Half a thought|scratch/);
+      // On Clear, not in Title: a digit typed next switches tabs instead of starting a title.
+      await landsOn(t, 'Clear');
       const { open } = await w.api<{ open: { title: string }[] }>('GET', '/api/board');
       expect(open.some((x) => x.title === 'Half a thought')).toBe(false);
     });
@@ -611,11 +646,11 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
     }, 2 * MIN);
 
     it('the board takes the keyboard: rows open with Enter', async () => {
-      await landsOn(t, `#${w.ids.ship} Ship`);
+      await landsOn(t, `#${w.ids.harness} Write the e2e harness`);
       await t.enter();
       await t.waitFor(/‹ Board/);
       await t.press('‹ Board');
-      await landsOn(t, `#${w.ids.ship} Ship`);
+      await landsOn(t, `#${w.ids.harness} Write the e2e harness`);
       shot(t, 'inline-board');
     });
 
@@ -626,11 +661,13 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       shot(t, 'inline-done');
       await t.key('3');
       await t.waitFor(/New task/);
+      await landsOn(t, 'New'); // a tab switch lands on the tab
+      await t.key('3'); // pressed again: to type
       await landsOn(t, 'Title');
       shot(t, 'inline-new');
       await t.type('Typed inline');
       for (const next of ['Project', 'Priority', 'Tags', 'Description']) {
-        await t.enter();
+        await t.key('TAB');
         await landsOn(t, next);
       }
       await t.enter();

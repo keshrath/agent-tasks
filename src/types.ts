@@ -21,6 +21,10 @@ export interface Task {
   readonly tags: string | null;
   readonly result: string | null;
   readonly parent_id: number | null;
+  /** The session holding the claim (HolderService); null when nothing holds it. */
+  readonly holder: string | null;
+  /** The stage a completed or cancelled task was closed in: where a reopen puts it. */
+  readonly closed_from: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -211,6 +215,7 @@ export type EventType =
   | 'task:completed'
   | 'task:failed'
   | 'task:cancelled'
+  | 'task:reopened'
   | 'task:deleted'
   | 'artifact:created'
   | 'dependency:added'

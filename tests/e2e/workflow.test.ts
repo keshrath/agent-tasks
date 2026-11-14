@@ -123,9 +123,8 @@ describe('Dependency blocking', () => {
     const dep = ctx.tasks.create({ title: 'Dependency task' }, 'agent-1');
     const task = ctx.tasks.create({ title: 'Blocked task' }, 'agent-1');
 
-    ctx.tasks.addDependency(task.id, dep.id, 'blocks');
-
     ctx.tasks.claim(task.id, 'agent-1');
+    ctx.tasks.addDependency(task.id, dep.id, 'blocks');
 
     expect(() => ctx.tasks.advance(task.id)).toThrow(/blocked/i);
   });

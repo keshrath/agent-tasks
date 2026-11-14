@@ -118,7 +118,7 @@ async function record(): Promise<Recording> {
     );
     await step(
       'advance',
-      '/pipeline 12 opens a task directly; the focus is on its next step',
+      '/pipeline 12 opens a task directly; its next step is the one drawn first',
       async () => {
         await command(String(ids.changelog));
         await t.waitFor(/Write the CHANGELOG 2\.0\.0 entry/);
@@ -129,6 +129,7 @@ async function record(): Promise<Recording> {
       'advanced',
       'Enter on Advance moves it to the next stage',
       async () => {
+        await t.focus('Advance › plan');
         await t.enter();
         await t.waitFor(/moved to plan/);
       },
@@ -142,6 +143,10 @@ async function record(): Promise<Recording> {
         await sleep(400);
         await t.enter();
         await t.waitFor(/Send #\d+ back/);
+        await t.waitFor(/▴/); // it opens on its stage picker: Enter takes spec, then Why
+        await sleep(600);
+        await t.enter();
+        await sleep(600);
         await typeSlowly('The spec misses the migration notes');
       },
       3_000,
@@ -198,10 +203,11 @@ async function record(): Promise<Recording> {
     );
     await step(
       'new',
-      'The 3 key: a new task. Enter walks the fields and creates it on the last',
+      'The 3 key: a new task. Tab walks the fields; Enter in any of them creates it',
       async () => {
         await t.key('3');
         await t.waitFor(/New task/);
+        await t.key('3');
         await t.settle();
         for (const [i, v] of [
           'Record the /pipeline tutorial',
@@ -211,7 +217,7 @@ async function record(): Promise<Recording> {
           'From the real CLI',
         ].entries()) {
           await typeSlowly(v, 40);
-          if (i < 4) await t.enter();
+          if (i < 4) await t.key('TAB');
         }
       },
       2_500,

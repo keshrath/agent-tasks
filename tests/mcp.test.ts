@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { AppContext } from '../src/context.js';
 import { createTestContext } from './helpers.js';
 import { createToolHandler, tools } from '../src/transport/mcp.js';
@@ -71,6 +71,15 @@ describe('session management', () => {
     const freshHandle = createToolHandler(ctx);
     const task = freshHandle('task_create', { title: 'Test' }) as { created_by: string };
     expect(task.created_by).toBe('system');
+  });
+
+  it('acts under the fallback name (client@project) until a session names it', () => {
+    const named = createToolHandler(ctx, null, () => 'claude-code@agent-tasks');
+    expect(named('task_create', { title: 'A' })).toMatchObject({
+      created_by: 'claude-code@agent-tasks',
+    });
+    named('task_config', { action: 'session', id: 'abc', name: 'my-agent' });
+    expect(named('task_create', { title: 'B' })).toMatchObject({ created_by: 'my-agent' });
   });
 
   it('rejects set_session without id', () => {
@@ -307,6 +316,25 @@ describe('task_stage claim', () => {
 // =============================================================================
 // task_stage: assign (claim minus stage advance)
 // =============================================================================
+
+describe('task_stage reopen', () => {
+  it('opens a failed task again for a fresh claim, as the caller', async () => {
+    const t = ctx.tasks.create({ title: 'failed one' }, 'test');
+    ctx.tasks.claim(t.id, 'agent-1');
+    ctx.tasks.fail(t.id, 'session gone');
+    await handle('task_config', { action: 'session', id: 's1', name: 'lead' });
+    const r = (await handle('task_stage', {
+      action: 'reopen',
+      task_id: t.id,
+      reason: 'was only idle',
+    })) as { status: string; assigned_to: string | null };
+    expect(r).toMatchObject({ status: 'pending', assigned_to: null });
+    expect(ctx.tasks.getArtifacts(t.id).find((a) => a.name === 'reopen')?.created_by).toBe('lead');
+    await expect(
+      Promise.resolve().then(() => handle('task_stage', { action: 'reopen', task_id: t.id })),
+    ).rejects.toThrow('still open');
+  });
+});
 
 describe('task_stage assign', () => {
   it('assigns without advancing the stage', () => {
@@ -681,6 +709,19 @@ describe('task_delete', () => {
 
   it('rejects missing task_id', () => {
     expect(() => handle('task_delete', {})).toThrow('"task_id" is required');
+  });
+
+  it('refuses a parent with an open subtask; task_get says what a delete would take', () => {
+    const parent = handle('task_create', { title: 'Parent' }) as { id: number };
+    const open = handle('task_create', { title: 'Open', parent_id: parent.id }) as { id: number };
+    const shut = handle('task_create', { title: 'Shut', parent_id: parent.id }) as { id: number };
+    handle('task_stage', { action: 'cancel', task_id: shut.id, reason: 'no' });
+    expect(handle('task_get', { task_id: parent.id, include: ['subtasks'] })).toMatchObject({
+      subtree: { open: [open.id], finished: 1 },
+    });
+    expect(() => handle('task_delete', { task_id: parent.id })).toThrow(
+      `has open subtasks (#${open.id})`,
+    );
   });
 });
 
@@ -1574,51 +1615,38 @@ describe('task_config', () => {
     expect(result.name).toBe('cfg-agent');
   });
 
-  it('cleanup mode stale_agents fails nothing while agent-comm cannot be reached', async () => {
-    const t = ctx.tasks.create({ title: 'Claimed' }, 'test');
-    ctx.tasks.claim(t.id, 'gone-agent');
-    const result = (await handle('task_config', {
-      action: 'cleanup',
-      mode: 'stale_agents',
-      timeout_minutes: 5,
-    })) as { stale_agents: { failed: unknown[]; checked: number } };
-    expect(result.stale_agents.failed).toEqual([]);
-    expect(typeof result.stale_agents.checked).toBe('number');
-    expect(ctx.tasks.getById(t.id)!.status).toBe('in_progress');
-  });
-
-  it('cleanup mode stale_agents fails the tasks of agents agent-comm reports gone or silent', async () => {
-    const live = ctx.tasks.create({ title: 'Live' }, 'test');
-    const silent = ctx.tasks.create({ title: 'Silent' }, 'test');
+  it('cleanup mode sessions fails the open tasks whose holder is gone, now', () => {
+    const held = ctx.tasks.create({ title: 'Held' }, 'test');
     const gone = ctx.tasks.create({ title: 'Gone' }, 'test');
-    ctx.tasks.claim(live.id, 'live-agent');
-    ctx.tasks.claim(silent.id, 'silent-agent');
-    ctx.tasks.claim(gone.id, 'gone-agent');
-    const now = new Date().toISOString();
-    const old = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    vi.spyOn(ctx.agentBridge, 'fetchAgents').mockResolvedValue([
-      { name: 'live-agent', status: 'online', last_heartbeat: now },
-      { name: 'silent-agent', status: 'online', last_heartbeat: old },
-    ]);
-    const result = (await handle('task_config', {
-      action: 'cleanup',
-      mode: 'stale_agents',
-      timeout_minutes: 5,
-    })) as { stale_agents: { failed: { id: number }[]; checked: number } };
-    expect(result.stale_agents.failed.map((t) => t.id).sort()).toEqual([silent.id, gone.id].sort());
-    expect(result.stale_agents.checked).toBe(3);
-    expect(ctx.tasks.getById(live.id)!.status).toBe('in_progress');
-    expect(ctx.tasks.getById(silent.id)!.result).toContain('has not heartbeated');
-    expect(ctx.tasks.getById(gone.id)!.result).toContain('no longer registered');
+    const unheld = ctx.tasks.create({ title: 'Unheld' }, 'test');
+    ctx.holders.beat('mcp:live');
+    ctx.holders.beat('mcp:gone');
+    ctx.tasks.claim(held.id, 'a', true, 'mcp:live');
+    ctx.tasks.claim(gone.id, 'b', true, 'mcp:gone');
+    ctx.tasks.claim(unheld.id, 'c');
+    ctx.holders.end('mcp:gone');
+    ctx.db.run(`UPDATE holders SET ended_at = datetime('now', '-1 day') WHERE id = 'mcp:gone'`);
+    const result = handle('task_config', { action: 'cleanup', mode: 'sessions' }) as {
+      sessions: { failed: { id: number }[] };
+    };
+    expect(result.sessions.failed.map((t) => t.id)).toEqual([gone.id]);
+    expect(ctx.tasks.getById(held.id)!.status).toBe('in_progress');
+    expect(ctx.tasks.getById(unheld.id)!.status).toBe('in_progress');
   });
 
-  it('cleanup mode all runs the retention purge and the stale-agent sweep', async () => {
-    const result = (await handle('task_config', { action: 'cleanup', mode: 'all' })) as {
+  it('cleanup mode all runs the retention purge and the session sweep', () => {
+    const result = handle('task_config', { action: 'cleanup', mode: 'all' }) as {
       retention: { purgedTasks: number };
-      stale_agents: { failed: unknown[]; checked: number };
+      sessions: { failed: unknown[] };
     };
     expect(result.retention.purgedTasks).toBe(0);
-    expect(result.stale_agents).toMatchObject({ failed: [] });
+    expect(result.sessions).toEqual({ failed: [] });
+  });
+
+  it('refuses an unknown cleanup mode', () => {
+    expect(() => handle('task_config', { action: 'cleanup', mode: 'stale_agents' })).toThrow(
+      'mode',
+    );
   });
 
   it('runs cleanup', () => {

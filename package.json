@@ -1,6 +1,6 @@
 {
   "name": "agent-tasks",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "description": "Pipeline-driven task management for AI coding agents — stages, dependencies, artifacts, multi-agent claiming, and a native Claude Code /pipeline pane",
   "type": "module",
   "main": "dist/index.js",
@@ -30,8 +30,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint src/ tests/",
-    "lint:fix": "eslint src/ tests/ --fix",
+    "lint": "eslint src/ tests/ plugin/",
+    "lint:fix": "eslint src/ tests/ plugin/ --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
@@ -45,7 +45,7 @@
     "prepare": "husky"
   },
   "lint-staged": {
-    "*.{ts,js}": [
+    "*.{ts,tsx,js}": [
       "prettier --write",
       "eslint --fix"
     ],

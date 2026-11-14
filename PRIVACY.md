@@ -5,7 +5,7 @@
 ## What data this plugin accesses
 
 - **Local filesystem only.** Maintains a local SQLite database at `~/.agent-tasks/agent-tasks.db` (configurable via `AGENT_TASKS_DB`) holding tasks, stages, dependencies, per-stage artifacts (specs, plans, test results, decisions, learnings, comments, review notes), claimer assignments, approvals, and collaborators.
-- **Runs a local REST API.** An HTTP server binds to `http://127.0.0.1:3422` (configurable via `AGENT_TASKS_PORT`) for the Claude Code `/pipeline` pane and the hook scripts. Never exposed to the public internet by this plugin.
+- **Runs a local REST API.** An HTTP server binds to `http://127.0.0.1:3422` (configurable via `AGENT_TASKS_PORT`) for the Claude Code plugin (the `/pipeline` pane and its session hooks). Never exposed to the public internet by this plugin.
 - **No telemetry.** The plugin does not collect or transmit usage data.
 - **No server-side storage by us.** All data stays on your machine.
 

@@ -4,38 +4,38 @@ Every control, key, command form, view state, notice, toast and output a person 
 
 ## Command forms
 
-| What                                                    | Covered by                                                                                               |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `/pipeline`: answers with the board summary, opens pane | board > /pipeline answers with the board summary and opens the pane; pane > opens on the board by stage  |
-| `/pipeline <id>` and `/pipeline #<id>`                  | pane > /pipeline <id> opens a task; Advance moves it on (`#id`); pane > a task in its last stage… (`id`) |
-| `/pipeline <unknown id>`: says so, shows the board      | board > /pipeline <unknown id> says there is no such task and shows the board                            |
-| `/pipeline <text>`: filters, answers with the count     | pane > Find narrows the board…; pane > /pipeline <text> lands on the first match every time              |
-| `/pipeline <text>` matching nothing                     | board > /pipeline <text> that matches nothing lands on Clear the filter                                  |
-| `/pipeline` while the pane is open                      | pane > /pipeline <text> lands on the first match every time (12 times, the pane open and polling)        |
-| `/pipeline` after the pane was closed                   | board > the ✕ closes the pane; /pipeline opens it again on the board                                     |
-| `/pipeline <id>` drops the text the last find kept      | pane > Find narrows the board by text, a project name too                                                |
-| `/pipeline` while the server is down                    | resilience > the server goes away and comes back: down and up again without a key                        |
+| What                                                | Covered by                                                                                               |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `/pipeline`: opens the pane, no transcript line     | board > /pipeline opens the pane and puts no line in the transcript…; pane > opens on the board by stage |
+| `/pipeline <id>` and `/pipeline #<id>`              | pane > /pipeline <id> opens a task; Advance moves it on (`#id`); pane > a task in its last stage… (`id`) |
+| `/pipeline <unknown id>`: says so, shows the board  | board > /pipeline <unknown id> says there is no such task and shows the board                            |
+| `/pipeline <text>`: filters, answers with the count | pane > Find narrows the board…; pane > /pipeline <text> lands on the first match every time              |
+| `/pipeline <text>` matching nothing                 | board > /pipeline <text> that matches nothing lands on Clear the filter                                  |
+| `/pipeline` while the pane is open                  | pane > /pipeline <text> lands on the first match every time (12 times, the pane open and polling)        |
+| `/pipeline` after the pane was closed               | board > the ✕ closes the pane; /pipeline opens it again on the board                                     |
+| `/pipeline <id>` drops the text the last find kept  | pane > Find narrows the board by text, a project name too                                                |
+| `/pipeline` while the server is down                | resilience > the server goes away and comes back: down and up again without a key                        |
 
 ## Board
 
-| What                                                                                                                            | Covered by                                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Summary line (open, in progress, blocked)                                                                                       | pane > opens on the board by stage                                                                                |
-| Stage counts, in pipeline order                                                                                                 | board > /pipeline answers with the board summary…; board > a project with its own stages…                         |
-| Sections by stage; in progress first, then priority, then oldest                                                                | board > /pipeline answers with the board summary and opens the pane                                               |
-| Row marks: ● in progress, ○ pending, ! blocked                                                                                  | pane > opens on the board by stage                                                                                |
-| Row facts: waits for, assignee/unclaimed, subtasks, part of, project                                                            | pane > opens on the board by stage                                                                                |
-| Priority marks: p5+ coloured, lower dim, none for p0                                                                            | board > priority marks…                                                                                           |
-| Custom per-project pipeline: sections after the default stages                                                                  | board > a project with its own stages gets sections after the default ones                                        |
-| Custom pipeline in a task's stage strip                                                                                         | board > a project with its own stages… (opens the proof task)                                                     |
-| Long title: cut on one line, priority beside it                                                                                 | board > a long title is cut on its one line (F); board > board rows stay two lines (N)                            |
-| Wide (CJK, emoji) title on one line                                                                                             | board > a title with wide characters stays on one line (F); board > board rows stay… (N)                          |
-| A long board (62 tasks): Tab scrolls the pane with the ring                                                                     | board > a project with its own stages… (Tab to the last section)                                                  |
-| ↑ ↓ scroll the pane, the ring stays                                                                                             | board > ↑ and ↓ scroll the board without moving the ring                                                          |
-| A long backlog folds past 10 rows (`▸ N more`), unfolds (toggle stays after row 10, ring on the first row shown) and folds back | board > the long backlog folds past ten rows; Enter unfolds it and folds it again; plugin > a long backlog folds… |
-| Empty board: says so, New task button, its landing                                                                              | board > says nothing is open and offers a new task                                                                |
-| Empty board with recent work points at Done                                                                                     | board > once all is finished the board points at Done                                                             |
-| Finished tasks are not on the board                                                                                             | pane > opens on the board by stage                                                                                |
+| What                                                                                                                          | Covered by                                                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Summary line (open, in progress, blocked)                                                                                     | pane > opens on the board by stage                                                                                 |
+| Stage counts, in pipeline order                                                                                               | board > /pipeline answers with the board summary…; board > a project with its own stages…                          |
+| Sections by stage; in progress first, then priority, then oldest                                                              | board > /pipeline answers with the board summary and opens the pane                                                |
+| Row marks: ● in progress, ○ pending, ! blocked                                                                                | pane > opens on the board by stage                                                                                 |
+| Row facts: waits for, assignee/unclaimed, subtasks, part of, project                                                          | pane > opens on the board by stage                                                                                 |
+| Priority marks: p5+ coloured, lower dim, none for p0                                                                          | board > priority marks…                                                                                            |
+| Custom per-project pipeline: sections after the default stages                                                                | board > a project with its own stages gets sections after the default ones                                         |
+| Custom pipeline in a task's stage strip                                                                                       | board > a project with its own stages… (opens the proof task)                                                      |
+| Long title: cut on one line, priority beside it                                                                               | board > a long title is cut on its one line (F); board > board rows stay two lines (N)                             |
+| Wide (CJK, emoji) title on one line                                                                                           | board > a title with wide characters stays on one line (F); board > board rows stay… (N)                           |
+| A long board (62 tasks): Tab scrolls the pane with the ring                                                                   | board > a project with its own stages… (Tab to the last section)                                                   |
+| ↑ ↓ scroll the pane, the ring stays                                                                                           | board > ↑ and ↓ scroll the board without moving the ring                                                           |
+| A long backlog folds past 5 rows (`▸ N more`), unfolds (toggle stays after row 5, ring on the first row shown) and folds back | board > the long backlog folds past five rows; Enter unfolds it and folds it again; plugin > a long backlog folds… |
+| Empty board: says so, New task button, its landing                                                                            | board > says nothing is open and offers a new task                                                                 |
+| Empty board with recent work points at Done                                                                                   | board > once all is finished the board points at Done                                                              |
+| Finished tasks are not on the board                                                                                           | pane > opens on the board by stage                                                                                 |
 
 ## Find
 
@@ -61,16 +61,16 @@ Every control, key, command form, view state, notice, toast and output a person 
 
 ## New
 
-| What                                                        | Covered by                                                             |
-| ----------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Enter walks Title → Project → Priority → Tags → Description | pane > New: Enter walks the fields and the last one creates the task   |
-| Priority not a whole number: said beneath, ring kept        | pane > New: Enter walks the fields…                                    |
-| Created: `✓ created #N` on one line, the task opens         | pane > New: Enter walks the fields…; board > New from the empty board… |
-| REST state: title, project, priority, tags, created_by      | pane > New: Enter walks the fields…; board > the mouse… (created_by)   |
-| Create button                                               | board > New from the empty board creates the first task                |
-| Clear button                                                | board > New: Clear empties what was typed and starts over in Title (N) |
-| Field hints fit beside their labels                         | board > New: every field hint fits beside its label (N)                |
-| Inline                                                      | board > Done and New draw inline too                                   |
+| What                                                                           | Covered by                                                                                                     |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Tab walks Title → … → Description at typing speed, nothing lost; Enter creates | pane > New: Tab walks the fields at typing speed…                                                              |
+| Priority not a whole number: said beneath, ring kept                           | pane > New: Tab walks the fields…                                                                              |
+| Created: `✓ created #N` on one line, the task opens                            | pane > New: Tab walks the fields…; board > New from the empty board…                                           |
+| REST state: title, project, priority, tags, created_by                         | pane > New: Tab walks the fields…; board > the mouse… (created_by)                                             |
+| Create button                                                                  | board > New from the empty board creates the first task                                                        |
+| Clear button: empties, the ring stays on Clear                                 | board > New: Clear empties what was typed and keeps the ring on Clear (N); pane > Clear on New lands on Clear… |
+| Field hints fit beside their labels                                            | board > New: every field hint fits beside its label (N)                                                        |
+| Inline                                                                         | board > Done and New draw inline too                                                                           |
 
 ## Keys and focus
 
@@ -113,31 +113,32 @@ Every control, key, command form, view state, notice, toast and output a person 
 
 ## Layouts
 
-| View  | F                                   | N                                                                | I                                                                              |
-| ----- | ----------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Board | pane, board                         | pane > board, detail, forms…; board > board rows stay two lines… | pane > opens the board above the prompt; board > the board takes the keyboard… |
-| Done  | pane > Done lists…                  | board > Done rows keep who…                                      | board > Done and New draw inline too                                           |
-| New   | pane > New: Enter walks the fields… | board > New: every field hint fits…                              | board > Done and New draw inline too                                           |
+| View  | F                                 | N                                                                | I                                                                              |
+| ----- | --------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Board | pane, board                       | pane > board, detail, forms…; board > board rows stay two lines… | pane > opens the board above the prompt; board > the board takes the keyboard… |
+| Done  | pane > Done lists…                | board > Done rows keep who…                                      | board > Done and New draw inline too                                           |
+| New   | pane > New: Tab walks the fields… | board > New: every field hint fits…                              | board > Done and New draw inline too                                           |
 
 ## Detail
 
 `resilience` = `resilience.e2e.test.ts`.
 
-| What                                                                         | Covered by                                                                                    |
-| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Status line (mark, word, agent, priority, project), stage strip              | pane > a task in progress…; detail > an unclaimed subtask…; detail > a completed task…        |
-| Created (by whom) / Updated, Tags                                            | detail > an unclaimed subtask…; pane > a task in progress…                                    |
-| Result / Error / Reason fact                                                 | detail > a completed task…; pane > Done lists… (Error); detail > a cancelled task… (Reason)   |
-| Cancelled: no stage strip                                                    | detail > a cancelled task: its reason, no stage strip                                         |
-| Completed: only Delete, no Artifacts section                                 | detail > a completed task: its result, the strip at done, only Delete left                    |
-| Unclaimed hint, no Advance/Complete/Fail/Send back, ring on `‹ Board`        | detail > an unclaimed subtask: its parent, who made it, no step to take, the way back         |
-| Assigned pending: "Waiting for <agent> to start it."                         | detail > an assigned task waits for its agent                                                 |
-| Custom pipeline: strip and `Advance ›` name its stages; Complete at the last | detail > a project with its own pipeline: the strip and Advance name its stages               |
-| Blocked: no Advance/Complete, "It moves on once…", ring on the blocker       | pane > a blocked task cannot move on…; detail > blocker → its subtask → back…                 |
-| Related / Duplicate links shown, never blocking                              | detail > a related link does not block: Advance stays; detail > a cancelled task… (Duplicate) |
-| Part of (parent), Subtasks n/m done                                          | detail > an unclaimed subtask…; detail > blocker → its subtask → back…                        |
-| Related-task navigation and the back trail (`‹ #N` … `‹ Board`)              | detail > blocker → its subtask → back, back, back to the board                                |
-| Description fold (`▸ Show all N lines` / `▾ Show less`), ring kept           | pane > a task in progress…                                                                    |
+| What                                                                                       | Covered by                                                                                    |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| Status line (mark, word, agent, priority, project), stage strip                            | pane > a task in progress…; detail > an unclaimed subtask…; detail > a completed task…        |
+| Created (by whom) / Updated, Tags                                                          | detail > an unclaimed subtask…; pane > a task in progress…                                    |
+| Result / Error / Reason fact                                                               | detail > a completed task…; pane > Done lists… (Error); detail > a cancelled task… (Reason)   |
+| Cancelled: no stage strip                                                                  | detail > a cancelled task: its reason, no stage strip                                         |
+| Completed: Reopen and Delete, no Artifacts section                                         | detail > a completed task: its result, the strip at done, Reopen and Delete left              |
+| Failed (session gone) → Reopen: unclaimed at its stage, `reopen` artifact, ring on ‹ Board | detail > a failed task opens again with Reopen…                                               |
+| Unclaimed hint, no Advance/Complete/Fail/Send back, ring on `‹ Board`                      | detail > an unclaimed subtask: its parent, who made it, no step to take, the way back         |
+| Assigned pending: "Waiting for <agent> to start it."                                       | detail > an assigned task waits for its agent                                                 |
+| Custom pipeline: strip and `Advance ›` name its stages; Complete at the last               | detail > a project with its own pipeline: the strip and Advance name its stages               |
+| Blocked: no Advance/Complete, "It moves on once…", ring on the blocker                     | pane > a blocked task cannot move on…; detail > blocker → its subtask → back…                 |
+| Related / Duplicate links shown, never blocking                                            | detail > a related link does not block: Advance stays; detail > a cancelled task… (Duplicate) |
+| Part of (parent), Subtasks n/m done                                                        | detail > an unclaimed subtask…; detail > blocker → its subtask → back…                        |
+| Related-task navigation and the back trail (`‹ #N` … `‹ Board`)                            | detail > blocker → its subtask → back, back, back to the board                                |
+| Description fold (`▸ Show all N lines` / `▾ Show less`), ring kept                         | pane > a task in progress…                                                                    |
 
 ## Actions and forms
 
@@ -156,13 +157,13 @@ Every control, key, command form, view state, notice, toast and output a person 
 
 ## Stage gates
 
-| What                                                                                                                                         | Covered by                                                                                                                   |
-| -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| require_artifact: said up front with who gives it; no primary; Advance refused until met                                                     | detail > an artifact is required: said up front, Advance refused until one is there; plugin > a stage gate is said up front… |
-| require_comment: said up front; the ring on Advance, never in the field (a next `/pipeline N` is no comment)                                 | detail > a comment is required: the ring stays off the field, so a next /pipeline is no comment                              |
-| require_comment: Advance refused, then the ring in the comment field; one sent lets it move on                                               | detail > a comment is required…                                                                                              |
-| A refusal the hint explains says only `✗ #N can't leave <stage> yet`                                                                         | detail > an artifact is required…; detail > a comment is required…; plugin > a refusal the gate hint explains…               |
-| Complete refused by a comment gate: its form stays with the typed result and the hint, ring in the comment field, then Complete goes through | detail > Complete refused for want of a comment keeps its form and words…; plugin > a refusal the gate hint explains…        |
+| What                                                                                                                                         | Covered by                                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| require_artifact: said up front with who gives it; no Advance or Complete until met                                                          | detail > an artifact is required: said up front, no Advance or Complete until one is there; plugin > a stage gate is said up front… |
+| require_comment: said up front; the ring on Advance, never in the field (a next `/pipeline N` is no comment)                                 | detail > a comment is required: the ring stays off the field, so a next /pipeline is no comment                                     |
+| require_comment: Advance refused, then the ring in the comment field; one sent lets it move on                                               | detail > a comment is required…                                                                                                     |
+| A refusal the hint explains says only `✗ #N can't leave <stage> yet`                                                                         | detail > an artifact is required…; detail > a comment is required…; plugin > a refusal the gate hint explains…                      |
+| Complete refused by a comment gate: its form stays with the typed result and the hint, ring in the comment field, then Complete goes through | detail > Complete refused for want of a comment keeps its form and words…; plugin > a refusal the gate hint explains…               |
 
 ## Artifacts and comments
 
@@ -179,7 +180,7 @@ Every control, key, command form, view state, notice, toast and output a person 
 
 | What                                                                                                     | Covered by                                                                                 |
 | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Task deleted elsewhere while open: "✗ there is no task #N", back on the board                            | detail > deleted elsewhere: the pane says so and goes back to the board                    |
+| Task deleted elsewhere while open: "! #N was deleted elsewhere", back on the board                       | detail > deleted elsewhere: the pane says so and goes back to the board                    |
 | Moved elsewhere: a stale Advance refused, the detail catches up                                          | detail > moved on elsewhere: an Advance from before is refused, then the detail catches up |
 | Comments and stage from elsewhere show without a key                                                     | detail > changed elsewhere: comments and stage show up without a key                       |
 | No toast for the pane's own acts                                                                         | detail > what the pane does itself is not toasted                                          |
@@ -190,3 +191,67 @@ Every control, key, command form, view state, notice, toast and output a person 
 | Down while a task is open: back up, the same task, its next step works                                   | resilience > down while a task is open: back up, the same task is shown again              |
 | An agent-tasks 1.x on the port: says which, `old server` entry, then the current one                     | resilience > an agent-tasks from before the board holds the port…                          |
 | Server down → Refresh, "still no board (time)"                                                           | pane > says so instead of showing a stale board, and Refresh brings it back                |
+
+## The session's claims and the pipeline reminder
+
+`session` = `session.e2e.test.ts` (`claude -p --plugin-dir`, the model makes the calls).
+
+| What                                                                                                                                                              | Covered by                                                                                       |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| A `task_stage` claim the model makes is held by the session (`claude:<session id>`)                                                                               | session > a claim the model makes is held by its session, and the session ending ends the holder |
+| The session ending ends its holder; past the grace the task fails with the reason                                                                                 | session > a claim the model makes is held by its session…                                        |
+| `enforcePipeline` on: a work prompt, no task held, the model reads the reminder                                                                                   | session > with enforcePipeline, a work prompt in a session holding no task carries the reminder  |
+| `enforcePipeline` on, the session holds a task (claimed in a first turn, `--resume`d): no reminder; the resumed session holds it again                            | session > with enforcePipeline, a session that holds a task is not reminded…                     |
+| The session is a holder from `session.start` to `session.end`, claim or not                                                                                       | session > without enforcePipeline…; idle > beats from its start…                                 |
+| `TaskCreate` (the session's own list) puts nothing on the board                                                                                                   | session > the session's own task list (TaskCreate) stays its own                                 |
+| A REST server that hangs: no hook waits past its timeout; a new conversation is reminded without the server                                                       | session > a REST server that hangs costs the session seconds…                                    |
+| An interactive session idle past twice the grace keeps its claim (sweeps find it alive, it keeps beating); `/exit` ends its holder; past the grace the task fails | idle > beats from its start, holds the claim its model makes through minutes idle…               |
+| `/clear` in an interactive session: its claim moves to the new session id, the old holder ends, the sweep past the grace fails nothing                            | clear > keeps its claims under the new session id…                                               |
+| `enforcePipeline` off: nothing                                                                                                                                    | session > without enforcePipeline, the same prompt carries nothing                               |
+| A claim through an MCP process is held by that process (`mcp:<id>`)                                                                                               | mcp > task_update: metadata and a blocks dependency; then a dependency refusal                   |
+
+## Landing again after a poll, and after Advance
+
+| What                                                                                                 | Covered by                                                                                              |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Ring on New task, a task made elsewhere: the ring goes to its row, never into Find; the hotkeys work | board > a task made elsewhere takes the ring to its row…                                                |
+| The ring's Advance moved on elsewhere: the ring goes to ‹ Board                                      | detail > changed elsewhere: comments and stage show up without a key                                    |
+| Local Advance: the ring on ‹ Board, a second Enter moves nothing                                     | pane > /pipeline <id> opens a task; Advance moves it on, once; detail > Advance moves on with one click |
+| A fresh board starts on the first task in progress                                                   | pane > opens on the board…; board > the ring starts on the first task in progress…                      |
+| Empty Done: its digit keeps the ring on Done                                                         | board > Done says nothing finished yet…                                                                 |
+
+## Round 3: the ring under other sessions' changes, delete, typing at speed
+
+| Behaviour                                                                                                                         | Test                                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| A Complete form closed by a move elsewhere: ring on Complete (never Advance), words kept, header the keys'                        | pane > a Complete form closed by a move elsewhere lands on Complete…                         |
+| Done right after a task finished elsewhere: its newest row, tabs in sight (3 runs)                                                | pane > Done right after a task finished elsewhere…                                           |
+| Delete of a parent with an open subtask: says which, only Keep it                                                                 | pane > Delete of a parent with work open below…; plugin > delete with an open subtask below… |
+| Clear on New: ring on Clear, a digit then switches tabs, no task made                                                             | pane > Clear on New lands on Clear…                                                          |
+| New fields, comment, Fail reason, Find typed at 25 ms a key: every key arrives                                                    | speed > New: every field…; a comment and a Fail reason…; Find at 25 ms…                      |
+| A comment typed at 40 ms while others claim, comment, advance, attach: text whole, nothing at the prompt, the changes drawn after | speed > a comment typed at 40 ms while other sessions…                                       |
+
+## Round 4: hurried keys, stale views, control characters
+
+| Behaviour                                                                                                                            | Test                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| Enter twice on a board row (5 places in the focus order, 10–80 ms) or a Done row, docked and inline: the task opens, nothing changes | keys > Enter twice on a row…                                                |
+| Enter twice right after /pipeline, and repeated pairs: nothing changes                                                               | keys > right after /pipeline…; Back then Enter…                             |
+| Send back then Enter twice (80, 150 ms): it asks for the stage, sends nothing                                                        | keys > Send back, then Enter twice…                                         |
+| An Advance drawn before a move elsewhere is refused, never a skip                                                                    | keys > Advance drawn before a move elsewhere…; detail > moved on elsewhere… |
+| Advance three times fast: moves once, no task_stage advice shown                                                                     | keys > Advance pressed three times fast…                                    |
+| 3 twice 40 ms apart: the ring is in Title, nothing at the prompt                                                                     | keys > 3 twice 40 ms apart…                                                 |
+| Colour codes and control characters in a title, description, comment and artifact: drawn clean, the pane keeps its keys              | ansi > the board draws the title…; the task draws its description…          |
+
+## Other sessions under a held keyboard, and artifact tables
+
+| What                                                                                                                         | Covered by                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| A task claimed (leaves the stage) and one raised above the ring: no row moves under it, Enter opens the task it is on        | pane > a task claimed and one raised above the ring move no row under it…                            |
+| An artifact attached elsewhere above the comment field: the ring stays in the field, the header says so, a key types into it | pane > an artifact attached elsewhere above the comment field…                                       |
+| `r` keeps the ring where it was (r then Enter never advances)                                                                | pane > r refreshes and leaves the ring where it was…                                                 |
+| A form whose task was finished elsewhere closes: "changed elsewhere … nothing was sent"                                      | pane > a form whose task was finished elsewhere closes…                                              |
+| A comment sent: the ring on ‹ Board, not in the field                                                                        | pane > a comment is sent from its field…; detail > a comment from the pane carries the person’s name |
+| Gate refusal: "add the comment below", the ring stays on the pressed button / the form                                       | detail > a comment is required…; detail > Complete refused for want of a comment…                    |
+| A table artifact at 110 columns (one row a line) and 240 (a table); the name on one line                                     | pane > an artifact with a table in a narrow and a wide dock                                          |
+| A claim made without a name is made as `claude-code@<project>`, held by the session                                          | session > a claim the model makes without naming itself…                                             |

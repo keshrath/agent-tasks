@@ -165,8 +165,9 @@ describe.skipIf(!E2E)('the /pipeline pane when its server changes', () => {
 
     await t.key('ESC');
     await t.pipeline();
-    const asked = await t.waitFor(/nothing answers at http:\/\/127\.0\.0\.1:\d+/);
-    expect(asked).toMatch(/not reachable/);
+    // The pane, closed and opened again, says it; the transcript line comes first.
+    const asked = await t.waitFor(/not reachable/);
+    expect(asked).toMatch(/nothing answers at http:\/\/127\.0\.0\.1:\d+/);
     await landsOn(t, 'Refresh');
 
     await w.startServer();
@@ -175,7 +176,7 @@ describe.skipIf(!E2E)('the /pipeline pane when its server changes', () => {
       () => /\d+ open tasks/.test(statusEntry(t) ?? ''),
       'the status entry counts again',
     );
-    expect(t.text()).not.toMatch(/not reachable|still no board/);
+    expect(t.text()).not.toMatch(/not reachable|still nothing answers/);
     // Back without a key, the ring is on a task again, not left on a tab where Enter does nothing.
     await landsOn(t, /^[○●!] #\d+ /);
   });
@@ -192,9 +193,9 @@ describe.skipIf(!E2E)('the /pipeline pane when its server changes', () => {
     await t.key('r');
     const back = await t.waitFor(/#\d+ Replace the web dashboard/, 20_000);
     expect(back).toMatch(/‹ Board/);
-    await landsOn(t, /Advance › \w+/);
+    await landsOn(t, '‹ Board');
     const stage = (await w.task(w.ids.pane)).stage;
-    await t.enter();
+    await t.press(/Advance › \w+/);
     await until(w, w.ids.pane, (x) => x.stage !== stage);
   });
 

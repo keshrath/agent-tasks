@@ -1,14 +1,23 @@
 {
   "name": "agent-tasks",
   "displayName": "agent-tasks",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "description": "Pipeline-driven task management for AI coding agents: stages, dependencies, per-stage artifacts and multi-agent claiming, with the board in the /pipeline pane.",
   "author": {
     "name": "keshrath"
   },
   "homepage": "https://github.com/keshrath/agent-tasks",
   "repository": "https://github.com/keshrath/agent-tasks",
+  "documentationUrl": "https://github.com/keshrath/agent-tasks/blob/main/docs/USER-MANUAL.md",
   "license": "MIT",
   "keywords": ["mcp", "tasks", "pipeline", "kanban", "claude-code"],
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "enforcePipeline": {
+      "type": "boolean",
+      "title": "Remind to claim a task first",
+      "description": "A prompt that asks for work, in a session that holds no claimed task, reaches the model with a reminder to create or claim a pipeline task before changing anything.",
+      "default": false
+    }
+  }
 }

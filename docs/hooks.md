@@ -1,173 +1,84 @@
-# Hooks (Claude Code)
+# The plugin's session hooks (Claude Code)
 
-agent-tasks ships five hook scripts that integrate with Claude Code's
-lifecycle events. They live under `scripts/hooks/` and are installed by
-`scripts/setup.js` into `~/.claude/settings.json`.
+agent-tasks 3.0 has no command hooks and nothing to write into `settings.json`. The
+agent-tasks plugin's mod (`plugin/hooks/register.tsx`, Claude Code 2.1.289+) hooks the
+session itself, next to the `/pipeline` pane. Every hook fails open: a server that is
+away never blocks a prompt, a tool call or the end of a session, and every request the
+plugin makes gives up after 3 s, so a server that hangs costs at most that.
 
-All hooks fail open — any internal error is logged to stderr and the hook
-returns an empty JSON object so the user is never blocked by a broken hook.
+| Hook             | What it does                                                                                                                                                     |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session.start`  | Registers `/pipeline`, polls the board, and makes the session a claim holder (`claude:<session id>`)                                                             |
+| clock, every 30s | The session's holder beats, idle or not                                                                                                                          |
+| `tool.call`      | After a `task_stage` claim or assign that succeeded, the session adopts the task (`POST /api/holders/:holder`)                                                   |
+| `session.end`    | Ends the session's holder (`DELETE /api/holders/:holder`); its open tasks fail once the grace has passed                                                         |
+| `prompt.submit`  | With `enforcePipeline` on: a work prompt in a session that holds no open task carries a reminder to claim one                                                    |
+| `prompt.context` | Once per conversation: what is in flight across every session, this session's own claims first and marked; it asks to claim first only with `enforcePipeline` on |
 
-| Script                  | Event                  | Purpose                                               |
-| ----------------------- | ---------------------- | ----------------------------------------------------- |
-| `session-start.js`      | SessionStart           | Points at the MCP tools and the `/pipeline` pane      |
-| `task-cleanup-start.js` | SessionStart           | Auto-fails tasks assigned to dead sessions            |
-| `pipeline-enforcer.mjs` | UserPromptSubmit       | Reminds when no pipeline task is active               |
-| `todowrite-bridge.mjs`  | PreToolUse (TodoWrite) | Mirrors TodoWrite todos into the pipeline             |
-| `task-cleanup-stop.js`  | Stop / SubagentStop    | Auto-fails open tasks whose owner is no longer online |
+## Claimed tasks live with their session
 
-## session-start.js
+A task in progress is failed for the session working on it being gone, never for its agent
+being quiet. The server keeps claim holders (`src/domain/holders.ts`): each MCP process holds
+the tasks claimed or moved on (advanced) through it and beats every 30 seconds while it runs;
+the plugin moves the tasks its agents claim or move on to the session itself, so they also
+survive an MCP server reconnecting, and carries them across a `/clear` (which ends the
+conversation, not its work: the next beat moves them to the new session id). A holder that
+ended, or stopped beating, longer than `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES` (default 10)
+ago is gone, and every agent-tasks process that sweeps fails the tasks in progress it held:
 
-Tells the person that `/pipeline` opens the board (the agent-tasks plugin's
-pane) and injects session context naming the MCP tools that drive the
-pipeline (`task_list`, `task_stage`, `task_artifact`).
+- `The session holding this task ended without completing it (<assignee>).`
+- `The session holding this task stopped answering (<assignee>).`
 
-## task-cleanup-start.js
+A holder that beats again within the grace (a resumed session) keeps its tasks. A process's
+first tick after starting, and its first tick after the machine slept, beat without sweeping,
+and the plugin beats at once on a tick that comes late, so no session is judged while the
+others have not had a chance to beat. Only work in progress is held: a task sent back to a
+queue stage, or one nothing holds (claimed over REST, before 3.0), is never failed this way.
 
-On every session start, opens the agent-tasks DB and finds tasks with
-`status IN ('pending', 'in_progress')` and an `assigned_to`. A task is
-auto-failed with a `stale task cleanup` message only when both hold:
+The session that moves a task on holds it from then on: a task assigned to another agent is
+held by whoever advances it. Without the plugin, an MCP process that restarted mid-session
+takes back its agent's tasks nothing alive holds when the agent names itself again
+(`task_config` action `session`; the answer lists them as `reclaimed`).
 
-- its assignee is no live agent in agent-comm: neither `status = 'online'` nor
-  a heartbeat within `AGENT_TASKS_HEARTBEAT_FRESH_MINUTES` (default 15), and
-- it has been idle (no update) for `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES`
-  (default 60).
+## The pipeline reminder
 
-Catches tasks orphaned by crashes where the Stop hook never fired.
+Off unless the plugin's `enforcePipeline` option is on. It looks only at prompts the person
+sent (typed, Remote Control, `claude -p`), never at a slash command, a notification or a peer's
+message, and only at prompts that ask for work (`plugin/hooks/work.ts`, read sentence by
+sentence, words like `ok`, `yes,`, `please`, `go ahead and` in front read past): a sentence
+that starts with something to do (`add`, `fix`, `implement`, `push the notes into…`, a go-ahead
+like `continue`), a request (`can you add…`, `could you fix…`), or any other statement of 20
+characters or more (`Status page needs a dark mode toggle, build it`). Not work: a question
+asking to know (`How does…?`, `What's the status of #12?`), a thanks (`looks great`), a git
+command alone (`commit and push`), a note to remember, a slash command; nor what is answered
+in the chat (`write a haiku`, `translate this sentence`, `give me a list of…`, `run the tests`).
+Asked to know and then to do (`explain why it fails and then fix it`) is work. A prompt of 200
+characters or more is work whatever its form. When this session holds no open task, the
+model reads, beside the prompt:
 
-## pipeline-enforcer.mjs
+> PIPELINE REQUIRED: this session holds no claimed agent-tasks task.
+>
+> Before doing this work, create a task with task_create or claim one with task_stage action
+> "claim". Do NOT start writing code or making changes until this session has claimed a
+> pipeline task.
 
-Runs on every `UserPromptSubmit`. Classifies the prompt as "work" or "not
-work" (greetings, questions, slash commands, meta commands, and
-system-injected blocks are all skipped). When the prompt looks like real
-work, checks:
+It never blocks the prompt, and asks the server nothing for it: what the session holds is
+known from its beats, and a new conversation (nothing said in it yet, nothing carried over
+from a `/clear`) holds nothing. Only a resumed conversation's first prompt, before its first
+beat answered, waits for that beat (at most 3 s); no answer lets the prompt through without
+the reminder.
 
-1. Is there a registered agent-comm identity for this session?
-2. Does that identity have at least one task in `pending` or `in_progress`?
+## Upgrading from 2.x
 
-If either check fails, it injects a `PIPELINE REQUIRED` reminder into the
-prompt context. **It never blocks** — the hook emits context, not a
-permission decision, so Claude can still see the user's prompt and respond.
+Remove the agent-tasks entries from `~/.claude/settings.json` (`session-start.js`,
+`task-cleanup-start.js`, `pipeline-enforcer.mjs`, `todowrite-bridge.mjs`,
+`task-cleanup-stop.js`): the scripts are gone. What they did:
 
-### Environment variables
-
-| Variable         | Default                         | Description             |
-| ---------------- | ------------------------------- | ----------------------- |
-| `AGENT_COMM_DB`  | `~/.agent-comm/agent-comm.db`   | agent-comm SQLite path  |
-| `AGENT_TASKS_DB` | `~/.agent-tasks/agent-tasks.db` | agent-tasks SQLite path |
-
-### Work classification
-
-The enforcer treats a prompt as "not work" when any of these match:
-
-- Empty or < 15 characters
-- Starts with a `<system-reminder>`, `<task-notification>`,
-  `<local-command-caveat>`, `<command-name>`, or `<command-message>` tag
-- Starts with a greeting (`hi`, `ok`, `yes`, ...)
-- Starts with `/` (slash command) or a meta word (`commit`, `push`,
-  `remember`, `save`, ...)
-- Is a question under 200 characters
-
-Anything else is treated as work.
-
-## todowrite-bridge.mjs
-
-Intercepts Claude Code's `TodoWrite` tool. For every non-completed todo in
-the payload, POSTs a task to `http://localhost:3422/api/tasks` (override
-with `AGENT_TASKS_URL`). Priority maps: `high → 5`, `medium → 3`, `low → 1`.
-Tags each mirrored task with `synced,todowrite` and project `claude-todos`.
-
-If agent-tasks isn't running, the hook silently fails after a 3 second
-timeout and lets the original `TodoWrite` proceed.
-
-## task-cleanup-stop.js
-
-On `Stop` / `SubagentStop`, sweeps for open tasks whose `assigned_to` is no
-longer present in agent-comm's `online` agent list and auto-fails them with
-a `session ended` message. Never blocks the stop and never touches tasks
-owned by sessions that are still alive — Claude Code's Stop event does not
-carry enough metadata to identify which agent-comm session is stopping, so
-attempting to nag "your" tasks specifically would false-positive on sibling
-sessions. When agent-comm's DB (`AGENT_COMM_DB`) cannot be read, nobody can
-be told apart from a dead session, so the sweep is skipped. Works together
-with `task-cleanup-start.js` so crashes don't leak in-progress tasks forever.
-
-## Manual configuration
-
-`scripts/setup.js` writes the hooks into `~/.claude/settings.json`
-automatically. If you need to configure them by hand, add entries like:
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/abs/path/to/agent-tasks/scripts/hooks/session-start.js\"",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "node \"/abs/path/to/agent-tasks/scripts/hooks/task-cleanup-start.js\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/abs/path/to/agent-tasks/scripts/hooks/pipeline-enforcer.mjs\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "TodoWrite",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/abs/path/to/agent-tasks/scripts/hooks/todowrite-bridge.mjs\"",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/abs/path/to/agent-tasks/scripts/hooks/task-cleanup-stop.js\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"/abs/path/to/agent-tasks/scripts/hooks/task-cleanup-stop.js\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Replace `/abs/path/to/agent-tasks` with your clone path.
-
-## Testing the hooks
-
-`tests/hooks/hooks.test.ts` covers all five scripts with shape-correct
-fail-open assertions. Run `npm test -- tests/hooks/` to execute them in
-isolation.
+- `session-start.js`: the `prompt.context` block says the same, with what is in flight.
+- `task-cleanup-start.js`, `task-cleanup-stop.js`: replaced by claim holders. They failed
+  tasks whose assignee agent-comm did not list as online, which failed the tasks of live
+  sessions that were only idle (waiting on the person) and every task claimed without a name.
+- `pipeline-enforcer.mjs`: the `prompt.submit` reminder, opt-in, and about this session's own
+  claims (the script read whichever agent-comm agent had beaten last, any session's).
+- `todowrite-bridge.mjs`: dropped. Claude Code has no `TodoWrite` tool any more, and its
+  session task list is the session's own scratch, not pipeline work.

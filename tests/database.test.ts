@@ -11,7 +11,7 @@ import { createDb, schemaVersion, type Db } from '../src/storage/database.js';
 import { createContext, type AppContext } from '../src/context.js';
 
 const FIXTURE = join(import.meta.dirname, 'fixtures', 'agent-tasks-1.10.13.db');
-const LATEST = 5;
+const LATEST = 7;
 
 const dirs: string[] = [];
 const open: Array<Db | AppContext> = [];
@@ -142,5 +142,28 @@ describe('a database written by agent-tasks 1.10.13', () => {
     const added = ctx.tasks.create({ title: 'Written by 2.x', parent_id: 1 }, 'agent-2');
     expect(added.project).toBe('legacy');
     expect(ctx.tasks.getById(added.id)?.title).toBe('Written by 2.x');
+  });
+});
+
+describe('transactions', () => {
+  // Deferred, a transaction that reads and then writes under WAL fails at once when another
+  // process wrote in between (SQLITE_BUSY_SNAPSHOT, no busy timeout). IMMEDIATE takes the
+  // write lock first: another writer waits (here: is refused at once) instead.
+  it('take the write lock when they start', () => {
+    const path = join(scratch(), 'tx.db');
+    const a = createDb({ path });
+    const b = createDb({ path });
+    open.push(a, b);
+    b.raw.pragma('busy_timeout = 0');
+    let other: unknown = null;
+    a.transaction(() => {
+      a.queryOne(`SELECT 1`);
+      try {
+        b.run(`INSERT INTO _meta (key, value) VALUES ('probe', '1')`);
+      } catch (err) {
+        other = err;
+      }
+    });
+    expect(String(other)).toMatch(/SQLITE_BUSY|database is locked/);
   });
 });

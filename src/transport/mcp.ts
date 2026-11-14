@@ -5,6 +5,7 @@
 // adapter — validation lives in the domain layer, not here.
 // =============================================================================
 
+import { basename } from 'node:path';
 import { Server, type Tool } from '@modelcontextprotocol/server';
 import type { AppContext } from '../context.js';
 import { readPackageMeta } from '../package-meta.js';
@@ -159,7 +160,7 @@ export const tools: Tool[] = [
   {
     name: 'task_delete',
     description:
-      'Delete a task and all its artifacts, comments, and dependencies (cascading delete). Cannot be undone.',
+      'Delete a task with its artifacts, comments, dependencies and finished subtasks (all levels). Refused while any subtask below it is still open: finish, cancel or delete those first. Cannot be undone.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -171,13 +172,13 @@ export const tools: Tool[] = [
   {
     name: 'task_stage',
     description:
-      'Move a task through its lifecycle. Actions: "claim" → assign to you and advance from backlog to spec, "assign" → assign to you WITHOUT advancing the stage (use for custom pipelines where the first stage is itself a do-work stage), "advance" → next stage (or jump to a specific one), "regress" → earlier stage (requires reason), "complete" → marks done with result, "fail" → marks failed with error, "cancel" → cancels with reason.',
+      'Move a task through its lifecycle. Actions: "claim" → assign to you and advance from backlog to spec, "assign" → assign to you WITHOUT advancing the stage (use for custom pipelines where the first stage is itself a do-work stage), "advance" → next stage (or jump to a specific one), "regress" → earlier stage (requires reason; back in the first stage it is unclaimed again), "complete" → marks done with result, "fail" → marks failed with error, "cancel" → cancels with reason, "reopen" → a failed, completed or cancelled task open again and unclaimed at the stage it was closed in (optional reason), ready to claim.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['claim', 'assign', 'advance', 'regress', 'complete', 'fail', 'cancel'],
+          enum: ['claim', 'assign', 'advance', 'regress', 'complete', 'fail', 'cancel', 'reopen'],
           description: 'Lifecycle action to perform',
         },
         task_id: { type: 'number', description: 'Task ID' },
@@ -188,7 +189,12 @@ export const tools: Tool[] = [
         stage: {
           type: 'string',
           description:
-            'Target stage (advance: optional — advances to next if omitted; regress: required)',
+            'Target stage (advance: optional — advances to exactly the next if omitted; regress: required)',
+        },
+        from: {
+          type: 'string',
+          description:
+            'advance only: the stage you saw the task in; refused if it moved elsewhere meanwhile',
         },
         comment: {
           type: 'string',
@@ -197,7 +203,7 @@ export const tools: Tool[] = [
         },
         reason: {
           type: 'string',
-          description: 'Reason for regression, failure, or cancellation',
+          description: 'Reason for regression, cancellation or reopening',
         },
         result: {
           type: 'string',
@@ -329,13 +335,9 @@ export const tools: Tool[] = [
         name: { type: 'string', description: 'Session name (session only)' },
         mode: {
           type: 'string',
-          enum: ['retention', 'stale_agents', 'all'],
-          description: 'Cleanup mode (cleanup only, default: retention)',
-        },
-        timeout_minutes: {
-          type: 'number',
+          enum: ['retention', 'sessions', 'all'],
           description:
-            'Heartbeat timeout in minutes for stale agent detection (cleanup only, default: 30)',
+            'Cleanup mode (cleanup only, default: retention). "sessions" fails the open tasks whose claiming session is gone now, without waiting for the next sweep.',
         },
         format: {
           type: 'string',
@@ -357,8 +359,16 @@ export type ToolHandler = (
   args: Record<string, unknown>,
 ) => unknown | Promise<unknown>;
 
-export function createToolHandler(ctx: AppContext): ToolHandler {
-  const session: SessionState = { current: null };
+/**
+ * `holder` is what claims made through these tools live with (HolderService); `fallback` the
+ * name they act under until `task_config` session names them.
+ */
+export function createToolHandler(
+  ctx: AppContext,
+  holder: string | null = null,
+  fallback?: () => string,
+): ToolHandler {
+  const session: SessionState = { current: null, holder, fallback };
 
   return function handleTool(
     name: string,
@@ -385,6 +395,8 @@ export interface McpServerOptions {
   onInitialized?: () => void;
   /** Append PIPELINE_FOOTER to tool results (AGENT_TASKS_INSTRUCTIONS=0 turns it off). */
   footer?: boolean;
+  /** The holder claims made through this server live with. */
+  holder?: string;
 }
 
 /**
@@ -394,7 +406,10 @@ export interface McpServerOptions {
 export function createMcpServer(ctx: AppContext, options: McpServerOptions = {}): Server {
   const { name, version } = readPackageMeta();
   const server = new Server({ name, version }, { capabilities: { tools: {} } });
-  const handleTool = createToolHandler(ctx);
+  // A readable name for an agent that never named itself: its client and project
+  // (`claude-code@agent-tasks`), not `system`.
+  const fallback = () => `${server.getClientVersion()?.name ?? 'agent'}@${basename(process.cwd())}`;
+  const handleTool = createToolHandler(ctx, options.holder ?? null, fallback);
   const footer = options.footer === false ? '' : PIPELINE_FOOTER;
 
   server.setRequestHandler('tools/list', () => ({ tools }));

@@ -27,7 +27,7 @@ import xterm from '@xterm/headless';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 
-const ROOT = resolve(import.meta.dirname, '..', '..');
+export const ROOT = resolve(import.meta.dirname, '..', '..');
 export const DIST = join(ROOT, 'dist');
 export const SHOTS_DIR =
   process.env.AGENT_TASKS_E2E_SHOTS ??
@@ -435,12 +435,18 @@ export class ClaudeTerm {
   private readonly serializer = new SerializeAddon();
   private proc: pty.IPty | null = null;
 
-  /** `env` adds to the world's, e.g. CLAUDE_CODE_NO_FLICKER=1 for the fullscreen layout. */
+  /**
+   * `env` adds to the world's, e.g. CLAUDE_CODE_NO_FLICKER=1 for the fullscreen layout;
+   * `args` to the command line, e.g. a model and the tools it may call. `withMcp` starts
+   * the plugin's MCP server too, for a session whose model calls the tools.
+   */
   constructor(
     private readonly world: World,
     readonly cols = 120,
     readonly rows = 50,
     private readonly env: Record<string, string> = {},
+    private readonly args: string[] = [],
+    private readonly withMcp = false,
   ) {
     this.term = new xterm.Terminal({ cols, rows, allowProposedApi: true });
     this.term.loadAddon(this.serializer as never);
@@ -463,8 +469,21 @@ export class ClaudeTerm {
         this.world.pluginDir,
         '--setting-sources',
         'project,local',
-        // The user's own MCP servers (~/.claude.json) stay out; the plugin's still load.
-        '--strict-mcp-config',
+        // The user's own MCP servers (~/.claude.json) stay out, and so does the plugin's:
+        // the pane reads the world's REST server. `withMcp` lets the plugin's start
+        // (--setting-sources already keeps the user's out).
+        ...(this.withMcp ? [] : ['--strict-mcp-config']),
+        // AGENT_TASKS_E2E_DEBUG_DIR: each session writes Claude Code's debug log there.
+        ...(process.env.AGENT_TASKS_E2E_DEBUG_DIR
+          ? [
+              '--debug-file',
+              join(
+                process.env.AGENT_TASKS_E2E_DEBUG_DIR,
+                `${Date.now()}-${this.cols}x${this.rows}.log`,
+              ),
+            ]
+          : []),
+        ...this.args,
       ],
       {
         name: 'xterm-256color',
@@ -620,6 +639,8 @@ export class ClaudeTerm {
    */
   async press(label: string | RegExp): Promise<void> {
     await this.focus(label);
+    // A person presses what they see: not within the pane's press guard (0.4 s) of a redraw.
+    await this.settle(500, 3_000);
     await this.enter();
   }
 
@@ -638,17 +659,20 @@ export class ClaudeTerm {
    */
   async pipeline(args = ''): Promise<void> {
     const answered = () => {
+      // A plain /pipeline with the pane shown leaves no line in the transcript, its echo
+      // included: it has run once the prompt is empty again.
       const lines = this.text().split('\n');
-      const asked = lines.findLastIndex((l) => /^❯ \/pipeline/.test(l));
+      const prompt = lines.findLast((l) => l.startsWith('❯'));
       return (
-        asked >= 0 &&
-        lines.slice(asked + 1).some((l) => /^\s+⎿/.test(l)) &&
+        prompt !== undefined &&
+        /^❯\s*$/.test(prompt) &&
         !/esc to interrupt/.test(lines.slice(-4).join('\n'))
       );
     };
     await this.type(`/pipeline${args ? ` ${args}` : ''}`);
     await sleep(300);
     await this.key('ENTER');
+    await sleep(300);
     const deadline = Date.now() + 20_000;
     while (!answered()) {
       if (Date.now() > deadline) throw new Error(`/pipeline never answered:\n${this.screen()}`);

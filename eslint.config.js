@@ -5,7 +5,7 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['src/**/*.ts', 'tests/**/*.ts'],
+    files: ['src/**/*.ts', 'tests/**/*.ts', 'plugin/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'error',
@@ -15,6 +15,12 @@ export default tseslint.config(
       eqeqeq: ['error', 'always'],
       'no-var': 'error',
       'prefer-const': 'error',
+    },
+  },
+  {
+    files: ['plugin/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: { h: 'readonly', Fragment: 'readonly' },
     },
   },
   {

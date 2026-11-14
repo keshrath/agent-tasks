@@ -70,6 +70,9 @@ const extra = (c: Ctx) => {
   const mouseAdvance = working('Moved on by mouse', { project: 'mouse' });
   const mouseComplete = working('Completed by mouse', { project: 'mouse' });
   const mouseFail = working('Failed by mouse', { project: 'mouse' });
+  const autoFailed = working('Failed while its session was idle', { project: 'reopen' });
+  t.advance(autoFailed);
+  t.fail(autoFailed, 'The session holding this task ended without completing it (agent-x).');
   const mouseCancel = working('Cancelled by mouse', { project: 'mouse' });
   const mouseDelete = mk('Deleted by mouse', { project: 'mouse' });
 
@@ -117,6 +120,7 @@ const extra = (c: Ctx) => {
     mouseAdvance,
     mouseComplete,
     mouseFail,
+    autoFailed,
     mouseCancel,
     mouseDelete,
     chainA,
@@ -231,25 +235,41 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
       await show(m.custom!, 'Trim the tiny pipeline');
       const s = await t.waitFor(/todo › doing › check › done/);
       expect(s).not.toMatch(/backlog ›/);
-      await landsOn(t, 'Advance › check');
-      await t.enter();
+      await landsOn(t, '‹ Board'); // never on Advance by itself
+      await t.press('Advance › check');
       await until(w, m.custom!, (x) => x.stage === 'check');
       await t.waitFor(/moved to check/);
-      await landsOn(t, btn('Complete'));
+      await landsOn(t, '‹ Board'); // moved on: the way out, not a second Enter on Complete
+      await t.waitFor(/\[ Complete \]/);
+      for (let i = 0; i < 40 && /Advance ›/.test(t.text()); i++) await sleep(100);
       expect(t.text()).not.toMatch(/Advance ›/);
       t.shot('detail-custom-pipeline');
     });
 
-    it('a completed task: its result, the strip at done, only Delete left', async () => {
+    it('a completed task: its result, the strip at done, Reopen and Delete left', async () => {
       await show(w.ids.bump, 'Bump agent-common to 1.1.2');
       const s = await t.waitFor(/Result\s+Bumped; loopback bind and request guard in\./);
       expect(s).toMatch(/✓ completed · agent-release · agent-tasks/);
       expect(s).toMatch(/review › done/);
-      expect(s).toMatch(/\[ Delete \]/);
+      expect(s).toMatch(/\[ Reopen \] \[ Delete \]/);
       for (const no of [/\[ Cancel \]/, /\[ Complete \]/, /Advance ›/, /Artifacts/])
         expect(s).not.toMatch(no);
       expect(s).toMatch(/Comment: add one/);
       await landsOn(t, '‹ Board');
+    });
+
+    it('a failed task opens again with Reopen: unclaimed at the stage it failed in, claimable', async () => {
+      await show(m.autoFailed!, 'Failed while its session was idle');
+      await t.waitFor(/✗ failed/);
+      await t.press(/^\[ Reopen \]$|^Reopen$/);
+      const back = await until(w, m.autoFailed!, (x) => x.status === 'pending');
+      expect(back).toMatchObject({ stage: 'plan', assigned_to: null, result: null });
+      await waitFlat(new RegExp(`✓ #${m.autoFailed} open again in plan, unclaimed`));
+      const s = await t.waitFor(/Unclaimed: it moves on once an agent claims it\./);
+      expect(s).not.toMatch(/\[ Reopen \]/);
+      await landsOn(t, '‹ Board');
+      // Who reopened it, and from what, stays with the task.
+      await t.waitFor(/reopen/);
     });
 
     it('a cancelled task: its reason, no stage strip', async () => {
@@ -266,8 +286,8 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
   describe('each form wants its words', () => {
     it('Complete, Fail and Cancel refuse to go without them; the form stays', async () => {
       await show(m.needsWords!, 'Needs words to finish');
-      await landsOn(t, btn('Complete'));
-      await t.enter();
+      await landsOn(t, '‹ Board');
+      await t.press(btn('Complete'));
       await landsOn(t, 'Result');
       await t.enter(); // nothing typed
       await t.waitFor(/✗ a result is needed/);
@@ -297,15 +317,19 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
 
     it('Never mind closes each form and puts the ring back on its button', async () => {
       await show(m.minds!, 'Change of mind');
-      const forms: [string, RegExp, RegExp][] = [
-        ['Complete', /Complete #\d+/, btn('Complete')],
-        ['‹ Send back', /Send #\d+ back to an earlier stage/, btn('‹ Send back')],
-        ['Cancel', /Cancel #\d+/, btn('Cancel')],
-        ['Fail', /Mark #\d+ failed/, btn('Fail')],
+      const forms: [string, RegExp, string, RegExp][] = [
+        ['Complete', /Complete #\d+/, 'Result', btn('Complete')],
+        ['‹ Send back', /Send #\d+ back to an earlier stage/, 'Why', btn('‹ Send back')],
+        ['Cancel', /Cancel #\d+/, 'Reason', btn('Cancel')],
+        ['Fail', /Mark #\d+ failed/, 'Error', btn('Fail')],
       ];
-      for (const [label, title, ring] of forms) {
+      for (const [label, title, field, ring] of forms) {
         await t.press(btn(label));
         await t.waitFor(title);
+        // The form's own landing first, the press then starts from it: Send back's is its
+        // stage picker (open while it has the ring), the others' their field.
+        if (field === 'Why') await t.waitFor(/▴/);
+        else await landsOn(t, field);
         await t.press('Never mind');
         await landsOn(t, ring);
         expect(t.text()).not.toMatch(title);
@@ -326,14 +350,12 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
   });
 
   describe('stage gates', () => {
-    it('an artifact is required: said up front, Advance refused until one is there', async () => {
+    it('an artifact is required: said up front, no Advance or Complete until one is there', async () => {
       await show(m.gatedArt!, 'Advance only with an artifact');
       await waitFlat(/Needs an artifact before it leaves spec: an agent attaches artifacts\./);
-      await landsOn(t, 'Advance › plan');
-      await t.enter();
-      // The hint under the actions already says why: the notice only says it held.
-      await waitFlat(/✗ #\d+ can't leave spec yet/);
-      expect(t.text()).not.toMatch(/Stage gate:/);
+      await landsOn(t, '‹ Board');
+      // Only an agent can pass it: neither is offered, so nothing is refused after the fact.
+      expect(t.text()).not.toMatch(/Advance › plan|\[ Complete \]/);
       expect((await w.task(m.gatedArt!)).stage).toBe('spec');
       t.shot('gate-refused');
       await w.domain((c) => c.tasks.addArtifact(m.gatedArt!, 'spec', 'the spec', 'agent-x'));
@@ -343,26 +365,27 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
       await t.press('Advance › plan');
       await until(w, m.gatedArt!, (x) => x.stage === 'plan');
       await t.waitFor(/moved to plan/);
-      await landsOn(t, 'Advance › implement');
+      await landsOn(t, '‹ Board');
     });
 
     it('a comment is required: the ring stays off the field, so a next /pipeline is no comment', async () => {
       await show(m.gatedCom!, 'Advance only with a comment');
       await waitFlat(/Needs a comment before it leaves spec: add the comment below\./);
-      // The ring lands on the next step, never in the comment field: what the person types
-      // next (another /pipeline) goes to the prompt, not into the task as a comment.
-      await landsOn(t, 'Advance › plan');
+      // The ring lands on the way back, never in the comment field (what the person types
+      // next, another /pipeline, goes to the prompt, not into the task) nor on Advance.
+      await landsOn(t, '‹ Board');
       t.shot('gate-comment');
       await t.pipeline(String(m.gatedArt!));
       await t.waitFor(/Advance only with an artifact/);
       expect(await w.domain((c) => c.comments.list(m.gatedCom!).length)).toBe(0);
       await show(m.gatedCom!, 'Advance only with a comment');
-      // The server stays the authority: Advance pressed anyway is refused with the reason, and
-      // only then does the ring go to the comment field.
+      // The server stays the authority: Advance pressed anyway is refused, says where the
+      // comment goes, and the ring stays on Advance: never in the field, even then.
       await t.press('Advance › plan');
-      await waitFlat(/✗ #\d+ can't leave spec yet/);
+      await waitFlat(/✗ #\d+ can't leave spec yet: add the comment below/);
       expect((await w.task(m.gatedCom!)).stage).toBe('spec');
-      await landsOn(t, 'Comment');
+      await landsOn(t, '‹ Board'); // off Advance, and out of the field
+      await t.focus('Comment');
       await t.type('Spec reviewed, good to go.');
       await t.enter();
       await t.waitFor(/Comments 1/);
@@ -372,19 +395,21 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
       await t.waitFor(/moved to plan/);
     });
 
-    it('Complete refused for want of a comment keeps its form and words; the ring goes to the field', async () => {
+    it('Complete refused for want of a comment keeps its form and words; the ring stays on the form', async () => {
       await show(m.gatedFinish!, 'Finish only with a comment');
-      await landsOn(t, 'Complete');
-      await t.enter();
+      await landsOn(t, '‹ Board');
+      await t.press(/^(\[ )?Complete( \])?$/);
       await landsOn(t, 'Result');
       await t.type('Shipped the fix');
       await t.enter();
-      await waitFlat(/✗ #\d+ can't leave review yet/);
+      await waitFlat(/✗ #\d+ can't leave review yet: add the comment below/);
       expect((await w.task(m.gatedFinish!)).status).toBe('in_progress');
-      // The form is still there with what was typed, and says what the gate holds for.
-      expect(t.text()).toMatch(/Shipped the fix/);
+      // The form is still there with what was typed (Enter cleared it; it is drawn back), and
+      // says what the gate holds for; the ring on its button, not in a field.
+      await t.waitFor(/Shipped the fix/);
       await waitFlat(/Needs a comment before it leaves review: add the comment below\./);
-      await landsOn(t, 'Comment');
+      await landsOn(t, 'Never mind'); // the form's safe button, not Complete
+      await t.focus('Comment');
       t.shot('gate-complete-refused');
       await t.type('Reviewed and fine.');
       await t.enter();
@@ -401,13 +426,13 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
       await t.click('[ Advance › plan ]', paneX);
       await until(w, m.mouseAdvance!, (x) => x.stage === 'plan');
       await t.waitFor(/moved to plan/);
-      await landsOn(t, 'Advance › implement');
+      await landsOn(t, '‹ Board');
     });
 
     it('Send back: the form opens on a click and its button sends', async () => {
       await t.click('[ ‹ Send back ]', paneX);
       await t.waitFor(/Send #\d+ back to an earlier stage/);
-      await landsOn(t, 'Why');
+      await t.focus('Why');
       await t.type('clicked back');
       await t.click('[ Send back ]', paneX);
       await until(w, m.mouseAdvance!, (x) => x.stage === 'spec');
@@ -446,16 +471,16 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
       );
     });
 
-    it('Delete: Never mind keeps it, Delete in the box deletes it', async () => {
+    it('Delete: Keep it keeps it, Delete #N in the box deletes it', async () => {
       await show(m.mouseDelete!, 'Deleted by mouse');
       await t.click('[ Delete ]', paneX);
       await t.waitFor(/There is no undo/);
-      await t.click('[ Never mind ]', paneX);
+      await t.click('[ Keep it ]', paneX);
       await t.waitFor(/\[ Cancel \] \[ Delete \]/);
       expect((await w.task(m.mouseDelete!)).title).toBe('Deleted by mouse');
       await t.click('[ Delete ]', paneX);
       await t.waitFor(/There is no undo/);
-      await t.click('[ Delete ]', paneX);
+      await t.click(`[ Delete #${m.mouseDelete} ]`, paneX);
       await t.waitFor(new RegExp(`#${m.mouseDelete} deleted`));
       await expect(w.task(m.mouseDelete!)).rejects.toThrow(/404/);
     });
@@ -463,9 +488,9 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
     it('a related task opens on a click, and ‹ back returns', async () => {
       await show(m.chainA!, 'Chain: the blocked end');
       await t.click(`#${m.chainB} Chain: what A waits for`, paneX);
-      await t.waitFor(new RegExp(`‹ #${m.chainA}`));
+      await t.waitFor(/‹ Chain: the blocked end/);
       expect(t.text()).toMatch(new RegExp(`#${m.chainB} Chain: what A waits for`));
-      await t.click(`‹ #${m.chainA}`, paneX);
+      await t.click('‹ Chain: the blocked end', paneX);
       await t.waitFor(/Waits for/);
       expect(t.text()).toMatch(new RegExp(`#${m.chainA} Chain: the blocked end`));
     });
@@ -479,16 +504,16 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
       expect(a).not.toMatch(/Advance ›|\[ Complete \]/);
       await landsOn(t, `#${m.chainB} Chain: what A waits for`); // the blocker is the place to go
       await t.enter();
-      const b = await t.waitFor(new RegExp(`‹ #${m.chainA}`));
+      const b = await t.waitFor(/‹ Chain: the blocked end/);
       expect(b).toMatch(new RegExp(`Blocks\\s+! #${m.chainA} Chain: the blocked end`));
       expect(b).toMatch(/Subtasks 0\/1 done/);
-      await landsOn(t, 'Advance › plan');
+      await landsOn(t, `‹ Chain: the blocked end`); // the way back names the task it goes to
       await t.press(`#${m.chainC} Chain: a part of B`);
-      const c = await t.waitFor(new RegExp(`‹ #${m.chainB}`));
+      const c = await t.waitFor(/‹ Chain: what A waits for/);
       expect(c).toMatch(new RegExp(`Part of\\s+● #${m.chainB} Chain: what A waits for`));
-      await t.press(`‹ #${m.chainB}`);
-      await t.waitFor(new RegExp(`‹ #${m.chainA}`));
-      await t.press(`‹ #${m.chainA}`);
+      await t.press('‹ Chain: what A waits for');
+      await t.waitFor(/‹ Chain: the blocked end/);
+      await t.press('‹ Chain: the blocked end');
       await t.waitFor(/‹ Board/);
       expect(t.text()).toMatch(new RegExp(`#${m.chainA} Chain: the blocked end`));
       await t.press('‹ Board');
@@ -502,7 +527,7 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
       expect(s).toMatch(new RegExp(`Related\\s+● #${m.linkedTo} The task it is linked to`));
       expect(s).toMatch(/● in progress · agent-x · chain/);
       expect(s).not.toMatch(/Waits for|It moves on once/);
-      await landsOn(t, 'Advance › plan');
+      expect(s).toMatch(/Advance › plan/);
     });
   });
 
@@ -540,17 +565,17 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
     it('the latest five, the earlier ones on demand, a reply among them', async () => {
       await show(m.chatty!, 'A long discussion');
       const s = await t.waitFor(/Comments 9/);
-      expect(s).toMatch(/▸ 4 earlier/);
+      expect(s).toMatch(/▸ 4 more/);
       expect(s).toMatch(/A reply to the first point/);
       expect(s).not.toMatch(/Point number 1\b/);
-      await t.press('▸ 4 earlier');
+      await t.press('▸ 4 more');
       const all = await t.waitFor(/Point number 1\b/);
-      expect(all).toMatch(/▾ Only the latest/);
+      expect(all).toMatch(/▾ Show less/);
       expect(all).toMatch(/agent-a[^\n]*\n[^\n]*Point number 1\b/);
-      await landsOn(t, '▾ Only the latest');
+      await landsOn(t, '▾ Show less');
       await t.enter();
-      await t.waitFor(/▸ 4 earlier/);
-      await landsOn(t, '▸ 4 earlier');
+      await t.waitFor(/▸ 4 more/);
+      await landsOn(t, '▸ 4 more');
     });
 
     it('a comment from the pane carries the person’s name', async () => {
@@ -559,7 +584,9 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
       await t.enter();
       const s = await t.waitFor(/Comments 10/);
       expect(s).toMatch(new RegExp(`${ME} just now[^\\n]*\\n[^\\n]*Read the whole thread\\.`));
-      await landsOn(t, 'Comment');
+      // Sent, the ring leaves the field for the comments' fold: what is typed next is no second
+      // comment, and the new one stays in sight.
+      await landsOn(t, /▸ \d+ more/);
       t.shot('comments-thread');
     });
   });
@@ -568,20 +595,27 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
     it('deleted elsewhere: the pane says so and goes back to the board', async () => {
       await show(m.raceGone!, 'Deleted by another session');
       await w.api('DELETE', `/api/tasks/${m.raceGone}`);
-      await t.waitFor(new RegExp(`✗ there is no task #${m.raceGone}`), 20_000);
+      await t.waitFor(new RegExp(`! #${m.raceGone} was deleted elsewhere`), 20_000);
       await t.waitFor(/Backlog \d+/);
       await landsOn(t, /#\d+ /);
-      expect(t.text()).not.toMatch(/Deleted by another session/);
+      // Gone from the pane (right of its border); /pipeline N named it in the transcript.
+      const pane = t
+        .text()
+        .split('\n')
+        .map((l) => l.split('│').slice(1).join('│'));
+      expect(pane.join('\n')).not.toMatch(/Deleted by another session/);
     });
 
     it('moved on elsewhere: an Advance from before is refused, then the detail catches up', async () => {
       await show(m.raceMoved!, 'Moved by another session');
-      await landsOn(t, 'Advance › plan');
+      await t.focus('Advance › plan');
       await w.api('POST', `/api/tasks/${m.raceMoved}/stage`, { action: 'advance', by: 'agent-x' });
-      await t.enter(); // the button still names plan, where it already is
-      await waitFlat(/✗ advance #\d+ failed: .*not ahead/);
+      await t.settle(500, 3_000);
+      await t.enter(); // drawn while it was in spec: sent with that stage, refused
+      await waitFlat(/! #\d+ moved elsewhere \(now plan\): nothing was done/);
       expect((await w.task(m.raceMoved!)).stage).toBe('plan');
-      await landsOn(t, 'Advance › implement');
+      await landsOn(t, '‹ Board'); // refused: the way back, not the next Advance
+      await t.waitFor(/Advance › implement/);
     });
 
     it('changed elsewhere: comments and stage show up without a key', async () => {
@@ -598,6 +632,9 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
       const s = await t.waitFor(/Seen from another session/, 20_000);
       expect(s).toMatch(/Comments 1/);
       await t.waitFor(/Advance › implement/, 20_000);
+      // The Advance the ring was on moved on with the task: the ring goes to the way back,
+      // not onto a button that now does something else.
+      await landsOn(t, '‹ Board', 15_000);
     });
   });
 

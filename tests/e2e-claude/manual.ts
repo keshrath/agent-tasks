@@ -185,6 +185,8 @@ async function docked(w: World): Promise<Shot[]> {
       await sleep(1_000);
       await t.key('DOWN', 5);
       await sleep(700);
+      await t.key('UP', 5); // the ring stayed on ‹ Board, where the task opened
+      await sleep(500);
       await s.tabTo('‹ Board', true);
       await t.enter();
       await t.waitFor(/Backlog \d+/);
@@ -219,7 +221,7 @@ async function docked(w: World): Promise<Shot[]> {
     await s.command(String(ids.changelog));
     await t.waitFor(/Write the CHANGELOG 2\.0\.0 entry/);
     await s.clip('advance', 'pane', async () => {
-      await sleep(500);
+      await s.tabTo('Advance › plan');
       await t.enter();
       await t.waitFor(/moved to plan/);
     });
@@ -227,7 +229,10 @@ async function docked(w: World): Promise<Shot[]> {
       await s.tabTo('‹ Send back');
       await t.enter();
       await t.waitFor(/Send #\d+ back/);
-      await sleep(500);
+      await t.waitFor(/▴/); // it opens on its stage picker: Enter takes spec, then Why
+      await sleep(600);
+      await t.enter();
+      await sleep(600);
       await s.typeSlowly('The spec misses the migration notes');
       await s.still('form-send-back');
       await t.enter();
@@ -237,8 +242,8 @@ async function docked(w: World): Promise<Shot[]> {
     await s.command(String(ids.serverJson));
     await t.waitFor(/Bump server\.json to 2\.0\.0/);
     await s.clip('complete', 'pane', async () => {
-      await sleep(400);
-      await t.enter(); // the ring starts on Complete: its last stage
+      await s.tabTo('Complete');
+      await t.enter();
       await t.waitFor(/Complete #\d+/);
       await sleep(300);
       await s.typeSlowly('On 2.0.0 in both places');
@@ -265,8 +270,8 @@ async function docked(w: World): Promise<Shot[]> {
       await s.tabTo('Delete');
       await t.enter();
       await t.waitFor(/Delete #\d+ with its/);
-      await sleep(1_400); // the ring starts on Never mind
-      await s.tabTo('Delete', true);
+      await sleep(1_400); // the ring starts on Keep it
+      await s.tabTo('Delete #');
       await t.enter();
       await t.waitFor(/deleted/);
     });
@@ -275,7 +280,7 @@ async function docked(w: World): Promise<Shot[]> {
     await t.press('Delete');
     await t.waitFor(/Delete #\d+ with its/);
     await s.still('confirm-delete');
-    await t.press('Never mind');
+    await t.press('Keep it');
 
     await s.command(String(ids.harness));
     await t.waitFor(/Waits for/);
@@ -285,7 +290,7 @@ async function docked(w: World): Promise<Shot[]> {
       await t.enter();
       await t.waitFor(/Acceptance:/);
       await sleep(1_200);
-      await s.tabTo(`‹ #${ids.harness}`, true);
+      await s.tabTo('‹ Write the e2e harness', true);
       await t.enter();
       await t.waitFor(/Waits for/);
     });
@@ -302,6 +307,7 @@ async function docked(w: World): Promise<Shot[]> {
     await s.clip('create', 'pane', async () => {
       await t.key('3');
       await t.waitFor(/New task/);
+      await t.key('3'); // the tab pressed again: to type
       await sleep(600);
       for (const [i, v] of [
         'Record the manual',
@@ -311,13 +317,14 @@ async function docked(w: World): Promise<Shot[]> {
         'GIFs from the CLI',
       ].entries()) {
         await s.typeSlowly(v, 40);
-        if (i < 4) await t.enter();
+        if (i < 4) await t.key('TAB');
       }
       await t.enter();
       await t.waitFor(/created #\d+/);
     });
     await t.key('3');
     await t.waitFor(/New task/);
+    await t.key('3');
     await t.settle();
     await t.type('Tidy the release notes');
     await s.still('new-task');
@@ -395,7 +402,7 @@ async function down(w: World): Promise<Shot[]> {
       await t.waitFor(/not reachable/);
       await sleep(1_500);
       await t.enter();
-      await t.waitFor(/still no board/);
+      await t.waitFor(/still nothing answers/);
       await sleep(1_200);
       await w.startServer();
       await t.enter();

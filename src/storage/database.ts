@@ -46,7 +46,9 @@ export function createDb(options: DbOptions = {}): Db {
     queryAll: <T>(sql: string, params: unknown[] = []) => raw.prepare(sql).all(...params) as T[],
     queryOne: <T>(sql: string, params: unknown[] = []) =>
       (raw.prepare(sql).get(...params) as T | undefined) ?? null,
-    transaction: <T>(fn: () => T) => raw.transaction(fn)(),
+    // IMMEDIATE: a deferred one that reads and then writes under WAL fails at once
+    // (SQLITE_BUSY_SNAPSHOT, no busy timeout) when another process wrote in between.
+    transaction: <T>(fn: () => T) => raw.transaction(fn).immediate(),
     close() {
       if (raw.open) raw.close();
     },
@@ -64,16 +66,21 @@ export function schemaVersion(raw: Database.Database): number {
 
 /** Applies every migration newer than the DB's version, in one transaction. */
 function migrate(raw: Database.Database): void {
-  const from = schemaVersion(raw);
-  raw.transaction(() => {
-    for (const m of migrations) {
-      if (m.version <= from) continue;
-      m.up(raw);
-      raw
-        .prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`)
-        .run(String(m.version));
-    }
-  })();
+  raw.exec(`CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  // The version read inside an IMMEDIATE transaction: two processes starting together apply
+  // each migration once.
+  raw
+    .transaction(() => {
+      const from = schemaVersion(raw);
+      for (const m of migrations) {
+        if (m.version <= from) continue;
+        m.up(raw);
+        raw
+          .prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`)
+          .run(String(m.version));
+      }
+    })
+    .immediate();
 }
 
 function resolveDbPath(path?: string): string {
@@ -264,6 +271,31 @@ const migrations: Migration[] = [
       db.exec(
         `CREATE INDEX IF NOT EXISTS idx_task_deps_depends_on ON task_dependencies(depends_on)`,
       );
+    },
+  },
+  {
+    version: 6,
+    up: (db: Database.Database) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS holders (
+          id TEXT PRIMARY KEY,
+          seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+          ended_at TEXT
+        )
+      `);
+      const cols = db.prepare(`PRAGMA table_info(tasks)`).all() as { name: string }[];
+      if (!cols.some((c) => c.name === 'holder')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN holder TEXT`);
+      }
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_holder ON tasks(holder)`);
+    },
+  },
+  {
+    version: 7,
+    up: (db: Database.Database) => {
+      const cols = db.prepare(`PRAGMA table_info(tasks)`).all() as { name: string }[];
+      if (!cols.some((c) => c.name === 'closed_from'))
+        db.exec(`ALTER TABLE tasks ADD COLUMN closed_from TEXT`);
     },
   },
 ];

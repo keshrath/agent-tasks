@@ -31,8 +31,7 @@ agent-tasks is an MCP (Model Context Protocol) server that provides pipeline-dri
 - **Stage gates** -- configurable per-project rules requiring named artifacts, minimum artifact counts or a comment before advancing. (`require_approval` exists in the schema, but no MCP tool or REST route records an approval, so a stage with it set cannot be left; keep it off.)
 - **Agent affinity** -- `task_list(next: true)` prefers routing tasks to agents with related history.
 - **Claude Code `/pipeline` pane** -- the board beside the conversation: tasks by stage, task detail, every lifecycle action, a status line entry.
-- **TodoWrite bridge** -- intercepts Claude Code's built-in TodoWrite and syncs to the pipeline.
-- **Heartbeat-based cleanup** -- auto-fails tasks from dead agents using agent-comm heartbeat data.
+- **Claims live with their session** -- a claimed task stays with the session that claimed it, idle or not, and fails only once that session has ended or stopped answering.
 
 ### Architecture
 
@@ -90,23 +89,21 @@ npx agent-tasks
 
 ### Environment Variables
 
-| Variable                                 | Default                         | Description                                                                    |
-| ---------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------ |
-| `AGENT_TASKS_DB`                         | `~/.agent-tasks/agent-tasks.db` | SQLite database file path                                                      |
-| `AGENT_TASKS_PORT`                       | `3422`                          | REST API port (the `/pipeline` pane reads it)                                  |
-| `AGENT_TASKS_HOST`                       | `127.0.0.1`                     | REST bind address (`0.0.0.0` exposes it to the network)                        |
-| `AGENT_TASKS_USER`                       | the OS user                     | Who the `/pipeline` pane acts as (`created_by`, comment author, `by`)          |
-| `AGENT_TASKS_INSTRUCTIONS`               | enabled                         | Set to `0` to disable response-embedded instructions                           |
-| `AGENT_TASKS_RETENTION_DAYS`             | `30`                            | Days the cleanup keeps resolved approval records                               |
-| `AGENT_TASKS_COMPLETED_RETENTION_DAYS`   | `7`                             | Days a completed task is kept (and listed under the pane's Done) before purge  |
-| `AGENT_TASKS_FAILED_RETENTION_DAYS`      | `7`                             | Days a failed task is kept before purge                                        |
-| `AGENT_TASKS_CANCELLED_RETENTION_DAYS`   | `1`                             | Days a cancelled task is kept before purge                                     |
-| `AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES`     | `360`                           | Minutes before an in-progress task with no assignee is cancelled               |
-| `AGENT_TASKS_COMM_TIMEOUT_MS`            | `5000`                          | Timeout of the cleanup's agent-comm requests                                   |
-| `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES` | `60`                            | `task-cleanup-start.js`: idle minutes before a dead session's task is failed   |
-| `AGENT_TASKS_HEARTBEAT_FRESH_MINUTES`    | `15`                            | `task-cleanup-start.js`: an agent with a heartbeat this recent counts as alive |
-| `AGENT_COMM_URL`                         | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications                                   |
-| `AGENT_KNOWLEDGE_URL`                    | `http://localhost:3423`         | Agent-knowledge REST URL for the knowledge bridge                              |
+| Variable                                 | Default                         | Description                                                                   |
+| ---------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------- |
+| `AGENT_TASKS_DB`                         | `~/.agent-tasks/agent-tasks.db` | SQLite database file path                                                     |
+| `AGENT_TASKS_PORT`                       | `3422`                          | REST API port (the `/pipeline` pane reads it)                                 |
+| `AGENT_TASKS_HOST`                       | `127.0.0.1`                     | REST bind address (`0.0.0.0` exposes it to the network)                       |
+| `AGENT_TASKS_USER`                       | the OS user                     | Who the `/pipeline` pane acts as (`created_by`, comment author, `by`)         |
+| `AGENT_TASKS_INSTRUCTIONS`               | enabled                         | Set to `0` to disable response-embedded instructions                          |
+| `AGENT_TASKS_RETENTION_DAYS`             | `30`                            | Days the cleanup keeps resolved approval records                              |
+| `AGENT_TASKS_COMPLETED_RETENTION_DAYS`   | `7`                             | Days a completed task is kept (and listed under the pane's Done) before purge |
+| `AGENT_TASKS_FAILED_RETENTION_DAYS`      | `7`                             | Days a failed task is kept before purge                                       |
+| `AGENT_TASKS_CANCELLED_RETENTION_DAYS`   | `1`                             | Days a cancelled task is kept before purge                                    |
+| `AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES`     | `360`                           | Minutes before an in-progress task with no assignee is cancelled              |
+| `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES` | `10`                            | Minutes a claiming session may be ended or silent before its open tasks fail  |
+| `AGENT_COMM_URL`                         | `http://localhost:3421`         | Agent-comm REST URL for bridge notifications                                  |
+| `AGENT_KNOWLEDGE_URL`                    | `http://localhost:3423`         | Agent-knowledge REST URL for the knowledge bridge                             |
 
 ### Claude Code Setup
 
@@ -162,11 +159,11 @@ Remove any hand-written `agent-tasks` entry from `~/.claude.json`, so the tools 
 
 | You type           | It opens                                                              |
 | ------------------ | --------------------------------------------------------------------- |
-| `/pipeline`        | the board, the focus on its first task                                |
-| `/pipeline 12`     | task 12 (`/pipeline #12` too), the focus on its next step             |
+| `/pipeline`        | the board, the focus on its first task in progress                    |
+| `/pipeline 12`     | task 12 (`/pipeline #12` too), the focus on its way back              |
 | `/pipeline <text>` | the board filtered to the tasks matching `<text>` (see [Find](#find)) |
 
-The command also answers in the conversation with the board's summary, or with why there is no board.
+The command puts nothing in the conversation when the pane opens: a plugin command's text also goes to the model, every time. It answers there only when something went wrong: no board (and why), no such task, a find that matches nothing, or no pane to show it (then with the board's summary).
 
 ![Typing /pipeline opens the board](images/manual/open.gif)
 
@@ -184,19 +181,19 @@ In the default layout the pane sits above the prompt, keyboard only.
 
 ### The header and the keys
 
-The first line holds the tabs and Refresh, the second says which keys work right now. That second line also carries the outcome of what you just did (`✓ #13 completed`, `✗ advance #7 failed: …`), which clears itself after a few seconds.
+The first line holds the tabs and Refresh, the second says which keys work right now. That second line also carries the outcome of what you just did (`✓ #13 completed`, `– #12 marked failed`, `✗ Advancing #7 failed: …`; ✗ only for what did not go through), which clears itself after a few seconds. The status entry under the prompt shows the same outcome meanwhile, so it stays in sight when a long task has scrolled the pane. After `Advance` the focus goes to `‹ Board`, so a second `Enter` does not move the task a stage further.
 
-| Key                 | Does                                                          |
-| ------------------- | ------------------------------------------------------------- |
-| `1` `2` `3`         | Board, Done, New (pressed again: back to the tab's first row) |
-| `Tab` / `shift+Tab` | move the focus ring to the next / previous control            |
-| `Enter`             | press what has the focus; in a text field, submit it          |
-| `↑` `↓`             | scroll the pane                                               |
-| `r`                 | refresh now                                                   |
-| `Esc`               | give the keyboard back to the prompt (the pane stays open)    |
-| `ctrl+x tab`        | take the keyboard back, the focus where you left it           |
+| Key                 | Does                                                           |
+| ------------------- | -------------------------------------------------------------- |
+| `1` `2` `3`         | Board, Done, New (pressed again: back to where the tab starts) |
+| `Tab` / `shift+Tab` | move the focus ring to the next / previous control             |
+| `Enter`             | press what has the focus; in a text field, submit it           |
+| `↑` `↓`             | scroll the pane                                                |
+| `r`                 | refresh now                                                    |
+| `Esc`               | give the keyboard back to the prompt (the pane stays open)     |
+| `ctrl+x tab`        | take the keyboard back, the focus where you left it            |
 
-While a text field has the focus, digits and letters go into it. The header then drops the digits (`Board  Done  New  Refresh`) and says `Tab leaves the field · Esc to the prompt` (in the New form, where `Tab` goes on to the next field, `Tab next field · Esc to the prompt`). The pane never puts the focus in a text field by itself when `/pipeline` opens it or you move to a view, so what you type next is never caught by a field you did not pick; the New tab, which you open to type, is the one exception.
+While a text field has the focus, digits and letters go into it; the header keeps the tabs and says `Tab leaves the field · Esc to the prompt` (in the New form, where `Tab` goes on to the next field and `Enter` creates, `Tab next field · Enter creates · Esc to the prompt`; on the stage picker of Send back, `↑↓ choose · Enter picks`). The pane never puts the focus in a text field by itself when `/pipeline` opens it or you move to a view, so what you type next is never caught by a field you did not pick; a switch to the New tab lands on the tab, and `3` (or `New`) pressed again puts the focus in Title.
 
 ![The New tab with its title being typed: the header says Tab next field](images/manual/new-task.png)
 
@@ -209,8 +206,8 @@ After `Esc` the header says how to come back:
 ![The board](images/manual/board.png)
 
 - **Summary**: `12 open tasks · 7 in progress · 1 blocked`, the same text as the status line entry, and under it the count per stage (`backlog 5 · spec 3 · …`).
-- **Stages**: open tasks grouped by pipeline stage, in pipeline order; within a stage, working tasks first, then by priority. A long stage nobody works on yet (a backlog of more than 12) shows its first 10 and `▸ N more in backlog`, so the work in flight below stays in reach; `Enter` unfolds it and puts the focus on the first row it showed, with `▾ Fold backlog` right above it to fold it again. A find shows every match. Finished tasks are under [Done](#done).
-- **Rows**: a mark, the id, the title and its priority (`p8`; high ones in yellow), then a dim line with the assignee (or `unclaimed`), the parent (`part of #1`), subtask progress (`1/2 subtasks`), the project and the age.
+- **Stages**: open tasks grouped by pipeline stage, in pipeline order; within a stage, working tasks first, then by priority. A long stage nobody works on yet (a backlog of more than 7) shows its first 5 and a dim `▸ N more`, so the work in flight below stays in reach; `Enter` unfolds it and puts the focus on the first row it showed, with `▾ Show less` right above it to fold it again. A find shows every match. Finished tasks are under [Done](#done).
+- **Rows**: a mark, the id, the title and its priority (`p8`; high ones in yellow), then a dim line with the assignee (or `unclaimed`), the parent (`part of #1`), subtask progress (`1/2 subtasks`), the project and the age (minutes, hours, then days from 24 hours on).
 
 | Mark | Means                                                             |
 | ---- | ----------------------------------------------------------------- |
@@ -218,7 +215,9 @@ After `Esc` the header says how to come back:
 | `○`  | pending: waits for an agent to claim it                           |
 | `!`  | blocked: a `blocks` dependency is open (`waits for #1` in yellow) |
 
-`Tab` walks the rows, `Enter` opens one.
+The focus starts on the first task in progress (after a find, on the first match), not on the unclaimed queue above it. `Tab` walks the rows, `Enter` opens one. While the pane holds the keyboard the board and Done keep the order they were drawn in: a task another session claims, raises or finishes does not move the rows under the focus (a new one is added at the end of its stage, or of Done); they sort afresh when you open the pane again or give the keyboard back. When another session changes what the pane draws, the focus waits on Refresh while the new drawing comes up, then goes back to the control it was on, or, when that is gone, lands again: on the board as on a fresh open, in a task on `‹ Board`. It never lands by itself on a control that changes a task with one `Enter` (Advance, Reopen, `Delete #12`, a form's send, Create), nor in a text field; a key you press meanwhile wins over any landing. A press on such a control, on Complete or on a button that opens a form, that comes within a moment of the view changing went to whatever the new view drew at the focus's place, so the pane takes it and says `– that press came as the view changed: nothing was done, press it again`; the same while an action still runs. `Enter` twice on a row opens the task and nothing else. An action form whose task changed elsewhere closes (`! #12 changed elsewhere (now test): nothing was sent, what you typed is kept for the form`), the focus on the button that opened it, which opens the form again with your words. A task deleted elsewhere while open says `! #12 was deleted elsewhere` and goes back to the board. While you type into a field, what other sessions change waits until you stop for a moment (the status entry says `the board changed: shown once you stop typing`), so nothing moves under your keys and no key goes to the prompt. `r` (Refresh) leaves the focus where it is. The tasks this session holds are marked `this session`, on the board and in their detail; an agent that never named itself (`task_config` action `session`) shows as its client and project (`claude-code@agent-tasks`), never as `system`.
+
+`/pipeline` itself puts nothing in the transcript (a plugin command's text also reaches the model); `/pipeline 12` names the task it opened, `/pipeline <text>` says how many match, and when no pane can show the board the summary comes with the reason.
 
 ![Tab to a task, Enter opens it, ‹ Board goes back](images/manual/navigate.gif)
 
@@ -238,7 +237,7 @@ The `2` key lists recently finished tasks, newest first: `✓` completed, `✗` 
 
 ### New task
 
-The `3` key opens a form with the focus in Title: Title, Project, Priority (a whole number, higher goes first), Tags (comma separated) and Description. `Enter` moves to the next field; `Enter` in Description, or `[ Create ]`, creates the task in the first stage, unclaimed, and opens it. `[ Clear ]` empties the form. A priority that is no whole number is said under its field, and the focus goes back there.
+The `3` key opens the New tab; pressed again (or `New` again), it puts the focus in Title. The form: Title, Project, Priority (a whole number, higher goes first), Tags (comma separated) and Description. `Tab` moves to the next field (Description takes three lines); `Enter` in any field, or `[ Create ]`, creates the task in the first stage, unclaimed, and opens it. `[ Clear ]` empties the form and keeps the focus on itself, so a digit typed next switches tabs instead of starting a title. A priority that is no whole number is said under its field, and the focus goes back there.
 
 ![Fill in the fields, Enter creates the task](images/manual/create.gif)
 
@@ -248,7 +247,7 @@ The `3` key opens a form with the focus in Title: Title, Project, Priority (a wh
 
 From the top:
 
-- **`‹ Board`** goes back to where you came from (`‹ Done`, or `‹ #4` when you opened a linked task).
+- **`‹ Board`** goes back to where you came from (`‹ Done`, or the linked task's title, cut at 40 characters, when you opened one from it; a task you reopened from Done goes back to the board, where it now is).
 - **Title**, then a status line: the state (`● in progress`, `○ unclaimed`, `! blocked`, `✓ completed`, `✗ failed`, `– cancelled`), assignee, priority and project.
 - **Stage strip**: the pipeline with the current stage highlighted (in red for a failed task).
 - **Actions** for the task as it is now (see [Actions](#actions)).
@@ -256,7 +255,7 @@ From the top:
 - **Description**: one of 14 lines or more shows its first 8 (`▸ Show all N lines`).
 - **Subtasks** with their progress (`1/2 done`); `Enter` opens one.
 - **Artifacts** agents attached (specs, test results, review notes, rejections): `Enter` unfolds one as Markdown (cut at 4,000 characters) and folds it again.
-- **Comments**: the last 5 (`▸ N earlier` shows the rest), and a field to add one. A comment is sent as you (`AGENT_TASKS_USER`, else your OS user name).
+- **Comments**: the last 5 (`▸ N more` shows the rest, `▾ Show less` folds them again), and a field to add one. A comment is sent as you (`AGENT_TASKS_USER`, else your OS user name).
 
 ![An artifact unfolded, subtasks and comments](images/manual/artifact.png)
 
@@ -274,13 +273,13 @@ What a task offers depends on where it is:
 | in progress, in its last stage | `Complete`, `‹ Send back`, `Fail`, `Cancel`, `Delete`                           |
 | blocked                        | `‹ Send back`, `Fail`, `Cancel`, `Delete`: no Advance, no Complete              |
 | unclaimed                      | `Cancel`, `Delete`                                                              |
-| completed, failed or cancelled | `Delete`                                                                        |
+| completed, failed or cancelled | `Reopen`, `Delete`                                                              |
 
 There is no Claim: agents claim with `task_stage`. An unclaimed task says `Unclaimed: it moves on once an agent claims it.` (or `Waiting for <agent> to start it.` when one is assigned but has not started).
 
 ![An unclaimed task](images/manual/unclaimed.png)
 
-When a task opens, the focus is on its next step: Advance, or Complete in its last stage, or what a blocked task waits for. Every action you take is recorded as you (`by`).
+When a task opens, the focus is on its way back (`‹ Board`), or on what a blocked task waits for; it never lands on Advance or Complete by itself, so a stray `Enter` moves nothing. Times read `HH:MM` for today and `YYYY-MM-DD HH:MM` before; relative ones (`3d ago`) go up to a week. Every action you take is recorded as you (`by`). While one runs, the line under the tabs says so (`Advancing #12 …`); one that fails says `✗ Advancing #12 failed: …`.
 
 #### Advance
 
@@ -290,7 +289,7 @@ When a task opens, the focus is on its next step: Advance, or Complete in its la
 
 #### Send back
 
-`‹ Send back` opens a small form: `Back to` picks the earlier stage, `Why` takes an optional note (kept as a `rejection` artifact). `Enter` in the field, or `[ Send back ]`, does it; `[ Never mind ]` closes the form. The focus then lands on `‹ Board`, not on Advance, so a second `Enter` does not undo it.
+`‹ Send back` opens a small form with the focus on `Back to`, which picks the earlier stage (back in the first stage the task is unclaimed, and the form says so); `Why` takes an optional note (kept as a `rejection` artifact). `Enter` in an empty `Why` sends nothing: `[ Send back ]` sends without a reason. `Enter` in the field, or `[ Send back ]`, does it; `[ Never mind ]` closes the form. The focus then lands on `‹ Board`, not on Advance, so a second `Enter` does not undo it.
 
 ![Send a task back with a reason](images/manual/send-back.gif)
 
@@ -308,9 +307,13 @@ Each asks for its words first: `Complete` the result, `Fail` what went wrong, `C
 
 ![Cancel asks why](images/manual/form-cancel.png)
 
+#### Reopen
+
+A failed, completed or cancelled task has `Reopen`: it opens again, unclaimed, so an agent can claim it: at the stage it was closed in: a failed one where it failed (the usual case: its session ended or stopped answering), a completed or cancelled one where it was completed or cancelled from (one closed before 3.0: the stage before done, or the start). Who reopened it, and from what, is kept as a `reopen` artifact. Agents do the same with `task_stage` action `reopen`.
+
 #### Delete
 
-`Delete` asks first, in a red box, with the focus on `[ Never mind ]`. `shift+Tab` and `Enter` on `[ Delete ]` delete the task with its artifacts and comments; there is no undo.
+`Delete` asks first, in a red box, naming what goes with the task (`Delete #12 with its artifacts, comments and 2 finished subtasks?`): `[ Keep it ]` first, with the focus, then `[ Delete #12 ]`. A task with a subtask still open below it cannot be deleted: the box names the open ones and offers only `[ Keep it ]`. `Tab` and `Enter` on `[ Delete #12 ]` delete the task with its artifacts and comments; there is no undo.
 
 ![Delete asks first](images/manual/delete.gif)
 
@@ -318,35 +321,37 @@ Each asks for its words first: `Complete` the result, `Fail` what went wrong, `C
 
 ### Blocked tasks
 
-A task with an open `blocks` dependency cannot move on: it offers no Advance and no Complete (the server refuses both), and says what it waits for, with the focus on that task. `Enter` opens the blocker; `‹ #4` comes back.
+A task with an open `blocks` dependency cannot move on: it offers no Advance and no Complete (the server refuses both), and says what it waits for, with the focus on that task. `Enter` opens the blocker; the way back, named after the blocked task, comes back.
 
 ![A blocked task](images/manual/blocked.png)
 
-![Enter opens what it waits for, ‹ #4 comes back](images/manual/blocked.gif)
+![Enter opens what it waits for, the way back returns](images/manual/blocked.gif)
 
 ### Stage gates
 
-A project's stage gate (`task_config` action `pipeline` with a `gate_config`) can ask for a comment or named artifacts before a task leaves a stage. The detail says what the gate still needs under the actions, and who gives it: `Needs a comment before it leaves spec: add the comment below.`, or `Needs artifact design before it leaves spec: an agent attaches artifacts.` While it holds, Advance and Complete are offered but not marked as the step to take. Pressed anyway, the action is refused (`✗ #7 can't leave spec yet`; the line under the actions says why); when the gate wants a comment, the focus then moves to the comment field. A refused Complete keeps its form open with what you typed, so after the comment its `Complete` button finishes the task. The gate holds for Advance and for Complete alike. Add what it asks for and the line goes.
+A project's stage gate (`task_config` action `pipeline` with a `gate_config`) can ask for a comment or named artifacts before a task leaves a stage. The detail says what the gate still needs under the actions, and who gives it: `Needs a comment before it leaves spec: add the comment below.`, or `Needs artifact design before it leaves spec: an agent attaches artifacts.` A gate that wants artifacts or an approval cannot be passed from the pane: Advance and Complete are not offered while it holds. One that wants a comment keeps them, not marked as the step to take; pressed anyway, the action is refused (`✗ #7 can't leave spec yet: add the comment below`) and the focus goes to `‹ Board` (after Advance) or the form's `Never mind` (after Complete), never into the comment field, so what you type next is not posted as a comment. A refused Complete keeps its form open with what you typed, so after the comment its `Complete` button finishes the task. The gate holds for Advance and for Complete alike. Add what it asks for and the line goes.
 
 ![A stage gate: what it needs and who gives it](images/manual/gate.png)
 
 ### Status line and toasts
 
-The status line entry under the prompt is the board's summary and stays there while the pane is closed (it refreshes every 30 s then, every 5 s while the pane is open). When another session finishes a task or moves one to review, a toast says so, the news first: `Done: #5 Review the REST changes`, `Failed: #…`, `Ready for review: #…`. What you do in the pane itself makes no toast.
+The status line entry under the prompt is the board's summary and stays there while the pane is closed (it refreshes every 30 s then, every 5 s while the pane is open). When another session finishes a task or moves one to review, a toast says so, the news first: `Done: #5 Review the REST changes`, `Failed: #…`, `Ready for review: #…`. What you do in the pane itself makes no toast. With the pane closed the toast ends in `(/pipeline)`, where to look.
 
 ![A toast from another session, and the status line entry](images/manual/toast.png)
 
 ### What the model sees
 
-The plugin adds one short context block (`prompt.context`) to what the model is given: what is in progress (up to 5 tasks), the top 3 pending tasks by priority, and that a task is claimed with `task_stage` before working on it, and that you follow the board in `/pipeline`. For example:
+The plugin adds one short context block (`prompt.context`) to what the model is given, once per conversation: what is in progress (up to 5 tasks, this session's own first and marked `this session`), the top 3 pending tasks by priority, how a task is claimed, and that you follow the board in `/pipeline`. With the plugin's `enforcePipeline` option off (the default):
 
 ```
-agent-tasks pipeline (shared by every session): 2 in progress: #1 "Replace the web dashboard with a Claude Code pane" [implement, agent-pane]; #4 "Write the e2e harness for the real CLI" [spec, agent-e2e]. 1 pending, highest priority first: #6 "Ship muk_import 19.0 to the customer" [backlog]. Claim a task (task_stage) before working on it. The person follows the board in /pipeline.
+agent-tasks pipeline (shared by every session): 2 in progress: #4 "Write the e2e harness for the real CLI" [spec, agent-e2e, this session]; #1 "Replace the web dashboard with a Claude Code pane" [implement, agent-pane]. 1 pending, highest priority first: #6 "Ship muk_import 19.0 to the customer" [backlog]. A task is claimed with task_stage action "claim". The person follows the board in /pipeline.
 ```
+
+With `enforcePipeline` on, the sentence about claiming asks for it: `Claim a task (task_stage action "claim") before working on it.`, and a work prompt in a session that holds no task gets the pipeline reminder (see [the session hooks](hooks.md)).
 
 ### When the server is away
 
-The pane reads the REST API of the agent-tasks MCP server (`AGENT_TASKS_PORT`, default 3422). The first MCP process serves it; when that session ends, another one takes the port over within 5 s. If nothing answers, the pane says so instead of showing a stale board, the status line says `offline`, and the focus is on Refresh: `Enter` tries again (`✗ still no board (21:47:08)`) and brings the board back once a server answers. It also comes back by itself on the next poll, with the focus where it was before (or on the first task).
+The pane reads the REST API of the agent-tasks MCP server (`AGENT_TASKS_PORT`, default 3422). The first MCP process serves it; when that session ends, another one takes the port over within 5 s. If nothing answers, the pane says so instead of showing a stale board, the status line says `offline`, and the focus is on Refresh: `Enter` tries again (`✗ still nothing answers at http://127.0.0.1:3422 (21:47:08)`); the tabs stay, so a digit typed meanwhile stays in the pane. `Enter` brings the board back once a server answers. It also comes back by itself on the next poll, with the focus where it was before (or on the first task).
 
 ![The server goes away and comes back](images/manual/server-down.gif)
 
@@ -365,7 +370,7 @@ If an agent-tasks 1.x process still holds the port, the pane says `An older agen
 | Keys type into a field                      | A text field has the focus (`Tab leaves the field`): `Tab` out of it first.                                            |
 | Keys go to the prompt                       | The prompt has the keyboard: `ctrl+x tab` gives it to the pane.                                                        |
 | A task has no Advance                       | It is unclaimed (an agent claims it with `task_stage`) or blocked (see `Waits for`).                                   |
-| A claimed task turned failed by itself      | The cleanup hooks fail the tasks of agents that are gone (see [Stale Tasks](#stale-tasks)).                            |
+| A claimed task turned failed by itself      | The session that claimed it ended or stopped answering (see [Stale Tasks](#stale-tasks)); the result says which.       |
 
 ### Recording these pictures
 
@@ -496,7 +501,7 @@ task_update with task_id 42, dependency { action: "remove", depends_on: 41 }
 
 ### task_delete
 
-Delete a task and all its artifacts, comments, and dependencies (cascading). Cannot be undone.
+Delete a task with its artifacts, comments, dependencies and finished subtasks (all levels). Refused while a subtask below it is still open: finish, cancel or delete those first. Cannot be undone.
 
 **Parameters:**
 
@@ -512,15 +517,15 @@ Move a task through its lifecycle. All claim/assign/advance/regress/complete/fai
 
 **Parameters:**
 
-| Name      | Type   | Required | Description                                                                      |
-| --------- | ------ | -------- | -------------------------------------------------------------------------------- |
-| `action`  | string | Yes      | One of: `claim`, `assign`, `advance`, `regress`, `complete`, `fail`, `cancel`    |
-| `task_id` | number | Yes      | Task ID                                                                          |
-| `claimer` | string | No       | Agent name claiming (claim only, uses session name if omitted)                   |
-| `stage`   | string | No       | Target stage (advance: optional, advances to next if omitted; regress: required) |
-| `comment` | string | No       | Comment (advance: optional, satisfies stage-gate require_comment check)          |
-| `reason`  | string | No       | Reason for regression or cancellation                                            |
-| `result`  | string | No       | Result summary (complete) or error description (fail)                            |
+| Name      | Type   | Required | Description                                                                                                         |
+| --------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------- |
+| `action`  | string | Yes      | One of: `claim`, `assign`, `advance`, `regress`, `complete`, `fail`, `cancel`, `reopen`                             |
+| `task_id` | number | Yes      | Task ID                                                                                                             |
+| `claimer` | string | No       | Agent name claiming (claim only; omitted, the session name, else the client and project: `claude-code@agent-tasks`) |
+| `stage`   | string | No       | Target stage (advance: optional, advances to next if omitted; regress: required)                                    |
+| `comment` | string | No       | Comment (advance: optional, satisfies stage-gate require_comment check)                                             |
+| `reason`  | string | No       | Reason for regression or cancellation                                                                               |
+| `result`  | string | No       | Result summary (complete) or error description (fail)                                                               |
 
 **Examples:**
 
@@ -593,17 +598,16 @@ Configuration and admin operations.
 
 **Parameters:**
 
-| Name              | Type     | Required | Description                                                          |
-| ----------------- | -------- | -------- | -------------------------------------------------------------------- |
-| `action`          | string   | Yes      | One of: `session`, `pipeline`, `cleanup`, `rules`                    |
-| `project`         | string   | No       | Project name (pipeline: scope, rules: project-specific)              |
-| `stages`          | string[] | No       | Stage names in order (pipeline set mode)                             |
-| `gate_config`     | object   | No       | Stage-gate config (pipeline only, see below)                         |
-| `id`              | string   | No       | Session ID (session only)                                            |
-| `name`            | string   | No       | Session name (session only)                                          |
-| `mode`            | string   | No       | Cleanup mode: `retention`, `stale_agents`, `all` (cleanup only)      |
-| `timeout_minutes` | number   | No       | Heartbeat timeout for stale detection (cleanup only, default: 30)    |
-| `format`          | string   | No       | Output format for rules: `mdc` (Cursor) or `claude_md` (Claude Code) |
+| Name          | Type     | Required | Description                                                          |
+| ------------- | -------- | -------- | -------------------------------------------------------------------- |
+| `action`      | string   | Yes      | One of: `session`, `pipeline`, `cleanup`, `rules`                    |
+| `project`     | string   | No       | Project name (pipeline: scope, rules: project-specific)              |
+| `stages`      | string[] | No       | Stage names in order (pipeline set mode)                             |
+| `gate_config` | object   | No       | Stage-gate config (pipeline only, see below)                         |
+| `id`          | string   | No       | Session ID (session only)                                            |
+| `name`        | string   | No       | Session name (session only)                                          |
+| `mode`        | string   | No       | Cleanup mode: `retention`, `sessions`, `all` (cleanup only)          |
+| `format`      | string   | No       | Output format for rules: `mdc` (Cursor) or `claude_md` (Claude Code) |
 
 **Action: session**
 
@@ -676,11 +680,11 @@ This works for both solo and multi-agent workflows. Solo: the implementing agent
 
 **Action: cleanup**
 
-Purge old completed tasks or stale agent tasks.
+Purge old closed tasks (`retention`, the default), fail now the open tasks whose claiming session is gone (`sessions`), or both (`all`).
 
 ```
 task_config with action "cleanup"
-task_config with action "cleanup", mode "stale_agents", timeout_minutes 60
+task_config with action "cleanup", mode "sessions"
 task_config with action "cleanup", mode "all"
 ```
 
@@ -703,7 +707,7 @@ task_config with action "rules", format "mdc", project "backend"
 
 All endpoints return JSON. Loopback only: a foreign `Host` header gets 403, so does any request carrying an `Origin` header (loopback origins included), request bodies must be `application/json`, no wildcard CORS.
 
-Eight routes: what the `/pipeline` pane and the hook scripts call. Everything else goes through the MCP tools.
+Ten routes: what the Claude Code plugin (the `/pipeline` pane and its session hooks) calls. Everything else goes through the MCP tools.
 
 ```
 GET    /health                        Health check with version, uptime, task count
@@ -711,9 +715,11 @@ GET    /api/board                     Open tasks, recently closed ones (?recent=
 GET    /api/pipeline                  Pipeline stages and gate config (?project=)
 GET    /api/tasks/:id                 One task as task_get (?include=subtasks,comments,transitive_deps; newest 100 comments)
 POST   /api/tasks                     Create a task (body: {title, description?, priority?, project?, tags?, parent_id?, assign_to?, stage?, created_by?})
-POST   /api/tasks/:id/stage           Lifecycle action (body: {action, stage?, comment?, reason?, result?, claimer?, by?})
+POST   /api/tasks/:id/stage           Lifecycle action (body: {action, stage?, comment?, reason?, result?, claimer?, by?}); reopen included
 POST   /api/tasks/:id/comments        Add comment (body: {content, agent_id?, parent_comment_id?})
 DELETE /api/tasks/:id                 Delete a task
+POST   /api/holders/:holder           A host session as claim holder: beat, adopt tasks in progress (body: {adopt?: number[]})
+DELETE /api/holders/:holder           The holder's session ended
 ```
 
 ### Example Requests
@@ -851,9 +857,9 @@ Learnings attached via `task_artifact(type: "learning")` are automatically propa
 
 **Solutions:**
 
-- If agent-comm is running, heartbeat-based cleanup automatically fails tasks from dead agents.
-- Manual cleanup: `task_config(action: "cleanup", mode: "stale_agents", timeout_minutes: 30)`.
-- Session hooks auto-fail orphaned tasks on session stop and clean up stale tasks on session start.
+- A claimed task lives with the session that claimed it (its `holder`). Once that session has ended or stopped answering for `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES` (default 10), the next sweep fails it; an idle session keeps its tasks however long it waits.
+- Fail them now: `task_config(action: "cleanup", mode: "sessions")`.
+- A task nothing holds (claimed before 3.0, or over REST without a `holder`) is never failed this way: fail or reassign it yourself.
 
 ### Database Issues
 
@@ -863,7 +869,7 @@ Learnings attached via `task_artifact(type: "learning")` are automatically propa
 
 - The database is at `~/.agent-tasks/agent-tasks.db` by default (configurable via `AGENT_TASKS_DB`).
 - If corrupted, delete the database and WAL files. All task data will be lost.
-- The database uses WAL mode with schema versioning (currently V5). Migrations run automatically on startup.
+- The database uses WAL mode with schema versioning (currently V7). Migrations run automatically on startup.
 
 ---
 
@@ -877,14 +883,9 @@ Yes. agent-tasks is a standard MCP server. Any MCP-compatible client can use it.
 
 agent-tasks optionally connects to agent-comm via `AGENT_COMM_URL`. This enables:
 
-- **Heartbeat-based cleanup**: Detects when agents die and auto-fails their tasks.
 - **Bridge notifications**: Notifies connected agents on task events.
 
-Without agent-comm, these features are gracefully skipped.
-
-### What is the TodoWrite bridge?
-
-When configured via hooks, agent-tasks intercepts Claude Code's built-in `TodoWrite` tool calls and syncs them to the pipeline. Todos become tasks on the `/pipeline` board.
+Without agent-comm, they are gracefully skipped. Whether a claimed task's session is alive does not depend on agent-comm.
 
 ### Can multiple agents work on the same task?
 

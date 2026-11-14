@@ -1,16 +1,12 @@
 // =============================================================================
 // agent-tasks — Cleanup service
 //
-// Hourly retention sweep (run()), plus:
-//   - agent-bridge integration (fails in-progress tasks whose agent is stale)
-//   - purgeAll() limited to completed and cancelled tasks
+// Hourly retention sweep (run()), the unassigned-orphan reaper, and
+// purgeAll() limited to completed and cancelled tasks. Claimed tasks whose
+// session is gone are HolderService's.
 // =============================================================================
 
 import type { Db } from '../storage/database.js';
-import type { AgentBridge } from './agent-bridge.js';
-import type { Task } from '../types.js';
-
-const AGENT_COMM_TIMEOUT_MS = parseInt(process.env.AGENT_TASKS_COMM_TIMEOUT_MS ?? '5000', 10);
 const ORPHAN_TIMEOUT_MINUTES = parseInt(
   process.env.AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES ?? '360', // 6 hours
   10,
@@ -38,7 +34,6 @@ export class CleanupService {
   constructor(
     private readonly db: Db,
     private readonly retentionDays: number = 30,
-    private readonly agentBridge?: AgentBridge,
   ) {}
 
   start(): void {
@@ -54,10 +49,6 @@ export class CleanupService {
       }
     }, RUN_EVERY_MS);
     this.timer.unref();
-    this.cancelOrphanedTasks();
-    setTimeout(() => {
-      this.failStaleAgentTasks().catch(() => {});
-    }, 10_000).unref();
   }
 
   stop(): void {
@@ -129,9 +120,8 @@ export class CleanupService {
 
   /**
    * Cancel tasks that are stuck in_progress with no assignee for longer than
-   * ORPHAN_TIMEOUT_MINUTES. These never get caught by failStaleAgentTasks
-   * (which requires assigned_to) or by the SessionStart hook (which only
-   * reaps tasks tied to a dead session). Returns the number of tasks cancelled.
+   * ORPHAN_TIMEOUT_MINUTES: nobody works on them and no holder fails them.
+   * Returns the number of tasks cancelled.
    */
   cancelOrphanedTasks(timeoutMinutes: number = ORPHAN_TIMEOUT_MINUTES): number {
     const result = this.db.run(
@@ -145,119 +135,5 @@ export class CleanupService {
       [timeoutMinutes, timeoutMinutes],
     );
     return result.changes;
-  }
-
-  async failStaleAgentTasks(
-    timeoutMinutes: number = 30,
-  ): Promise<{ failed: Task[]; checked: number }> {
-    if (!this.agentBridge) {
-      return { failed: [], checked: 0 };
-    }
-
-    const inProgressTasks = this.db.queryAll<Task>(
-      `SELECT * FROM tasks WHERE status = 'in_progress' AND assigned_to IS NOT NULL`,
-    );
-
-    if (inProgressTasks.length === 0) {
-      return { failed: [], checked: 0 };
-    }
-
-    const agentNames = [...new Set(inProgressTasks.map((t) => t.assigned_to!))];
-    let agents: Array<{ name: string; status: string; last_heartbeat?: string }>;
-    try {
-      agents = (await this.fetchAgentsWithTimeout()) as Array<{
-        name: string;
-        status: string;
-        last_heartbeat?: string;
-      }>;
-    } catch (err) {
-      process.stderr.write(
-        '[agent-tasks] failStaleAgentTasks fetchAgents error: ' +
-          (err instanceof Error ? err.message : String(err)) +
-          '\n',
-      );
-      return { failed: [], checked: agentNames.length };
-    }
-
-    if (!Array.isArray(agents) || agents.length === 0) {
-      return { failed: [], checked: agentNames.length };
-    }
-
-    const agentMap = new Map<string, { status: string; last_heartbeat?: string }>();
-    for (const a of agents) {
-      if (a.name) agentMap.set(a.name, a);
-    }
-
-    const cutoff = Date.now() - timeoutMinutes * 60 * 1000;
-    const staleAgents = new Set<string>();
-
-    for (const name of agentNames) {
-      const agent = agentMap.get(name);
-      if (!agent) {
-        staleAgents.add(name);
-        continue;
-      }
-      if (agent.status === 'offline') {
-        staleAgents.add(name);
-        continue;
-      }
-      if (agent.last_heartbeat) {
-        const hbTime = new Date(agent.last_heartbeat).getTime();
-        if (hbTime < cutoff) {
-          staleAgents.add(name);
-        }
-      }
-    }
-
-    const failed: Task[] = [];
-    for (const task of inProgressTasks) {
-      if (!staleAgents.has(task.assigned_to!)) continue;
-      const agent = agentMap.get(task.assigned_to!);
-      const reason = agent
-        ? `Auto-failed: agent "${task.assigned_to}" has not heartbeated for ${timeoutMinutes} minutes`
-        : `Auto-failed: agent "${task.assigned_to}" is no longer registered`;
-      try {
-        this.db.run(
-          `UPDATE tasks SET status = 'failed', result = ?, updated_at = datetime('now') WHERE id = ?`,
-          [reason, task.id],
-        );
-        const updated = this.db.queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [task.id]);
-        if (updated) failed.push(updated);
-      } catch (err) {
-        process.stderr.write(
-          '[agent-tasks] failStaleAgentTasks task update error: ' +
-            (err instanceof Error ? err.message : String(err)) +
-            '\n',
-        );
-      }
-    }
-
-    return { failed, checked: agentNames.length };
-  }
-
-  private async fetchAgentsWithTimeout(): Promise<unknown[]> {
-    if (!this.agentBridge) return [];
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), AGENT_COMM_TIMEOUT_MS);
-    try {
-      const result = await Promise.race([
-        this.agentBridge.fetchAgents(),
-        new Promise<never>((_resolve, reject) => {
-          controller.signal.addEventListener('abort', () => {
-            reject(new Error(`agent-comm fetch timed out after ${AGENT_COMM_TIMEOUT_MS}ms`));
-          });
-        }),
-      ]);
-      return result;
-    } catch (err) {
-      process.stderr.write(
-        '[agent-tasks] fetchAgentsWithTimeout: ' +
-          (err instanceof Error ? err.message : String(err)) +
-          '\n',
-      );
-      return [];
-    } finally {
-      clearTimeout(timer);
-    }
   }
 }

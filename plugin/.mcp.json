@@ -2,7 +2,7 @@
   "mcpServers": {
     "agent-tasks": {
       "command": "npx",
-      "args": ["-y", "agent-tasks@^2"]
+      "args": ["-y", "agent-tasks@^3"]
     }
   }
 }

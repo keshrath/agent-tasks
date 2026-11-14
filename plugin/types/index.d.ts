@@ -92,6 +92,8 @@ export type AgentTasksDetail = {
   /** Tasks linked without blocking (`related`, `duplicate`), either way round. */
   links: (AgentTasksRef & { relationship: string })[];
   subtasks: AgentTasksRef[];
+  /** Below it, all levels: the open subtasks a delete is refused for, the finished it takes along. */
+  subtree: { open: number[]; finished: number };
   artifacts: {
     id: number;
     stage: string;
@@ -120,11 +122,20 @@ export type AgentTasksForm = {
    */
   words: string;
   /**
-   * Words the field draws once: a submit the gate refused clears the field, and these put the
-   * submitted words back. Unchanged while the person types, so no redraw fights the keys.
+   * Words the field draws once: a refused submit cleared the field (Enter does), and these put
+   * the submitted words back. Unchanged while the person types, so no redraw fights the keys.
    */
   seed?: string;
+  /** How often the field was drawn anew with `seed` (its key carries it: `formKey`). */
+  drawn?: number;
+  /** The task's stage when the form opened: changed elsewhere since, the form closes. */
+  at: string;
+  /** Send back: the stage was picked (the ring then goes on to Why). */
+  picked?: boolean;
 };
+
+/** The order the board and Done were drawn in (task ids), each its own. */
+export type AgentTasksPinned = { board: number[]; done: number[] };
 
 /** The New tab's fields as typed. */
 export type AgentTasksDraft = {
@@ -154,12 +165,24 @@ declare module 'claude-code' {
        * drawn from state again only under a new key, which this makes.
        */
       rev: number;
+      /**
+       * Bumped to have a landing wait for the drawing of what was just written: Refresh carries
+       * it in its key, which only that drawing has (no field is re-keyed by it).
+       */
+      frame: number;
       /** The action in flight ("advance #12"), shown instead of its outcome. */
       busy: string | null;
       /** The last action's outcome, one line. */
       notice: string | null;
       /** The key of the pane's element holding the ring; null when none does. */
       focused: string | null;
+      /**
+       * The order the board and Done were drawn in when the pane took the keyboard (task ids);
+       * kept while it holds it, so a poll never moves rows under the ring. Null: sorted afresh.
+       */
+      pinned: AgentTasksPinned | null;
+      /** The open tasks this session holds (its claims), marked on the board and in a task. */
+      mine: number[];
     };
   }
 }

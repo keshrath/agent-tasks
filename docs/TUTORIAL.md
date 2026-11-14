@@ -8,14 +8,14 @@ The pane is keyboard-first. A few keys get you everywhere:
 
 | Key                  | Does                                                 |
 | -------------------- | ---------------------------------------------------- |
-| `1` `2` `3`          | Board, Done, New (again: back to its first row)      |
+| `1` `2` `3`          | Board, Done, New (again: back to where it starts)    |
 | `Tab` / `shift+Tab`  | move the focus (the highlighted button or field)     |
 | `Enter`              | press what has the focus                             |
 | `↑` `↓`              | scroll the pane                                      |
 | `r`                  | refresh                                              |
 | `Esc` / `ctrl+x tab` | give the keyboard back to the prompt / take it again |
 
-While the focus is in a text field, digits and letters go into the field, and the line under the tabs says `Tab leaves the field` instead of the keys (`Tab next field` in the New form); `Tab` leaves it. With the mouse (fullscreen layout), a click presses a button.
+While the focus is in a text field, digits and letters go into the field, and the line under the tabs says `Tab leaves the field` instead of the keys (`Tab next field · Enter creates` in the New form); `Tab` leaves it. With the mouse (fullscreen layout), a click presses a button.
 
 ## 1. Open it
 
@@ -37,25 +37,25 @@ Open tasks are grouped by pipeline stage, working ones first, then by priority (
 
 ![An artifact unfolded](images/tutorial/04-artifact.png)
 
-The comment field at the bottom sends a comment as you (`AGENT_TASKS_USER`, else your OS user name) for the agents working on it.
+The comment field at the bottom sends a comment as you (`AGENT_TASKS_USER`, else your OS user name) for the agents working on it. Sent, the focus leaves the field (for the comments' `▸ n more` above them, else `‹ Board` with the comment scrolled into view), so what you type next is not a second comment.
 
 ![A comment sent](images/tutorial/05-comment.png)
 
 ## 3. Move it through the pipeline
 
-Agents claim tasks with `task_stage`; the pane has no Claim, and a task nobody claimed has no Advance either. For a task in progress the focus lands on its next step: `Advance › plan` moves it on.
+Agents claim tasks with `task_stage`; the pane has no Claim, and a task nobody claimed has no Advance either. For a task in progress its next step is drawn first: `Advance › plan` moves it on. The focus starts on `‹ Board`, never on Advance, so you press the step you mean.
 
-![The next step has the focus](images/tutorial/06-advance.png)
+![The next step, there to press](images/tutorial/06-advance.png)
 
 ![Moved to plan](images/tutorial/07-advanced.png)
 
-`‹ Send back` returns it to an earlier stage: pick the stage (the focus then moves on to Why), say why (kept as the rejection note), `Enter` or `Send back`. The focus lands on `‹ Board`, not on Advance, so a second `Enter` does not undo it.
+`‹ Send back` returns it to an earlier stage: the form opens on its stage picker, the stage before already chosen; `Enter` picks it and the focus moves on to Why. Say why (kept as the rejection note), then `Enter` or `Send back`; an empty Why sends only with the `Send back` button. The focus lands on `‹ Board`, not on Advance, so a second `Enter` does not undo it.
 
 ![Send back](images/tutorial/08-send-back.png)
 
 ![Back in spec](images/tutorial/09-sent-back.png)
 
-In its last stage the next step is `Complete`, which asks for the result. `Fail` asks what went wrong, `Cancel` why it is dropped. `Enter` in the field, or the form's own button (`Complete`, `Fail`, `Cancel task`, `Send back`), does it; `Never mind` closes the form. `Delete` asks first, in a red box, with the focus on `Never mind`. The line under the tabs says how it went (`✓ #13 completed`, `✗ #14 failed`, `– #15 cancelled`) and clears itself after a few seconds or at the next move.
+In its last stage the next step is `Complete`, which asks for the result. `Fail` asks what went wrong, `Cancel` why it is dropped. `Enter` in the field, or the form's own button (`Complete`, `Fail`, `Cancel task`, `Send back`), does it; `Never mind` closes the form. `Delete` asks first, in a red box, with the focus on `Keep it`. The line under the tabs says how it went (`✓ #13 completed`, `✗ #14 failed`, `– #15 cancelled`) and clears itself after a few seconds or at the next move.
 
 ![Complete asks for the result](images/tutorial/10-complete.png)
 
@@ -71,7 +71,7 @@ The `2` key lists recently finished tasks, newest first: `✓` completed, `✗` 
 
 ![Done](images/tutorial/13-done.png)
 
-The `3` key opens a new task, focus in its title. `Enter` moves to the next field; `Enter` in Description creates the task in backlog and opens it. A priority that is no whole number is said under its field, and the focus stays there.
+The `3` key opens the New tab; press it again to type the title. `Tab` moves to the next field; `Enter` in any field creates the task in backlog and opens it, so nothing you type is lost to a field the focus is leaving. A priority that is no whole number is said under its field, and the focus stays there.
 
 ![A new task](images/tutorial/14-new.png)
 

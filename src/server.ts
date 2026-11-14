@@ -3,7 +3,7 @@
 // =============================================================================
 // agent-tasks — REST server entry point
 //
-// The local REST API the Claude Code /pipeline pane and the hook scripts read.
+// The local REST API the Claude Code plugin (the /pipeline pane and its session hooks) reads.
 // Can be started manually: node dist/server.js [--port 3422] [--db path]
 // Or auto-started from the MCP server via leader election: the first process
 // to bind the port serves it, the others retry, so one of them takes over when

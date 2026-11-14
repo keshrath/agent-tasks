@@ -2,7 +2,7 @@
 // agent-tasks — REST transport
 //
 // Lightweight HTTP API using only node:http. No framework dependencies.
-// The JSON API the Claude Code /pipeline pane and the hook scripts call.
+// The JSON API the Claude Code plugin (the /pipeline pane and its session hooks) calls.
 // Host, Origin and Content-Type are checked by the request guard (guard.ts)
 // before a request reaches the router.
 // =============================================================================
@@ -11,6 +11,7 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import type { AppContext } from '../context.js';
 import { readPackageMeta } from '../package-meta.js';
 import { TasksError, ValidationError } from '../types.js';
+import { validateHolder } from '../domain/holders.js';
 import {
   handleArtifact,
   handleCreate,
@@ -53,10 +54,11 @@ function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
+/** Who acts, from `body[key]`; a claim made over REST is held by nothing (`/api/holders`). */
 function actor(body: Record<string, unknown>, key: string): SessionState {
   const given = body[key];
   const name = typeof given === 'string' && given ? given : 'api';
-  return { current: { id: name, name } };
+  return { current: { id: name, name }, holder: null };
 }
 
 type RouteHandler = (
@@ -113,6 +115,21 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   route('GET', '/api/tasks/:id', (_req, res, params, url) => {
     const include = url.searchParams.getAll('include').flatMap((v) => v.split(','));
     json(res, handleGet(ctx, { task_id: parseId(params), include }));
+  });
+
+  // A host's own session as a claim holder: POST beats (alive now), adopts the open
+  // tasks in `adopt` and answers the open tasks it holds; DELETE says the session ended.
+  route('POST', '/api/holders/:holder', async (req, res, params) => {
+    const body = await parseBody(req);
+    const holder = validateHolder(params.holder);
+    const ids = Array.isArray(body.adopt) ? body.adopt.map(Number).filter(Number.isInteger) : [];
+    const adopted = ctx.holders.adopt(holder, ids);
+    json(res, { adopted, held: ctx.holders.held(holder) });
+  });
+
+  route('DELETE', '/api/holders/:holder', (_req, res, params) => {
+    ctx.holders.end(validateHolder(params.holder));
+    json(res, { ok: true });
   });
 
   route('DELETE', '/api/tasks/:id', (_req, res, params) => {

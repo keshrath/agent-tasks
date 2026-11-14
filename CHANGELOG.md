@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.0] - 2026-11-13
+
+The plugin is the whole Claude Code integration: no command hooks, nothing in `settings.json`. A claimed task now lives as long as the session that claimed it, so an idle session no longer loses its work.
+
+### Added
+
+- **Claim holders** (`src/domain/holders.ts`, schema V6): a claimed task lives with the session that claimed it (`holder` on the task). Each MCP process holds the claims made through it and beats every 30 s while it runs, idle or not; it ends its holder when it exits. A task fails only once its holder ended or stopped beating longer than `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES` (now 10) ago, with the reason (`ended without completing it` / `stopped answering`). A session that beats again within the grace keeps its tasks; a tick right after start or after the machine slept only beats.
+- **The plugin holds the session's claims**: it adopts each `task_stage` claim or assign its agents make (`claude:<session id>`), beats while the session runs and ends the holder on `session.end`, so a reconnected MCP server loses nothing. Other hosts can do the same: `POST /api/holders/:holder` (beat, `adopt`) and `DELETE /api/holders/:holder` (ends it); a claim made over REST is held by nothing until a holder adopts it.
+- **`enforcePipeline` plugin option** (off by default): a work prompt the person sends in a session that holds no open task reaches the model with a reminder to create or claim one first.
+- **`task_config` cleanup mode `sessions`**: fail now the open tasks whose session is gone.
+- **Reopen**: `task_stage` action `reopen` (MCP and REST) and a `Reopen` button on a finished task in the pane open a failed, completed or cancelled task again, unclaimed and ready to claim, at the stage it was closed in (`closed_from`, schema V7; one closed before 3.0: before done if completed, at the start if cancelled). A `reopen` artifact keeps who and why.
+- Every request the plugin makes gives up after 3 s and fails open, so an agent-tasks REST server that hangs never stalls a prompt, a tool call, the pane or the end of a session.
+
+### Changed
+
+- **Breaking: no command hooks.** `scripts/hooks/` and `scripts/setup.js` are gone; remove the agent-tasks entries from `~/.claude/settings.json`. `session-start.js` is covered by the plugin's context block, the two cleanup hooks by claim holders, `pipeline-enforcer.mjs` by the plugin's opt-in reminder (`docs/hooks.md`).
+- **Breaking: liveness never comes from agent-comm.** The cleanup no longer fails tasks whose assignee agent-comm calls offline or silent: that failed the tasks of live sessions waiting on the person, and every task claimed without a name (`system`). `task_config` cleanup mode `stale_agents` and `timeout_minutes` are gone (`sessions` replaces them), and so is `AGENT_TASKS_HEARTBEAT_FRESH_MINUTES` / `AGENT_TASKS_COMM_TIMEOUT_MS`. Tasks claimed before 3.0 are held by nothing and are never failed this way.
+- **Breaking: `claim` refuses a blocked task** (an open `blocks` dependency), as `claim_status.claimable` already said; `claimable` is now false for a task that is not pending (a failed one included), so it is true exactly when a claim is taken.
+- Reassigning a task (`task_update` `assign_to`, a stage's auto-assignee) releases it from the claiming session.
+- **The pipeline reminder reads real prompts**: "Can you add…", "Yes, implement it", "Go ahead and…", "Push the notes into…", "Status page needs a toggle, build it" are work; "How does…?", "thanks", "commit and push" are not (sentence by sentence, polite openers read past).
+- **The context block** marks this session's own claims and puts them first, and asks the model to claim before working only with `enforcePipeline` on.
+- **The pane**:
+  - New: `Tab` walks the fields and `Enter` in any field creates the task. Walking with `Enter` moved the focus after the keypress, so what was typed meanwhile went into the field it left. Description takes three lines.
+  - A fresh board starts on the first task in progress, not on the backlog above it; a stage nobody works on folds past 5 rows (was 10).
+  - When another session changes what holds the focus (a task made on an empty board, the task's Advance moved on, the task completed), the focus lands again instead of falling into Find or onto a control that now does something else. A task opens with the focus on its way back (`‹ Board`, or the title of the task it came from), never on Advance or Complete: `Enter` moves a task only when the person picked that step.
+  - `/pipeline` puts nothing in the transcript (a plugin command's text also goes to the model); `/pipeline 12` names the task, a find its count, no pane the summary with the reason.
+  - The outcome of an act also shows in the status entry while it lasts, so a long task scrolled down still says what happened. A task failed from the pane reads `– #12 marked failed`, not as an error.
+  - The Complete form warns when subtasks are still open; a finished task no longer lists what it blocks; an empty find leaves no empty count line; the stage picker says `↑↓ choose`; an empty Done says why and offers `[ Board ]`.
+- **Send back** always keeps a `rejection` artifact naming who, with or without a reason; to the queue it says the task waits to be claimed.
+- **The focus is never moved by another session.** While the pane holds the keyboard the board and Done keep their drawn order (new rows at the end), and after every poll the focus goes back to the control it was on, or lands again when that is gone. Before, a task claimed or finished elsewhere could shift the rows so that `Enter` opened or advanced the wrong task. `r` (Refresh) keeps the focus too.
+- **The focus never lands in a text field by itself**: after a comment it goes to `‹ Board`; a gate refusal keeps it on the button pressed and says `add the comment below`.
+- **Action forms**: words sent and refused are put back in the field; a form whose task changed elsewhere closes and says nothing was sent; `Never mind` takes its error along.
+- **Whose task**: an agent that never named itself (`task_config` session) acts as its client and project (`claude-code@agent-tasks`) instead of `system`, for claims, tasks it creates, comments and artifacts; the tasks this session holds are marked `this session`.
+- **The pane**: artifact tables fit the pane (one row a line when too wide, as in the /knowledge pane), artifact names clip instead of splitting a word, Done follows the find and marks a cut result with `…`, no fold toggle under a find, no hotkey labels while the keyboard is the prompt's, a tab typed or pasted into a New field is a space, `/pipeline` says something in the conversation only when something went wrong.
+- **The pipeline reminder** no longer takes a question asked as a request ("Can you explain…", "Do you know…"), a "don't change anything" or a "…, any idea why" for work.
+- The pipeline reminder speaks of this session's own claims; the old hook read whichever agent-comm agent had beaten last, often another session's, and asked for `comm_register`.
+
+### Removed
+
+- The TodoWrite bridge: Claude Code has no `TodoWrite` tool any more, and its session task list is the session's own scratch.
+
 ## [2.1.0] - 2026-10-24
 
 No agent-common any more, stage gates said before they refuse, and the `/pipeline` pane tested end to end in the real Claude Code CLI.
@@ -23,12 +64,25 @@ No agent-common any more, stage gates said before they refuse, and the `/pipelin
 - **Subtasks inherit the parent's project and priority** unless given their own, as `task_create` says.
 - **Stage-gate errors state the fact only** (`Stage gate: at least one comment required before advancing from 'spec'.`), no tool hints; they read the same in the pane and to agents.
 - **The pane never lands the focus in a text field** when `/pipeline` opens or moves to a view: what the person types next is not taken as a comment. The comment field gets it only after a press the gate refused for want of one. Advance and Complete are not drawn as the main step while a gate holds. A refusal the gate line explains says only `✗ #N can't leave <stage> yet`, and a refused Complete keeps its form and typed result.
+- **The pane follows the /knowledge and /discover conventions**: a running act shows as a progress line (`Advancing #12 …`) and a failed one as `✗ Advancing #12 failed: …`; `3` lands on the New tab and pressed again in Title; the tabs stay while the server is down; ages count days from 24 hours, times read `HH:MM` today else with the date; folds read `▸ N more` / `▾ Show less`; Delete asks `[ Keep it ]` (with the focus) or `[ Delete #N ]`.
 - **The pane measures text in terminal columns**: wide (CJK) and emoji titles no longer wrap a row.
 - `pipeline-enforcer.mjs` tells the model to use `task_stage` action `claim` (`task_claim` does not exist).
 
 ### Fixed
 
-- The focus after Advance into the stage before done landed on Send back instead of Complete.
+- **A key pressed while the pane redrew could do nothing**: it reached the button of the drawing being replaced, whose handler was gone. A move between views (a tab, a row, a fold, back, Refresh) is now done anyway; any other press says to press it again.
+- **A colour code in what an agent wrote blanked the pane**: one control character in a title, description, result, comment, tag or artifact made Claude Code refuse the whole pane, and its hotkeys fell to the prompt. Escape sequences are dropped where the server's answer enters the pane; other control characters show as `�`. The stored text is left as written.
+- **`Enter` twice on a row pressed what the task view drew at its place**: Advance, Reopen, Complete (its form then took the next words and `Enter` as the result), or Delete. Every navigation now parks the focus before it draws, a task opens loading, and a press on a control that changes a task right after the view changed (or while an action runs) is taken and said. `task_stage` advance takes `from`, the stage the caller saw: a task moved elsewhere meanwhile is refused instead of skipping stages, and the pane always sends it.
+- **Send back sent itself on a hurried `Enter`**: it starts on its stage picker, an empty `Why` sends nothing, and the first stage says it unclaims.
+- **The reminder stayed silent right after the session finished its only task**: a complete, fail or cancel refreshes what the session holds.
+- **Deleting a parent deleted its open subtasks** (`ON DELETE CASCADE`), work other agents had claimed included. `task_delete` and `DELETE /api/tasks/:id` now refuse while a subtask anywhere below is open, naming it; finished ones go along, and the pane's delete box says how many (`task_get` include subtasks returns `subtree`).
+- **A task sent back to its first stage kept its assignee** while waiting to be claimed by anyone: it is unclaimed now, as the pane already said.
+- **An action form closed by a change elsewhere left the focus on Advance**, where the next `Enter` moved the task. The pane now parks the focus on Refresh while a poll redraws, puts it back by key, and never lands it on a control that changes a task with one `Enter`; the closed form's words come back with its button.
+- **Done right after a task finished elsewhere landed on its oldest row** and scrolled the tabs away: every landing now waits for the drawing it lands on, and yields to a key pressed meanwhile.
+- **Keys typed fast could be lost or reordered** in the New fields and an action form's field: the pane drew each key back as the field's value. Fields now keep what is typed out of what they draw; while the person types, a poll's change waits until they pause instead of moving the field or the ring.
+- **Clear on New left the focus in Title**, so the next digit started a title (and `/pipeline 37` then made a task named `1`).
+- A gate that wants artifacts or an approval offered Advance and Complete, refused only after the result was typed.
+- A board row's facts were cut mid-word; a toast's title was cut by UTF-16 units, overflowing with wide characters; a tab pressed while the server was down switched the view unseen.
 - `/pipeline <id>` for a task that does not exist did not say so.
 - The Delete buttons' focus highlight covered only the word, not the button.
 - Right after `/pipeline`, the focus sat in the Find field for an instant: keys typed then could land in it.

@@ -180,16 +180,3 @@ describe('per-status retention', () => {
     expect(ctx.cleanup.run().purgedTasks).toBe(1);
   });
 });
-
-describe('stale agent cleanup', () => {
-  it('returns empty when no agent bridge', async () => {
-    const result = await ctx.cleanup.failStaleAgentTasks();
-    expect(result.failed).toHaveLength(0);
-    expect(result.checked).toBe(0);
-  });
-
-  it('returns empty when no in-progress tasks', async () => {
-    const result = await ctx.cleanup.failStaleAgentTasks();
-    expect(result.failed).toHaveLength(0);
-  });
-});

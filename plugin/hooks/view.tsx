@@ -9,6 +9,7 @@ import type {
   AgentTasksDraft,
   AgentTasksForm,
   AgentTasksGate,
+  AgentTasksPinned,
   AgentTasksRef,
   AgentTasksRoute,
   AgentTasksSnapshot,
@@ -18,12 +19,14 @@ import type {
 } from '../types';
 
 /** The elements the pane draws with; mobile has no `Input` or `Select`. */
-export type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'> &
+export type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown' | 'Progress'> &
   Partial<Pick<Elements['terminal'], 'Input' | 'Select'>>;
 
 export type Actions = {
   refresh: () => void;
   go: (tab: AgentTasksTab) => void;
+  /** Opens the New tab to type in (a press that asked for it: New task). */
+  newTask: () => void;
   open: (id: number) => void;
   back: () => void;
   find: (query: string) => void;
@@ -33,23 +36,24 @@ export type Actions = {
   /** Opens the field an action needs its words in. */
   ask: (id: number, action: AgentTasksForm['action']) => void;
   pickStage: (stage: string) => void;
-  finish: (id: number, action: AgentTasksForm['action'], words: string) => void;
+  /** Sends the open form: `words` from its field's Enter, else what was typed into it. */
+  finish: (id: number, action: AgentTasksForm['action'], words?: string) => void;
   /** Keeps what is typed in the open form's field, for its button. */
   type: (words: string) => void;
+  /** A key typed into a field that keeps no text in state (Find, the comment). */
+  typing: () => void;
   /** Closes the open form or confirmation. */
   dismiss: () => void;
   askDelete: (id: number) => void;
   remove: (id: number) => void;
+  /** A failed, completed or cancelled task open again, unclaimed. */
+  reopen: (id: number) => void;
   comment: (id: number, words: string) => void;
   /** Unfolds or folds a part of the detail (`foldKey`). */
   toggle: (part: string) => void;
   edit: (field: keyof AgentTasksDraft, value: string) => void;
-  /** Enter in a New field: keeps its text and moves on to `next`, or creates the task. */
-  submitField: (
-    field: keyof AgentTasksDraft,
-    value: string,
-    next: keyof AgentTasksDraft | null,
-  ) => void;
+  /** Enter in a New field: keeps its text and creates the task (Tab walks the fields). */
+  submitField: (field: keyof AgentTasksDraft, value: string) => void;
   create: () => void;
   clearDraft: () => void;
 };
@@ -85,6 +89,40 @@ function charCols(ch: string): number {
 /** Display width in terminal columns, which is what wraps a line; `length` counts UTF-16 units. */
 export const cols = (s: string) => [...s].reduce((n, ch) => n + charCols(ch), 0);
 
+/**
+ * Whole facts, in order, as many as fit `width` columns joined by ` · `: a fact cut in half
+ * (`agent-tas…`) or a separator left dangling says less than one left out.
+ */
+export function fitFacts(facts: (Part | false | null | undefined)[], width: number): Part[] {
+  const shown: Part[] = [];
+  let used = 0;
+  for (const f of facts) {
+    if (!f) continue;
+    const w = cols(typeof f === 'string' ? f : f.text) + (shown.length ? 3 : 0);
+    if (used + w > width) break;
+    shown.push(f);
+    used += w;
+  }
+  return shown;
+}
+
+/** What a terminal escape sequence looks like: OSC (to BEL or ST), CSI, or a two-key escape. */
+const ESCAPES =
+  // eslint-disable-next-line no-control-regex
+  /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?|\u001b\[[0-?]*[ -/]*[@-~]|\u001b[@-Z\\-_]/g;
+/** Control characters a drawn text may not hold: C0 but newline and tab, DEL, C1. */
+// eslint-disable-next-line no-control-regex
+const CONTROLS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
+
+/**
+ * Text as the pane can draw it. Agents write tasks, comments and artifacts from tool output,
+ * colour codes and all; one control character in a drawn text makes Claude Code refuse the
+ * whole pane. Escape sequences go whole, line ends become newlines, any other control
+ * character a visible `�`.
+ */
+export const printable = (s: string) =>
+  s.replace(ESCAPES, '').replace(/\r\n?/g, '\n').replace(CONTROLS, '\uFFFD');
+
 /** `s` cut to `n` columns with an ellipsis. */
 export function clip(s: string, n: number): string {
   if (cols(s) <= n) return s;
@@ -98,28 +136,60 @@ export function clip(s: string, n: number): string {
   }
   return `${out.trimEnd()}…`;
 }
-const firstLine = (s: string) =>
-  s
-    .split('\n')
-    .find((l) => l.trim())
-    ?.trim() ?? '';
+/**
+ * A text whose Markdown tables fit `width`: a table wider than the pane reads one row a line,
+ * its cells joined with ` · ` (the header bold), as box drawing past the edge cannot be read.
+ * The same reading as agent-knowledge's /knowledge pane.
+ */
+export function fitTables(body: string, width: number): string {
+  const lines = body.split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; ) {
+    if (!/^\s*\|/.test(lines[i]!)) {
+      out.push(lines[i++]!);
+      continue;
+    }
+    const table: string[] = [];
+    while (i < lines.length && /^\s*\|/.test(lines[i]!)) table.push(lines[i++]!.trim());
+    const cells = (row: string) =>
+      row
+        .replace(/^\||\|$/g, '')
+        .split('|')
+        .map((c) => c.trim());
+    const rows = table.filter((r) => !/^\|?[\s:|-]+\|?$/.test(r)).map(cells);
+    const widths = rows[0]?.map((_, c) => Math.max(...rows.map((r) => cols(r[c] ?? '')))) ?? [];
+    const drawn = widths.reduce((sum, w) => sum + w + 3, 1);
+    if (drawn <= width) {
+      out.push(...table);
+      continue;
+    }
+    rows.forEach((r, n) => out.push(n === 0 ? `**${r.join(' · ')}**` : r.join(' · '), ''));
+  }
+  return out.join('\n');
+}
+
+/** A result's first line, `…` after it when more follows, so a cut never reads as whole. */
+const firstLine = (s: string) => {
+  const lines = s.split('\n').filter((l) => l.trim());
+  return `${lines[0]?.trim() ?? ''}${lines.length > 1 ? ' …' : ''}`;
+};
 
 /** Server timestamps are UTC (SQLite's `YYYY-MM-DD HH:MM:SS`, or ISO). */
 function parse(ts: string): Date {
   return new Date(/(?:[zZ]|[+-]\d\d:?\d\d)$/.test(ts) ? ts : `${ts.replace(' ', 'T')}Z`);
 }
 
-/** Local time: HH:MM today, MM-DD HH:MM before. */
+/** Local time: HH:MM today, YYYY-MM-DD HH:MM before. */
 export function time(ts: string, now = new Date()): string {
   const d = parse(ts);
   if (Number.isNaN(d.getTime())) return ts;
   const clock = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   return d.toDateString() === now.toDateString()
     ? clock
-    : `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${clock}`;
+    : `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${clock}`;
 }
 
-/** When, in the detail: just now, 5m ago, 3h ago; past a day the local date and time. */
+/** When, in the detail: just now, 5m ago, 3h ago, 2d ago; past a week the local date and time. */
 export function when(ts: string, now = new Date()): string {
   const ms = now.getTime() - parse(ts).getTime();
   if (Number.isNaN(ms)) return ts;
@@ -127,6 +197,7 @@ export function when(ts: string, now = new Date()): string {
   if (min < 1) return 'just now';
   if (min < 60) return `${min}m ago`;
   if (min < 24 * 60) return `${Math.floor(min / 60)}h ago`;
+  if (min < 7 * 24 * 60) return `${Math.floor(min / (24 * 60))}d ago`;
   return time(ts, now);
 }
 
@@ -138,7 +209,7 @@ export function ago(ts: string, now = Date.now()): string {
   if (min < 1) return 'now';
   if (min < 60) return `${min}m`;
   const h = Math.floor(min / 60);
-  return h < 48 ? `${h}h` : `${Math.floor(h / 24)}d`;
+  return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
 }
 
 export const isOpen = (s: AgentTasksStatus) => s === 'pending' || s === 'in_progress';
@@ -169,6 +240,18 @@ export function gateText(g: AgentTasksGate): string {
  * The gate's line under the actions: what it needs and who gives it. A comment is added in the
  * field below; artifacts come from an agent; no tool records an approval.
  */
+/** What the delete box asks, or why there is nothing to delete yet. */
+export function deleteQuestion(d: Pick<AgentTasksDetail, 'id' | 'subtree'>): string {
+  const { open, finished } = d.subtree;
+  if (open.length)
+    return `#${d.id} has open subtasks (${open.map((id) => `#${id}`).join(', ')}): finish, cancel or delete them first.`;
+  const along = ['artifacts', 'comments', finished ? plural(finished, 'finished subtask') : '']
+    .filter(Boolean)
+    .join(', ')
+    .replace(/, ([^,]*)$/, ' and $1');
+  return `Delete #${d.id} with its ${along}? There is no undo.`;
+}
+
 export function gateHint(g: AgentTasksGate, stage: string): string {
   const who = [
     g.comment && 'add the comment below',
@@ -230,17 +313,29 @@ export function boardOrder(
 }
 
 /** Rows a stage nobody works on (a backlog) shows before it folds the rest away. */
-export const FOLD_ROWS = 10;
+export const FOLD_ROWS = 5;
 
 /**
  * The board's groups as drawn: open tasks matching `filter` by stage, and how many rows each
  * folds away. A stage where nothing is in progress (a backlog) folds past FOLD_ROWS, so a long
  * queue never buries the work in flight below it; a find shows every match.
  */
+/**
+ * `tasks` in the order `pinned` drew them, the ones it does not hold after, as they came: a
+ * poll then never moves a row under the ring while the pane holds the keyboard.
+ */
+export function pinOrder<T extends { id: number }>(tasks: T[], pinned: number[] | null): T[] {
+  if (!pinned) return tasks;
+  const at = new Map(pinned.map((id, i) => [id, i]));
+  const held = tasks.filter((t) => at.has(t.id)).sort((a, b) => at.get(a.id)! - at.get(b.id)!);
+  return [...held, ...tasks.filter((t) => !at.has(t.id))];
+}
+
 export function boardGroups(
   snap: AgentTasksSnapshot,
   filter: string,
   expanded: string[],
+  pinned: number[] | null = null,
 ): { stage: string; tasks: AgentTasksTask[]; hidden: number }[] {
   const shown = boardOrder(
     snap.open.filter((t) => matches(t, filter)),
@@ -248,7 +343,13 @@ export function boardGroups(
   );
   const stages = stageOrder(snap);
   const groups = stages
-    .map((stage) => ({ stage, tasks: shown.filter((t) => t.stage === stage) }))
+    .map((stage) => ({
+      stage,
+      tasks: pinOrder(
+        shown.filter((t) => t.stage === stage),
+        pinned,
+      ),
+    }))
     .filter((g) => g.tasks.length > 0);
   const stray = shown.filter((t) => !stages.includes(t.stage));
   if (stray.length) groups.push({ stage: 'other stages', tasks: stray });
@@ -265,7 +366,7 @@ export function boardGroups(
 }
 
 /** The stages a task can still move through (its pipeline without `cancelled`). */
-const activeStages = (d: Pick<AgentTasksDetail, 'stages'>) =>
+export const activeStages = (d: Pick<AgentTasksDetail, 'stages'>) =>
   d.stages.filter((s) => s !== 'cancelled');
 
 /** Complete's key names the stage it completes from, for the same reason as `advance:<stage>`. */
@@ -301,7 +402,19 @@ export const foldKey = (part: string, isOpen: boolean) => `${part}:${isOpen ? 'o
  * would move a ring kept by its place, so Refresh is drawn anew and lands it itself. Up, it
  * also names `rev`: a button only the board after a bump draws, which a landing waits on.
  */
-export const refreshKey = (isUp: boolean, rev = 0) => (isUp ? `refresh:${rev}` : 'retry');
+export const refreshKey = (isUp: boolean, frame = 0) => (isUp ? `refresh:${frame}` : 'retry');
+
+/**
+ * Controls one Enter on them changes a task with (Advance, Reopen, a form's or the delete
+ * box's send, Create): the ring never lands on them by itself, so a stray Enter after a move,
+ * a poll or a command changes nothing. The person Tabs there.
+ */
+export const isRisky = (key: string) =>
+  /^(advance:.+|reopen|confirm-yes|form-submit|create)$/.test(key);
+
+/** A gate only an agent or an approval can pass (artifacts, an approval): not from the pane. */
+export const isOutOfReach = (g: AgentTasksGate | null) =>
+  g !== null && (g.artifact || g.artifacts.length > 0 || g.more > 0 || g.approval);
 
 type Look = { mark: string; tone: string | undefined; word: string };
 
@@ -360,7 +473,7 @@ function Fact({ el, label, children }: { el: El; label: string; children: unknow
 }
 
 /** One part of a summary line: dim text, or text with its own look. */
-type Part = string | { text: string; color?: string; bold?: boolean };
+export type Part = string | { text: string; color?: string; bold?: boolean };
 
 const partText = (p: Part) => (typeof p === 'string' ? p : p.text);
 
@@ -435,6 +548,8 @@ export type PaneProps = Omit<ViewProps, 'auto'> & {
   form: AgentTasksForm | null;
   draft: AgentTasksDraft;
   rev: number;
+  /** Refresh's key (`refreshKey`): a landing waits for the drawing that has it. */
+  frame: number;
   busy: string | null;
   notice: string | null;
   /** The key of the element holding the ring (`ui.focus`). */
@@ -443,7 +558,18 @@ export type PaneProps = Omit<ViewProps, 'auto'> & {
   isFocused: boolean;
   /** The pane body's width (`bodyColumns`). */
   columns: number;
+  /** The order the board and Done keep while the pane holds the keyboard (`pinOrder`). */
+  pinned: AgentTasksPinned | null;
+  /** This session's open tasks. */
+  mine: number[];
 };
+
+/**
+ * The key of an action form's field: drawn anew, under a new key, each time a refused submit
+ * puts the words back (Enter clears a field, which takes text from state only when new).
+ */
+export const formKey = (f: Pick<AgentTasksForm, 'action' | 'drawn'>) =>
+  `form:${f.action}${f.drawn ? `:${f.drawn}` : ''}`;
 
 const TABS: [AgentTasksTab, string, string][] = [
   ['board', 'Board', '1'],
@@ -457,11 +583,19 @@ const KEYS = [
   'Tab moves · Enter presses · Esc to the prompt',
   'Tab · Enter · Esc to the prompt',
 ];
+/** On a Select ↑↓ pick its option, not scroll the pane. */
+const CHOOSING = [
+  'Tab moves · ↑↓ choose · Enter picks · Esc to the prompt',
+  'Tab · ↑↓ choose · Enter picks · Esc',
+];
 const UNFOCUSED = ['ctrl+x tab to work this pane from the keyboard', 'ctrl+x tab: keyboard'];
 /** In a text field the hotkeys type into it: the hint says how out instead. */
 const TYPING = ['Tab leaves the field · Esc to the prompt', 'Tab leaves · Esc to the prompt'];
-/** In a New field Tab goes on to the next one. */
-const TYPING_NEW = ['Tab next field · Esc to the prompt', 'Tab next · Esc to the prompt'];
+/** In a New field Tab goes on to the next one and Enter creates the task. */
+const TYPING_NEW = [
+  'Tab next field · Enter creates · Esc to the prompt',
+  'Tab next · Enter creates · Esc',
+];
 /** The text fields' keys: Find, the New fields, the comment field, an action form's field. */
 export const isField = (key: string | null) =>
   key !== null && /^(find|new-\w+|comment|form):/.test(key);
@@ -474,8 +608,15 @@ const fitting = (hints: string[], width: number) =>
   hints.find((h) => cols(h) <= width) ?? hints.at(-1)!;
 
 /** An outcome's tone, by the mark `act` in register.tsx leads it with: ✓ done, ✗ failed. */
+/** ✓ done, ✗ refused or failed, ! changed elsewhere, – nothing happened (default). */
 const noticeTone = (notice: string) =>
-  notice.startsWith('✓') ? { color: OK } : notice.startsWith('✗') ? { color: BAD } : {};
+  notice.startsWith('✓')
+    ? { color: OK }
+    : notice.startsWith('✗')
+      ? { color: BAD }
+      : notice.startsWith('!')
+        ? { color: WARN }
+        : {};
 
 /** Why there is no board: nothing answers, or an agent-tasks from before the board does. */
 function Down({ el, snap }: { el: El; snap: AgentTasksSnapshot }) {
@@ -495,6 +636,12 @@ function Down({ el, snap }: { el: El; snap: AgentTasksSnapshot }) {
     </Box>
   );
 }
+
+/** A task's title as the board or Done has it. */
+const titleOf = (snap: AgentTasksSnapshot, id: number | undefined) =>
+  id === undefined
+    ? null
+    : ([...snap.open, ...snap.recent].find((t) => t.id === id)?.title ?? null);
 
 export function Pane(p: PaneProps) {
   const { Box, Text, Button } = p.el;
@@ -518,9 +665,11 @@ export function Pane(p: PaneProps) {
           form={p.form}
           rev={p.rev}
           width={width}
+          isMine={p.mine.includes(p.detail.id)}
+          backTitle={titleOf(snap, route.trail.at(-1))}
         />
       ) : (
-        <Text dimColor>Loading #{route.task}…</Text>
+        <p.el.Progress label={`#${route.task}`} valueText="loading…" />
       );
   else if (route.tab === 'board')
     body = (
@@ -533,10 +682,22 @@ export function Pane(p: PaneProps) {
         rev={p.rev}
         width={width}
         expanded={p.expanded}
+        pinned={p.pinned?.board ?? null}
+        mine={p.mine}
       />
     );
   else if (route.tab === 'done')
-    body = <Done el={p.el} on={on} auto={p.landing} snap={snap} width={width} />;
+    body = (
+      <Done
+        el={p.el}
+        on={on}
+        auto={p.landing}
+        snap={snap}
+        width={width}
+        filter={p.filter}
+        pinned={p.pinned?.done ?? null}
+      />
+    );
   else
     body = (
       <NewTask
@@ -554,9 +715,9 @@ export function Pane(p: PaneProps) {
     <Box flexDirection="column" gap={1} width={width}>
       <Box flexDirection="column">
         <Box flexWrap="wrap" columnGap={2}>
-          {/* The tab shown takes its key too: pressed again it lands the ring on its first row. */}
-          {/* Down, there is nothing to switch between: only Refresh is drawn. */}
-          {(snap.isUp ? TABS : []).map(([tab, label, hotkey]) => (
+          {/* The tab shown takes its key too: pressed again it lands the ring on its first row.
+              Drawn while the server is down too, so a digit stays in the pane. */}
+          {TABS.map(([tab, label, hotkey]) => (
             <Button
               key={`tab:${tab}`}
               {...af(p.landing, `tab:${tab}`)}
@@ -576,22 +737,22 @@ export function Pane(p: PaneProps) {
             </Button>
           ))}
           <Button
-            key={refreshKey(snap.isUp, p.rev)}
+            key={refreshKey(snap.isUp, p.frame)}
             label="Refresh"
             {...(isTyping ? {} : { hotkey: 'r' })}
             plain
-            {...af(p.landing, refreshKey(snap.isUp, p.rev))}
+            {...af(p.landing, refreshKey(snap.isUp, p.frame))}
             onPress={on.refresh}
           />
         </Box>
         {/* One status line under the tabs: the action in flight, else its outcome, else the
             keys. Only an outcome long enough to wrap (a refusal's reason) takes more. */}
         {p.busy ? (
-          <Text color={WARN} wrap="truncate">
-            {p.busy}…
-          </Text>
+          <p.el.Progress label={p.busy} valueText="…" color={WARN} />
         ) : p.notice ? (
-          <Text {...noticeTone(p.notice)}>{p.notice}</Text>
+          <Text {...noticeTone(p.notice)} wrap="wrap">
+            {p.notice}
+          </Text>
         ) : (
           <Text dimColor wrap="truncate">
             {fitting(
@@ -600,7 +761,9 @@ export function Pane(p: PaneProps) {
                   ? TYPING_NEW
                   : TYPING
                 : p.isFocused
-                  ? KEYS
+                  ? p.focused === 'form-stage'
+                    ? CHOOSING
+                    : KEYS
                   : UNFOCUSED,
               width,
             )}
@@ -652,18 +815,16 @@ function Row({ el, on, auto, t, facts, width, result }: RowProps) {
       </Box>
       <Box paddingLeft={2}>
         <Text dimColor wrap="truncate">
-          {facts
-            .filter((f): f is Part => Boolean(f))
-            .map((f, i) =>
-              typeof f === 'string' ? (
-                `${i > 0 ? ' · ' : ''}${f}`
-              ) : (
-                <Text {...color(f.color)}>
-                  {i > 0 ? ' · ' : ''}
-                  {f.text}
-                </Text>
-              ),
-            )}
+          {fitFacts(facts, width - 2).map((f, i) =>
+            typeof f === 'string' ? (
+              `${i > 0 ? ' · ' : ''}${f}`
+            ) : (
+              <Text {...color(f.color)}>
+                {i > 0 ? ' · ' : ''}
+                {f.text}
+              </Text>
+            ),
+          )}
         </Text>
       </Box>
       {result ? (
@@ -686,12 +847,16 @@ function Board({
   rev,
   width,
   expanded,
+  pinned,
+  mine,
 }: ViewProps & {
   snap: AgentTasksSnapshot;
   filter: string;
   rev: number;
   width: number;
   expanded: string[];
+  pinned: number[] | null;
+  mine: number[];
 }) {
   const { Box, Text, Button, Input } = el;
   if (snap.open.length === 0)
@@ -709,12 +874,12 @@ function Board({
           label="New task"
           variant="primary"
           {...af(auto, 'empty-new')}
-          onPress={() => on.go('new')}
+          onPress={on.newTask}
         />
       </Box>
     );
   const n = tally(snap.open);
-  const groups = boardGroups(snap, filter, expanded);
+  const groups = boardGroups(snap, filter, expanded, pinned);
   const shownCount = groups.reduce((sum, g) => sum + g.tasks.length + g.hidden, 0);
   const isFiltered = filter !== '';
 
@@ -731,11 +896,13 @@ function Board({
             isFiltered && { text: `${shownCount} shown`, color: ACCENT },
           ]}
         />
-        <Parts
-          el={el}
-          width={width}
-          parts={groups.map((g) => `${g.stage} ${g.tasks.length + g.hidden}`)}
-        />
+        {groups.length > 0 && (
+          <Parts
+            el={el}
+            width={width}
+            parts={groups.map((g) => `${g.stage} ${g.tasks.length + g.hidden}`)}
+          />
+        )}
       </Box>
       {Input && (
         <Box flexDirection="column">
@@ -745,6 +912,7 @@ function Board({
             placeholder={fitting(FINDS, width - 13)}
             value={filter}
             submitLabel="find"
+            onInput={on.typing}
             onSubmit={on.find}
           />
           {isFiltered && (
@@ -759,7 +927,8 @@ function Board({
       )}
       {shownCount === 0 && <Text dimColor>No open task matches.</Text>}
       {groups.map((g) => {
-        const isUnfolded = g.hidden === 0 && expanded.includes(`stage:${g.stage}`);
+        // A find shows every match, folded or not: no toggle that would do nothing.
+        const isUnfolded = !isFiltered && g.hidden === 0 && expanded.includes(`stage:${g.stage}`);
         // Unfolded, the toggle stays where it was: the rows it showed follow it.
         const at = isUnfolded ? Math.min(FOLD_ROWS, g.tasks.length) : g.tasks.length;
         const row = (t: AgentTasksTask) => (
@@ -775,6 +944,7 @@ function Board({
                 text: `waits for ${t.blocked_by.map((b) => `#${b}`).join(', ')}`,
                 color: WARN,
               },
+              mine.includes(t.id) && { text: 'this session', color: ACCENT },
               t.assigned_to ?? 'unclaimed',
               t.subtasks && `${t.subtasks.done}/${t.subtasks.total} subtasks`,
               t.parent_id !== null && `part of #${t.parent_id}`,
@@ -792,7 +962,8 @@ function Board({
               <Button
                 key={foldKey(`stage:${g.stage}`, isUnfolded)}
                 plain
-                label={g.hidden > 0 ? `▸ ${g.hidden} more in ${g.stage}` : `▾ Fold ${g.stage}`}
+                dimColor
+                label={g.hidden > 0 ? `▸ ${g.hidden} more` : '▾ Show less'}
                 onPress={() => on.toggle(`stage:${g.stage}`)}
               />
             )}
@@ -810,14 +981,56 @@ function Done({
   auto,
   snap,
   width,
-}: ViewProps & { snap: AgentTasksSnapshot; width: number }) {
-  const { Box, Text } = el;
-  if (snap.recent.length === 0) return <Text dimColor>Nothing finished yet.</Text>;
+  filter,
+  pinned,
+}: ViewProps & {
+  snap: AgentTasksSnapshot;
+  width: number;
+  filter: string;
+  pinned: number[] | null;
+}) {
+  const { Box, Text, Button } = el;
+  if (snap.recent.length === 0)
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Box flexDirection="column">
+          <Text>Nothing finished yet.</Text>
+          <Text dimColor>Tasks land here once they are completed, failed or cancelled.</Text>
+        </Box>
+        <Box>
+          <Button
+            key="empty-board"
+            label="Board"
+            variant="primary"
+            {...af(auto, 'empty-board')}
+            onPress={() => on.go('board')}
+          />
+        </Box>
+      </Box>
+    );
+  // The board's find holds here too: a finished task is found where it now is.
+  const shown = pinOrder(
+    snap.recent.filter((t) => matches(t, filter)),
+    pinned,
+  );
   return (
     <Box flexDirection="column" gap={1}>
       <Heading el={el} title="Recently finished" aside="newest first" />
+      {filter !== '' && (
+        <Box flexDirection="column">
+          <Text>
+            {`${plural(shown.length, 'finished task')} ${shown.length === 1 ? 'matches' : 'match'} "${filter}"`}
+          </Text>
+          <Button
+            key="clear-filter"
+            label="Clear the filter"
+            {...af(auto, 'clear-filter')}
+            onPress={on.clearFilter}
+          />
+        </Box>
+      )}
       <Box flexDirection="column" gap={1}>
-        {snap.recent.map((t) => (
+        {shown.map((t) => (
           <Row
             key={`row:${t.id}`}
             el={el}
@@ -872,19 +1085,20 @@ function NewTask({
           title="New task"
           aside={`lands in ${snap.stages[0] ?? 'backlog'}, unclaimed`}
         />
-        <Text dimColor>Enter moves to the next field; in the last it creates the task.</Text>
+        <Text dimColor>Tab moves to the next field; Enter in any field creates the task.</Text>
       </Box>
       <Box flexDirection="column">
-        {FIELDS.map(([field, label, hints], i) => (
+        {FIELDS.map(([field, label, hints]) => (
           <Fact key={`field:${field}`} el={el} label={label}>
             <Input
               key={`new-${field}:${rev}`}
               {...af(auto, `new-${field}:${rev}`)}
-              placeholder={fitting(hints, width - LABEL - 1 - ' ⏎ next'.length)}
+              placeholder={fitting(hints, width - LABEL - 1 - ' ⏎ create'.length)}
               value={draft[field]}
-              submitLabel={i === FIELDS.length - 1 ? 'create' : 'next'}
+              submitLabel="create"
+              {...(field === 'description' ? { rows: 3 } : {})}
               onInput={(v) => on.edit(field, v)}
-              onSubmit={(v) => on.submitField(field, v, FIELDS[i + 1]?.[0] ?? null)}
+              onSubmit={(v) => on.submitField(field, v)}
             />
             {field === 'priority' && priorityOf(draft) === null && (
               <Text color={BAD}>a whole number, like 0 or 5</Text>
@@ -901,6 +1115,10 @@ function NewTask({
 }
 
 type DetailProps = ViewProps & {
+  /** The task is one this session holds. */
+  isMine: boolean;
+  /** The title of the task the way back goes to, when it is one. */
+  backTitle: string | null;
   d: AgentTasksDetail;
   route: AgentTasksRoute;
   expanded: string[];
@@ -913,7 +1131,7 @@ type DetailProps = ViewProps & {
 const DESC_LINES = 8;
 /** A description folds only when that hides at least this many lines. */
 const DESC_FOLD = 6;
-const COMMENTS_SHOWN = 5;
+export const COMMENTS_SHOWN = 5;
 
 /**
  * A list of related tasks, each a Button that opens it, marked as the board marks it; the
@@ -943,7 +1161,20 @@ function Refs({ el, on, auto, k, refs }: ViewProps & { k: string; refs: AgentTas
   );
 }
 
-function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }: DetailProps) {
+function Detail({
+  el,
+  on,
+  auto,
+  d,
+  route,
+  expanded,
+  confirm,
+  form,
+  rev,
+  width,
+  isMine,
+  backTitle,
+}: DetailProps) {
   const { Box, Text, Button, Input, Markdown } = el;
   const waiting = d.blockers.filter((b) => isOpen(b.status));
   const lk = look(d, waiting.length > 0);
@@ -952,14 +1183,18 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
   const step = nextStep(d);
   const isLive = isOpen(d.status);
   const isWorking = d.status === 'in_progress';
+  const openSubtasks = d.subtasks.filter((t) => isOpen(t.status)).length;
   const atEnd = step === completeKey(d.stage);
+  // Advance and Complete only when nothing it waits for, and no gate the pane cannot pass,
+  // would refuse them.
+  const reachable = waiting.length === 0 && !isOutOfReach(d.gate);
   const descLines = d.description.split('\n');
   const isDescFolding = descLines.length >= DESC_LINES + DESC_FOLD;
   const isDescOpen = expanded.includes('desc') || !isDescFolding;
   const isAllComments = expanded.includes('comments');
   const comments = isAllComments ? d.comments : d.comments.slice(-COMMENTS_SHOWN);
   const backLabel = route.trail.length
-    ? `#${route.trail.at(-1)}`
+    ? clip(backTitle ?? `#${route.trail.at(-1)}`, 40)
     : route.tab === 'done'
       ? 'Done'
       : 'Board';
@@ -989,6 +1224,7 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
           width={width}
           parts={[
             { text: `${lk.mark} ${lk.word}`, ...(lk.tone ? { color: lk.tone } : {}) },
+            isMine && { text: 'this session', color: ACCENT },
             d.assigned_to ?? false,
             d.priority ? `p${d.priority}` : false,
             d.project ?? false,
@@ -1008,20 +1244,30 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
 
       {confirm === `delete:${d.id}` ? (
         <Box flexDirection="column" borderStyle="round" borderColor={BAD} paddingX={1}>
-          <Text color={BAD}>Delete #{d.id} with its artifacts and comments? There is no undo.</Text>
+          <Text color={BAD} wrap="wrap">
+            {deleteQuestion(d)}
+          </Text>
           <Box columnGap={1}>
-            <Button key="confirm-yes" label="Delete" onPress={() => on.remove(d.id)} />
             <Button
               key="confirm-no"
-              label="Never mind"
+              label={d.subtree.open.length ? 'Back' : 'Keep it'}
               {...af(auto, 'confirm-no')}
               onPress={on.dismiss}
             />
+            {/* Open work below it is someone's: the server refuses, so nothing to press. */}
+            {d.subtree.open.length === 0 && (
+              <Button key="confirm-yes" label={`Delete #${d.id}`} onPress={() => on.remove(d.id)} />
+            )}
           </Box>
         </Box>
       ) : form?.task === d.id ? (
         <Box flexDirection="column">
           <ActionForm el={el} on={on} auto={auto} d={d} form={form} />
+          {form.action === 'complete' && openSubtasks > 0 && (
+            <Text color={WARN} wrap="wrap">
+              {`${plural(openSubtasks, 'subtask')} still open: completing #${d.id} does not close ${openSubtasks === 1 ? 'it' : 'them'}.`}
+            </Text>
+          )}
           {/* Complete passes the gate too: its form says what it holds for. */}
           {form.action === 'complete' && d.gate && (
             <Text color={WARN} wrap="wrap">
@@ -1032,7 +1278,7 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
       ) : (
         <Box flexDirection="column">
           <Box flexWrap="wrap" columnGap={1}>
-            {isWorking && waiting.length === 0 && !atEnd && idx >= 0 && idx < stages.length - 1 && (
+            {isWorking && reachable && !atEnd && idx >= 0 && idx < stages.length - 1 && (
               <Button
                 key={`advance:${stages[idx + 1]}`}
                 {...af(auto, `advance:${stages[idx + 1]}`)}
@@ -1043,7 +1289,7 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
                 onPress={() => on.advance(d.id, stages[idx + 1]!)}
               />
             )}
-            {isWorking && waiting.length === 0 && (
+            {isWorking && reachable && (
               <Button
                 key={completeKey(d.stage)}
                 {...af(auto, completeKey(d.stage))}
@@ -1067,6 +1313,7 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
               {isLive && (
                 <Button key="ask:cancel" label="Cancel" onPress={() => on.ask(d.id, 'cancel')} />
               )}
+              {!isLive && <Button key="reopen" label="Reopen" onPress={() => on.reopen(d.id)} />}
               <Button key="ask-delete" label="Delete" onPress={() => on.askDelete(d.id)} />
             </Box>
           </Box>
@@ -1105,7 +1352,7 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
             <Refs el={el} on={on} auto={auto} k="dep" refs={waiting} />
           </Fact>
         )}
-        {d.blocking.length > 0 && (
+        {isLive && d.blocking.length > 0 && (
           <Fact el={el} label="Blocks">
             <Refs el={el} on={on} auto={auto} k="blocks" refs={d.blocking} />
           </Fact>
@@ -1179,12 +1426,15 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
             return (
               <Box key={`artrow:${a.id}`} flexDirection="column">
                 <Box columnGap={1}>
+                  {/* The name clips at its end, never splits a word; the facts beside it give way first. */}
                   <Box flexShrink={1}>
                     <Button key={foldKey(part, isUnfolded)} plain onPress={() => on.toggle(part)}>
-                      {isUnfolded ? '▾' : '▸'} {a.name}
+                      <Text wrap="truncate">
+                        {isUnfolded ? '▾' : '▸'} {a.name}
+                      </Text>
                     </Button>
                   </Box>
-                  <Box flexShrink={1}>
+                  <Box flexShrink={10}>
                     <Text dimColor wrap="truncate">
                       {[
                         `by ${a.created_by}`,
@@ -1198,8 +1448,8 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
                   </Box>
                 </Box>
                 {isUnfolded && (
-                  <Box flexDirection="column" paddingLeft={2} width={width - 2}>
-                    <Markdown text={a.content} />
+                  <Box flexDirection="column" paddingLeft={2}>
+                    <Markdown text={fitTables(a.content, width - 2)} />
                     {a.cut > 0 && <Text dimColor>… {a.cut} more characters not shown</Text>}
                   </Box>
                 )}
@@ -1214,11 +1464,7 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
         {d.comments.length > COMMENTS_SHOWN && (
           <Button
             key={foldKey('comments', isAllComments)}
-            label={
-              isAllComments
-                ? '▾ Only the latest'
-                : `▸ ${d.comments.length - COMMENTS_SHOWN} earlier`
-            }
+            label={isAllComments ? '▾ Show less' : `▸ ${d.comments.length - COMMENTS_SHOWN} more`}
             plain
             dimColor
             onPress={() => on.toggle('comments')}
@@ -1241,6 +1487,8 @@ function Detail({ el, on, auto, d, route, expanded, confirm, form, rev, width }:
             label="Comment"
             placeholder="add one"
             submitLabel="send"
+            rows={3}
+            onInput={on.typing}
             onSubmit={(v) => on.comment(d.id, v)}
           />
         )}
@@ -1302,6 +1550,7 @@ function ActionForm({
         <Fact el={el} label="Back to">
           <Select
             key="form-stage"
+            {...af(auto, 'form-stage')}
             value={form.stage ?? earlier.at(-1)!}
             options={earlier.map((s) => ({ value: s, label: s }))}
             onSelect={on.pickStage}
@@ -1311,22 +1560,28 @@ function ActionForm({
       {Input && (
         <Fact el={el} label={f.label}>
           <Input
-            key={`form:${form.action}`}
-            {...af(auto, `form:${form.action}`)}
+            key={formKey(form)}
+            {...af(auto, formKey(form))}
             placeholder={f.hint}
             {...(form.seed ? { value: form.seed } : {})}
             submitLabel={f.submit}
+            rows={2}
             onInput={on.type}
             onSubmit={(v) => on.finish(d.id, form.action, v)}
           />
         </Fact>
+      )}
+      {form.action === 'regress' && (form.stage ?? earlier.at(-1)) === activeStages(d)[0] && (
+        <Text dimColor wrap="wrap">
+          {`Back in ${activeStages(d)[0]} it is unclaimed: any agent may claim it.`}
+        </Text>
       )}
       <Box columnGap={1}>
         <Button
           key="form-submit"
           label={f.button}
           variant="primary"
-          onPress={() => on.finish(d.id, form.action, form.words)}
+          onPress={() => on.finish(d.id, form.action)}
         />
         <Button key="form-dismiss" label="Never mind" onPress={on.dismiss} />
       </Box>

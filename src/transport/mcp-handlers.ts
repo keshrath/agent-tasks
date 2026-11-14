@@ -30,10 +30,14 @@ function withStageInstructions(
 
 export interface SessionState {
   current: { id: string; name: string } | null;
+  /** The claim holder claims made through this connection live with (HolderService). */
+  holder: string | null;
+  /** Who acts when no `task_config` session named it: the client and its project. */
+  fallback?: () => string;
 }
 
 export function sessionName(state: SessionState): string {
-  return state.current?.name ?? 'system';
+  return state.current?.name ?? state.fallback?.() ?? 'system';
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +167,13 @@ export function handleGet(ctx: AppContext, args: Record<string, unknown>): unkno
 
   if (include.includes('subtasks')) {
     result.subtasks = ctx.tasks.getSubtasks(taskId);
+    const below = ctx.tasks.descendants(taskId);
+    const isOpen = (t: { status: string }) => t.status === 'pending' || t.status === 'in_progress';
+    // What a delete would take along (finished, all levels) or is refused for (open).
+    result.subtree = {
+      open: below.filter(isOpen).map((t) => t.id),
+      finished: below.filter((t) => !isOpen(t)).length,
+    };
   }
 
   if (include.includes('artifacts')) {
@@ -303,29 +314,36 @@ export function handleStage(
 ): unknown {
   const action = validateEnum(
     optString(args, 'action'),
-    ['claim', 'assign', 'advance', 'regress', 'complete', 'fail', 'cancel'] as const,
+    ['claim', 'assign', 'advance', 'regress', 'complete', 'fail', 'cancel', 'reopen'] as const,
     'action',
   );
   const taskId = requireNumber(args, 'task_id');
 
   if (action === 'claim') {
     const claimer = optString(args, 'claimer') ?? sessionName(session);
-    const claimed = ctx.tasks.claim(taskId, claimer);
+    const claimed = ctx.tasks.claim(taskId, claimer, true, session.holder);
     return withStageInstructions(ctx, claimed);
   }
 
   if (action === 'assign') {
     const assignee = optString(args, 'claimer') ?? sessionName(session);
-    const assigned = ctx.tasks.claim(taskId, assignee, false);
+    const assigned = ctx.tasks.claim(taskId, assignee, false, session.holder);
     return withStageInstructions(ctx, assigned);
   }
 
   if (action === 'advance') {
     const advanceComment = optString(args, 'comment');
-    const advanced = ctx.tasks.advance(taskId, optString(args, 'stage'), advanceComment);
+    const advanced = ctx.tasks.advance(
+      taskId,
+      optString(args, 'stage'),
+      advanceComment,
+      optString(args, 'from'),
+    );
     if (advanceComment) {
       ctx.comments.add(taskId, sessionName(session), advanceComment);
     }
+    // The session that moves a task on is the one working on it: it holds it from now on.
+    if (session.holder) ctx.holders.adopt(session.holder, [taskId]);
     return withStageInstructions(ctx, advanced);
   }
 
@@ -344,6 +362,10 @@ export function handleStage(
 
   if (action === 'fail') {
     return ctx.tasks.fail(taskId, requireString(args, 'result'));
+  }
+
+  if (action === 'reopen') {
+    return ctx.tasks.reopen(taskId, sessionName(session), optString(args, 'reason'));
   }
 
   // action === 'cancel'
@@ -435,7 +457,9 @@ export function handleConfig(
     const id = requireString(args, 'id');
     const sName = requireString(args, 'name');
     session.current = { id, name: sName };
-    return { success: true, id, name: sName };
+    // Named again after a restart, the process takes back its agent's work nothing holds.
+    const reclaimed = session.holder ? ctx.holders.reclaim(session.holder, sName) : [];
+    return { success: true, id, name: sName, ...(reclaimed.length ? { reclaimed } : {}) };
   }
 
   if (action === 'cleanup') {
@@ -496,22 +520,15 @@ function handlePipelineConfig(ctx: AppContext, args: Record<string, unknown>): u
   };
 }
 
-function handleCleanup(ctx: AppContext, args: Record<string, unknown>): unknown | Promise<unknown> {
-  const cleanupMode = (optString(args, 'mode') ?? 'retention') as string;
-  const timeoutMinutes = optNumber(args, 'timeout_minutes');
-  if (cleanupMode === 'stale_agents') {
-    return ctx.cleanup.failStaleAgentTasks(timeoutMinutes).then((stale) => ({
-      stale_agents: stale,
-    }));
-  }
-  if (cleanupMode === 'all') {
-    const retention = ctx.cleanup.run();
-    return ctx.cleanup.failStaleAgentTasks(timeoutMinutes).then((stale) => ({
-      retention,
-      stale_agents: stale,
-    }));
-  }
-  return ctx.cleanup.run();
+function handleCleanup(ctx: AppContext, args: Record<string, unknown>): unknown {
+  const mode = validateEnum(
+    optString(args, 'mode') ?? 'retention',
+    ['retention', 'sessions', 'all'] as const,
+    'mode',
+  );
+  if (mode === 'retention') return ctx.cleanup.run();
+  const sessions = { failed: ctx.holders.sweep() };
+  return mode === 'sessions' ? { sessions } : { retention: ctx.cleanup.run(), sessions };
 }
 
 function handleGenerateRules(ctx: AppContext, args: Record<string, unknown>): unknown {

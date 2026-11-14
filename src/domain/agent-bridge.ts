@@ -100,34 +100,6 @@ export class AgentBridge {
     this.unsubs = [];
   }
 
-  fetchAgents(): Promise<unknown[]> {
-    return new Promise((resolve) => {
-      const url = new URL('/api/agents', AGENT_COMM_URL);
-      http
-        .get(url, { timeout: 3000 }, (res) => {
-          let body = '';
-          res.on('data', (c: string) => (body += c));
-          res.on('end', () => {
-            try {
-              resolve(JSON.parse(body));
-            } catch (err) {
-              process.stderr.write(
-                '[agent-tasks] fetchAgents JSON parse: ' +
-                  (err instanceof Error ? err.message : String(err)) +
-                  '\n',
-              );
-              resolve([]);
-            }
-          });
-        })
-        .on('error', () => resolve([]))
-        .on('timeout', function (this: http.ClientRequest) {
-          this.destroy();
-          resolve([]);
-        });
-    });
-  }
-
   private notify(content: string, agentName: string): void {
     this.postMessage({ to: agentName, content }).catch(() => {});
   }

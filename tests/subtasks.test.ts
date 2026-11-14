@@ -89,11 +89,30 @@ describe('subtasks', () => {
     expect(children[0].title).toBe('Child');
   });
 
-  it('cascades delete to subtasks', () => {
+  it('refuses to delete a parent with an open subtask anywhere below it, naming them', () => {
     const parent = ctx.tasks.create({ title: 'Parent' }, 'agent-1');
     const child = ctx.tasks.create({ title: 'Child', parent_id: parent.id }, 'agent-1');
+    const grandchild = ctx.tasks.create({ title: 'Grandchild', parent_id: child.id }, 'agent-2');
+    ctx.tasks.claim(grandchild.id, 'agent-2');
+    ctx.tasks.complete(grandchild.id, 'done');
+    const open = ctx.tasks.create({ title: 'Open', parent_id: child.id }, 'agent-2');
+    ctx.tasks.claim(open.id, 'agent-2');
+    expect(() => ctx.tasks.delete(parent.id)).toThrow(
+      `Task ${parent.id} has open subtasks (#${child.id}, #${open.id}): finish, cancel or delete them first.`,
+    );
+    expect(ctx.tasks.getById(open.id)).toMatchObject({ status: 'in_progress' });
+  });
+
+  it('deletes a parent with its finished subtasks, all levels down', () => {
+    const parent = ctx.tasks.create({ title: 'Parent' }, 'agent-1');
+    const child = ctx.tasks.create({ title: 'Child', parent_id: parent.id }, 'agent-1');
+    const grandchild = ctx.tasks.create({ title: 'Grandchild', parent_id: child.id }, 'agent-1');
+    ctx.tasks.cancel(grandchild.id, 'not needed');
+    ctx.tasks.cancel(child.id, 'not needed');
+    expect(ctx.tasks.descendants(parent.id).map((t) => t.id)).toEqual([child.id, grandchild.id]);
     ctx.tasks.delete(parent.id);
     expect(ctx.tasks.getById(child.id)).toBeNull();
+    expect(ctx.tasks.getById(grandchild.id)).toBeNull();
   });
 
   it('rejects parent_id to nonexistent task', () => {

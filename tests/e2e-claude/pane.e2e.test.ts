@@ -20,12 +20,12 @@ vi.setConfig({ testTimeout: 2 * MIN });
 const FULLSCREEN = { CLAUDE_CODE_NO_FLICKER: '1', CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT: '1' };
 
 /** The ring settles where the plugin lands it after a move. */
-async function landsOn(t: ClaudeTerm, label: string | RegExp) {
+async function landsOn(t: ClaudeTerm, label: string | RegExp, ms = 5_000) {
   const hit = () => {
     const f = t.focused();
     return f !== null && (typeof label === 'string' ? f.includes(label) : label.test(f));
   };
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + ms;
   while (Date.now() < deadline && !hit()) await sleep(100);
   if (!hit())
     throw new Error(`the ring is not on ${label}:
@@ -71,7 +71,7 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
     }, 2 * MIN);
     afterAll(async () => t?.kill(), MIN);
 
-    it('opens on the board by stage, the ring on the first task', async () => {
+    it('opens on the board by stage, the ring on the first task in progress', async () => {
       await t.pipeline();
       const s = await t.waitFor(/Backlog \d+/);
       expect(s).toMatch(/1: Board\s+2: Done\s+3: New\s+r: Refresh/);
@@ -88,7 +88,8 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       expect(s).toMatch(new RegExp(`○ #${w.ids.ship} Ship muk_import 19\\.0 to the customer`));
       // Finished tasks are under Done, not on the board.
       expect(s).not.toMatch(/Bump agent-common/);
-      await landsOn(t, `#${w.ids.ship} Ship muk_import`); // backlog first, highest priority
+      // The work in progress, not the unclaimed queue above it.
+      await landsOn(t, `#${w.ids.harness} Write the e2e harness`);
       t.shot('board');
     });
 
@@ -104,18 +105,20 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
     });
 
     it('digits switch Board, Done and New while the pane holds the keyboard', async () => {
-      // The tab shown takes its own digit: the ring back on its first row, the prompt empty.
+      // The tab shown takes its own digit: the ring back where the board starts, the prompt empty.
       await t.key('TAB', 3);
       await t.key('1');
-      await landsOn(t, `#${w.ids.ship} Ship muk_import`);
+      await landsOn(t, `#${w.ids.harness} Write the e2e harness`);
       expect(t.text()).toMatch(/^❯\s*$/m);
       await t.key('2');
       await t.waitFor(/Recently finished/);
       await t.key('3');
       await t.waitFor(/New task/);
-      await landsOn(t, 'Title'); // the New tab starts in its first field
+      await landsOn(t, 'New'); // a tab switch lands on the tab, not in a field
+      await t.key('3'); // pressed again: to type
+      await landsOn(t, 'Title');
       // Digits in a field are text: the header drops them; in New, Tab goes to the next field.
-      const typing = await t.waitFor(/Tab next field · Esc to the prompt/);
+      const typing = await t.waitFor(/Tab next field · Enter creates · Esc to the prompt/);
       expect(typing).not.toMatch(/1: Board/);
       expect(typing).toMatch(/Board\s+Done\s+New\s+Refresh/);
       await t.focus('Create'); // on a button they switch tabs again
@@ -175,7 +178,8 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       expect(s).toMatch(/Comments 2/);
       expect(s).toMatch(/Make sure it works docked at 60 columns\./);
       expect(s).not.toMatch(/version 2\.0\.0/); // the description folds past its first lines
-      await landsOn(t, 'Advance › test'); // the next step for a task in progress
+      await landsOn(t, '‹ Board'); // never on Advance by itself
+      expect(t.text()).toMatch(/Advance › test/); // the next step, there to press
       t.shot('detail');
 
       // A fold keeps the ring on its toggle, unfolded and folded again.
@@ -208,9 +212,11 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       await t.type('Docked at 60 columns looks right.');
       await t.enter();
       await t.waitFor(/Comments 6/);
-      await landsOn(t, 'Comment'); // ready for the next one, not on the fold that came above it
-      expect(t.text()).toMatch(/▸ 1 earlier/);
-      expect(t.text()).toMatch(/Docked at 60 columns looks right\./);
+      // The ring leaves the field (a /pipeline typed next goes to the prompt, not into a
+      // comment) for the comments' fold right above them: the new one stays in sight.
+      await landsOn(t, '▸ 1 more');
+      expect(t.text()).toMatch(/▸ 1 more/);
+      await t.waitFor(/Docked at 60 columns looks right\./); // scrolled into view once drawn
       const { comments } = await w.api<{ comments: { agent_id: string; content: string }[] }>(
         'GET',
         `/api/tasks/${w.ids.pane}?include=comments`,
@@ -222,16 +228,18 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       t.shot('comment');
     });
 
-    it('/pipeline <id> opens a task; Advance moves it on', async () => {
+    it('/pipeline <id> opens a task; Advance moves it on, once', async () => {
       await t.key('ESC'); // the keyboard back to the prompt
       await t.pipeline(`#${w.ids.changelog}`);
       await t.waitFor(/Write the CHANGELOG 2\.0\.0 entry/);
-      await landsOn(t, 'Advance › plan');
-      await t.enter();
+      await landsOn(t, '‹ Board');
+      await t.press('Advance › plan');
       await until(w, w.ids.changelog, (x) => x.stage === 'plan');
       const s = await t.waitFor(/moved to plan/);
       expect(s).toMatch(/backlog › spec › plan › implement/);
-      await landsOn(t, 'Advance › implement');
+      // The ring goes to the way out: a second Enter does not move it a stage further.
+      await landsOn(t, '‹ Board');
+      await t.waitFor(/Advance › implement/);
       t.shot('advanced');
     });
 
@@ -239,11 +247,10 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       await t.press('‹ Send back');
       const s = await t.waitFor(/Send #\d+ back to an earlier stage/);
       expect(s).toMatch(/Back to/);
-      await landsOn(t, 'Why');
-      t.shot('form-send-back');
-      // Picking the stage moves the ring on to the note. (The Select opens on focus.)
-      await t.key('SHIFTTAB');
+      // The form starts on its stage picker (open while it has the ring): the stage is picked
+      // first, then the ring moves on to the note.
       await t.waitFor(/▴/);
+      t.shot('form-send-back');
       await t.key('UP');
       await t.key('ENTER');
       await t.waitFor(/Back to\s+backlog/);
@@ -260,8 +267,8 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       await t.key('ESC');
       await t.pipeline(String(w.ids.serverJson));
       await t.waitFor(/Bump server\.json to 2\.0\.0/);
-      await landsOn(t, 'Complete'); // review is the last stage before done
-      await t.enter();
+      await landsOn(t, '‹ Board');
+      await t.press(/^(\[ )?Complete( \])?$/); // review is the last stage before done
       await t.waitFor(/Complete #\d+/);
       await landsOn(t, 'Result');
       t.shot('form-complete');
@@ -278,6 +285,7 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       await t.key('ESC');
       await t.pipeline(String(w.ids.wsTests));
       await t.waitFor(/Port the WebSocket tests/);
+      await landsOn(t, '‹ Board'); // the task's own landing first: a press then starts from it
       await t.press(/^\[ Fail \]$|^Fail$/);
       await t.waitFor(/Mark #\d+ failed/);
       await t.press('Never mind');
@@ -295,7 +303,7 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       const failed = await until(w, w.ids.wsTests, (x) => x.status === 'failed');
       expect(failed.result).toBe('The WebSocket is gone with the dashboard');
       // The form's field holds the same words: wait for the outcome, then the Error fact.
-      await t.waitFor(new RegExp(`✗ #${w.ids.wsTests} failed`));
+      await t.waitFor(new RegExp(`– #${w.ids.wsTests} marked failed`));
       await t.waitFor(/Error\s+The WebSocket is gone with the dashboard/);
       expect(t.text()).not.toMatch(/✓ #\d+ failed/);
     });
@@ -304,6 +312,7 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       await t.key('ESC');
       await t.pipeline(String(w.ids.restyle));
       await t.waitFor(/Restyle the kanban columns/);
+      await landsOn(t, '‹ Board');
       await t.press(/^\[ Cancel \]$|^Cancel$/);
       await t.waitFor(/Cancel #\d+/);
       await landsOn(t, 'Reason');
@@ -313,17 +322,19 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       const gone = await until(w, w.ids.restyle, (x) => x.status === 'cancelled');
       expect(gone.result).toMatch(/No dashboard any more/);
       await t.waitFor(/– cancelled/);
-      expect(t.text()).toMatch(new RegExp(`– #${w.ids.restyle} cancelled`));
+      // The outcome replaces the busy line once the reload is drawn, a moment after the facts.
+      await t.waitFor(new RegExp(`– #${w.ids.restyle} cancelled`));
     });
 
-    it('Delete asks first: Never mind keeps it, Delete deletes it', async () => {
+    it('Delete asks first: Keep it keeps it, Delete #N deletes it', async () => {
       await t.key('ESC');
       await t.pipeline(String(w.ids.darkMode));
       await t.waitFor(/Dark-mode toggle for the dashboard/);
+      await landsOn(t, '‹ Board');
       await t.press(/^\[ Delete \]$|^Delete$/);
       const s = await t.waitFor(/Delete #\d+ with its artifacts and comments\? There is no undo\./);
-      expect(s).toMatch(/Never mind/);
-      await landsOn(t, 'Never mind'); // the safe answer has the focus
+      expect(s).toMatch(/\[ Keep it \] \[ Delete #\d+ \]/); // the safe answer first
+      await landsOn(t, 'Keep it'); // and it has the focus
       t.shot('confirm-delete');
       await t.enter();
       await t.waitFor(/\[ Cancel \]/);
@@ -332,11 +343,13 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
 
       await t.press(/^\[ Delete \]$|^Delete$/);
       await t.waitFor(/There is no undo/);
-      await t.press(/^\[ Delete \]$|^Delete$/);
+      await t.press(/^\[ Delete #\d+ \]$|^Delete #\d+$/);
       await t.waitFor(new RegExp(`#${w.ids.darkMode} deleted`));
       await expect(w.task(w.ids.darkMode)).rejects.toThrow(/404/);
       const board = await t.waitFor(/Backlog \d+/);
-      expect(board).not.toMatch(/Dark-mode toggle/);
+      // Gone from the pane (right of its border); /pipeline 16 named it in the transcript.
+      const pane = board.split('\n').map((l) => l.split('│').slice(1).join('│'));
+      expect(pane.join('\n')).not.toMatch(/Dark-mode toggle/);
     });
 
     it('a blocked task cannot move on and points at what it waits for', async () => {
@@ -358,30 +371,31 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       expect([still.stage, still.status]).toEqual(['spec', 'in_progress']);
     });
 
-    it('New: Enter walks the fields and the last one creates the task', async () => {
+    it('New: Tab walks the fields at typing speed, nothing lost; Enter creates the task', async () => {
       await t.focus('‹ Board');
       await t.key('3');
       await t.waitFor(/New task/);
+      await t.key('3'); // the tab pressed again: to type
       await landsOn(t, 'Title');
-      await t.type('Record the /pipeline tutorial');
+      // Typed as a person types, field to field with no pause: every key lands where it is meant.
+      await t.type('Record the /pipeline tutorial', 0);
+      await t.key('TAB');
+      await t.type('docs', 0);
+      await t.key('TAB');
+      await t.type('high', 0);
       await t.enter();
-      await landsOn(t, 'Project');
-      await t.type('docs');
-      await t.enter();
-      await landsOn(t, 'Priority');
-      await t.type('high');
-      await t.enter();
-      // Said beneath its own field, the ring kept there.
+      // A priority that is no number: said beneath its own field, the ring kept there.
       await t.waitFor(/Priority\s+high.*\n.*a whole number, like 0 or 5/);
+      expect(t.text()).toMatch(/Title\s+Record the \/pipeline tutorial/);
+      expect(t.text()).toMatch(/Project\s+docs/);
       await landsOn(t, 'Priority');
       await t.key('BS', 4);
-      await t.type('4');
-      await t.enter();
-      await landsOn(t, 'Tags');
-      await t.type('docs, ui');
-      await t.enter();
+      await t.type('4', 0);
+      await t.key('TAB');
+      await t.type('docs, ui', 0);
+      await t.key('TAB');
       await landsOn(t, 'Description');
-      await t.type('From the real CLI, docked and wide');
+      await t.type('From the real CLI, docked and wide', 0);
       t.shot('new-task');
       await t.enter();
       const s = await t.waitFor(/created #\d+/);
@@ -429,8 +443,8 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
 
       await t.key('ESC');
       await t.pipeline('flaky');
-      await t.waitFor(/1 open task matches "flaky"/);
       const f = await t.waitFor(/Find: flaky/);
+      expect(f).not.toMatch(/open task matches "flaky"/); // the pane says it: no transcript line
       expect(f).toMatch(new RegExp(`#${w.ids.flaky} Investigate flaky knowledge sync`));
       expect(f).not.toMatch(/Ship muk_import/);
       await landsOn(t, `#${w.ids.flaky} Investigate`);
@@ -526,8 +540,9 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       t.shot('narrow-detail');
       // Labels sit in their column and hints stay on the field's line.
       await t.press('Send back');
-      const f = await t.waitFor(/Back to/);
-      expect(f).toMatch(/Why\s+optional note ⏎ send/);
+      await t.waitFor(/Back to/);
+      await t.focus('Why');
+      expect(t.text()).toMatch(/Why\s+optional note ⏎ send/);
       t.shot('narrow-form');
       await t.press('Never mind');
       await landsOn(t, '‹ Send back');
@@ -577,11 +592,17 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       expect(s).toContain(`http://127.0.0.1:${w.port}`);
       expect(s).not.toMatch(/Backlog \d+/);
       expect(s).toMatch(/r: Refresh/);
-      expect(s).not.toMatch(/2: Done|3: New/); // nothing to switch to while it is down
+      expect(s).toMatch(/2: Done\s+3: New/); // the tabs stay, so a digit stays in the pane
       await landsOn(t, 'Refresh');
       expect(statusEntry(t)).toBe('offline'); // no stale counts under the prompt
       await t.enter();
-      await t.waitFor(/still no board \(\d\d:\d\d:\d\d\)/); // a Refresh says it tried
+      // A Refresh says it tried, and when (wrapped in the 40-column pane).
+      const tried = await t.waitFor(/✗ still nothing answers at/);
+      const pane = tried
+        .split('\n')
+        .map((l) => l.split('│').slice(1).join('│').trim())
+        .join(' ');
+      expect(pane).toMatch(/still nothing answers at http:\/\/127\.0\.0\.1:\d+ \(\d\d:\d\d:\d\d\)/);
       t.shot('server-down');
 
       await w.startServer();
@@ -591,4 +612,362 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       await landsOn(t, /#\d+ /);
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+// Other sessions change what the pane shows while it holds the keyboard: the
+// ring stays on the control the person left it on, nothing lands in a field.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!E2E)('/pipeline while other sessions change the board', () => {
+  let w: World;
+  let t: ClaudeTerm;
+  beforeAll(async () => {
+    w = await startWorld();
+    t = new ClaudeTerm(w, 160, 50, FULLSCREEN);
+    await t.start();
+  }, 2 * MIN);
+  afterAll(async () => {
+    await t?.kill();
+    await w?.stop();
+  }, 2 * MIN);
+
+  it('a task claimed and one raised above the ring move no row under it; Enter opens the task it is on', async () => {
+    await t.pipeline();
+    await t.waitFor(/Backlog \d+/);
+    await t.focus(`#${w.ids.flaky} Investigate`);
+    // Another session claims the backlog's first task (it leaves for spec) and raises its last.
+    await w.api('POST', `/api/tasks/${w.ids.ship}/stage`, { action: 'claim', claimer: 'agent-x' });
+    await w.domain((c) =>
+      c.db.run(`UPDATE tasks SET priority = 99 WHERE id = ?`, [w.ids.darkMode]),
+    );
+    await t.waitFor(new RegExp(`Spec 3`), 15_000);
+    await sleep(6_000); // one more poll: still where it was
+    await landsOn(t, `#${w.ids.flaky} Investigate`);
+    await t.enter();
+    await t.waitFor(/‹ Board[\s\S]*Investigate flaky knowledge sync on Windows/);
+  });
+
+  it('an artifact attached elsewhere above the comment field leaves the ring in the field', async () => {
+    await t.key('ESC');
+    await t.pipeline(String(w.ids.pane));
+    await t.waitFor(/Replace the web dashboard/);
+    await t.focus('Comment');
+    await landsOn(t, 'Comment'); // the field holds the ring (its hint may scroll out of view)
+    await w.domain((c) =>
+      c.tasks.addArtifact(w.ids.pane, 'design', 'The layout, docked.', 'agent-pane'),
+    );
+    await t.waitFor(/▸ design/, 20_000);
+    await sleep(1_000);
+    await landsOn(t, 'Comment');
+    await t.type('k');
+    // Typed into the field (the ring's marks aside), not into the prompt.
+    for (let i = 0; i < 40 && !/Comment:\s+k/.test(t.text()); i++) await sleep(100);
+    expect(t.text()).toMatch(/Comment:\s+k/);
+    await t.key('BS');
+  });
+
+  it('r refreshes and leaves the ring where it was, so r and Enter never advance a task', async () => {
+    await t.key('TAB');
+    await t.focus(/^(\[ )?Fail( \])?$/);
+    await t.key('ESC');
+    await t.key('FOCUS');
+    await landsOn(t, /^(\[ )?Fail( \])?$/);
+    await t.key('r');
+    await sleep(1_500);
+    await landsOn(t, /^(\[ )?Fail( \])?$/);
+  });
+
+  it('a form whose task was finished elsewhere closes and says nothing was sent', async () => {
+    await t.press(/^(\[ )?Fail( \])?$/);
+    await landsOn(t, 'Error');
+    await t.type('half a reason');
+    await w.api('POST', `/api/tasks/${w.ids.pane}/stage`, {
+      action: 'complete',
+      result: 'finished in another session',
+      by: 'agent-pane',
+    });
+    await t.waitFor(/changed elsewhere \(now completed\): nothing was sent/, 25_000);
+    // The closed form's field goes with it (waited for, not read off the notice's frame).
+    for (let i = 0; i < 50 && /half a reason/.test(t.text()); i++) await sleep(100);
+    expect(t.text()).not.toMatch(/half a reason/);
+    expect((await w.task(w.ids.pane)).result).toBe('finished in another session');
+  });
+
+  /** A task in progress at implement, made for one test. */
+  const working = (title: string) =>
+    w.domain((c) => {
+      const { id } = c.tasks.create({ title, project: 'race' }, 'lead');
+      c.tasks.claim(id, 'agent-r');
+      c.tasks.advance(id);
+      c.tasks.advance(id);
+      return id;
+    });
+
+  it('a Complete form closed by a move elsewhere lands on Complete, never on Advance; the words come back', async () => {
+    const id = await working('Moved while the form was open');
+    await t.key('ESC');
+    await t.pipeline(String(id));
+    await t.waitFor(/Moved while the form was open/);
+    await landsOn(t, '‹ Board');
+    await t.press(/^(\[ )?Complete( \])?$/);
+    await landsOn(t, 'Result');
+    await t.type('half a result');
+    await w.api('POST', `/api/tasks/${id}/stage`, { action: 'advance', by: 'agent-r' });
+    await t.waitFor(
+      /changed elsewhere \(now test\): nothing was sent, what you typed is kept/,
+      25_000,
+    );
+    await landsOn(t, /^(\[ )?Complete( \])?$/, 10_000);
+    // The header is the keys' again, not a field's.
+    expect(t.text()).toMatch(/1: Board\s+2: Done/);
+    // Enter there, once the person sees it, opens the form with the words; nothing moved the task.
+    await t.settle(500, 3_000);
+    await t.enter();
+    await t.waitFor(/Result\s+half a result/);
+    expect((await w.task(id)).stage).toBe('test');
+    await t.press('Never mind');
+  });
+
+  it('Done right after a task finished elsewhere lands on its newest row, the tabs in sight', async () => {
+    for (const n of [1, 2, 3]) {
+      const id = await working(`Finished elsewhere ${n}`);
+      await t.key('ESC');
+      await t.pipeline();
+      await t.waitFor(new RegExp(`Finished elsewhere ${n}`));
+      await w.api('POST', `/api/tasks/${id}/stage`, {
+        action: 'complete',
+        result: 'done elsewhere',
+        by: 'agent-r',
+      });
+      // The poll took it off the board: it is in Done now.
+      for (let i = 0; i < 150 && new RegExp(`#${id} Finished elsewhere`).test(t.text()); i++)
+        await sleep(100);
+      await t.key('2');
+      await landsOn(t, new RegExp(`#${id} Finished elsewhere ${n}`));
+      expect(t.text()).toMatch(/1: Board\s+2: Done\s+3: New/);
+    }
+  });
+
+  it('Delete of a parent with work open below says so and offers only Back', async () => {
+    const [parent, child] = await w.domain((c) => {
+      const p = c.tasks.create({ title: 'Parent with open work', project: 'race' }, 'lead');
+      const k = c.tasks.create({ title: 'Open child', project: 'race', parent_id: p.id }, 'lead');
+      c.tasks.claim(k.id, 'agent-other');
+      return [p.id, k.id];
+    });
+    await t.key('ESC');
+    await t.pipeline(String(parent));
+    await t.waitFor(/Parent with open work/);
+    await t.press(/^\[ Delete \]$|^Delete$/);
+    const s = await t.waitFor(/has open subtasks/);
+    expect(s).not.toMatch(/Delete #\d+ \]/);
+    await landsOn(t, 'Back');
+    await t.enter();
+    await t.waitFor(/\[ Cancel \] \[ Delete \]/);
+    expect((await w.task(child)).status).toBe('in_progress');
+    expect((await w.task(parent)).title).toBe('Parent with open work');
+  });
+
+  it('Clear on New lands on Clear: a digit typed next switches tabs, it makes no task', async () => {
+    await t.key('ESC');
+    await t.pipeline();
+    await t.waitFor(/Backlog \d+/);
+    const before = (await w.api<{ open: unknown[] }>('GET', '/api/board')).open.length;
+    await t.key('3');
+    await t.key('3');
+    await landsOn(t, 'Title');
+    await t.type('scratch');
+    await t.focus('Clear');
+    await t.enter();
+    await landsOn(t, 'Clear');
+    await t.key('1');
+    await t.waitFor(/Backlog \d+/);
+    await t.pipeline('37');
+    await t.settle();
+    expect((await w.api<{ open: unknown[] }>('GET', '/api/board')).open.length).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Typing at speed: every key arrives, in order, in the field it was typed into, also
+// while other sessions change the task the field belongs to; nothing reaches the prompt.
+// ---------------------------------------------------------------------------
+
+/** Types `text` one key at a time, `ms` apart, as a fast typist does. */
+async function typeAt(t: ClaudeTerm, text: string, ms: number) {
+  for (const ch of text) await t.type(ch, ms);
+  await sleep(300);
+}
+
+/** What the screen shows left of the pane: the conversation and its prompt. */
+const outside = (t: ClaudeTerm) =>
+  t
+    .text()
+    .split('\n')
+    .map((l) => l.split('│')[0])
+    .join('\n');
+
+describe.skipIf(!E2E)('/pipeline fields typed into at speed', () => {
+  let w: World;
+  let t: ClaudeTerm;
+  beforeAll(async () => {
+    w = await startWorld();
+    t = new ClaudeTerm(w, 160, 50, FULLSCREEN);
+    await t.start();
+  }, 2 * MIN);
+  afterAll(async () => {
+    await t?.kill();
+    await w?.stop();
+  }, 2 * MIN);
+
+  const working = (title: string) =>
+    w.domain((c) => {
+      const { id } = c.tasks.create({ title, project: 'speed' }, 'lead');
+      c.tasks.claim(id, 'agent-s');
+      c.tasks.advance(id);
+      return id;
+    });
+
+  it('New: every field at 25 ms a key arrives whole', async () => {
+    await t.pipeline();
+    await t.waitFor(/Backlog \d+/);
+    await t.key('3');
+    await t.key('3');
+    await landsOn(t, 'Title');
+    await typeAt(t, 'Typed at twenty-five ms a key', 25);
+    await t.key('TAB');
+    await typeAt(t, 'speedy-project', 25);
+    await t.key('TAB');
+    await typeAt(t, '7', 25);
+    await t.key('TAB');
+    await typeAt(t, 'fast, keys', 25);
+    await t.key('TAB');
+    await typeAt(t, 'Every key in its place.', 25);
+    await t.enter();
+    const s = await t.waitFor(/created #(\d+)/);
+    const id = Number(/created #(\d+)/.exec(s)![1]);
+    expect(await w.task(id)).toMatchObject({
+      title: 'Typed at twenty-five ms a key',
+      project: 'speedy-project',
+      priority: 7,
+      description: 'Every key in its place.',
+    });
+    expect(JSON.parse(String((await w.task(id)).tags))).toEqual(['fast', 'keys']);
+  });
+
+  it('a comment and a Fail reason at 25 ms a key arrive whole', async () => {
+    const id = await working('Typed into at speed');
+    await t.key('ESC');
+    await t.pipeline(String(id));
+    await t.waitFor(/Typed into at speed/);
+    await t.focus('Comment');
+    await typeAt(t, 'A comment typed at twenty-five ms, every key kept.', 25);
+    await t.enter();
+    await t.waitFor(/comment added/);
+    const { comments } = await w.api<{ comments: { content: string }[] }>(
+      'GET',
+      `/api/tasks/${id}?include=comments`,
+    );
+    expect(comments.at(-1)?.content).toBe('A comment typed at twenty-five ms, every key kept.');
+    await t.press(/^\[ Fail \]$|^Fail$/);
+    await landsOn(t, 'Error');
+    await typeAt(t, 'Failed on purpose, typed fast.', 25);
+    await t.enter();
+    const failed = await until(w, id, (x) => x.status === 'failed');
+    expect(failed.result).toBe('Failed on purpose, typed fast.');
+  });
+
+  it('Find at 25 ms a key finds what was typed', async () => {
+    await t.key('ESC');
+    await t.pipeline();
+    await t.waitFor(/Backlog \d+/);
+    await t.focus('Find');
+    await typeAt(t, 'speedy-project', 25);
+    await t.enter();
+    await t.waitFor(/1 shown/);
+    expect(t.text()).toMatch(/Typed at twenty-five ms a key/);
+    await t.press('Clear the filter');
+  });
+
+  it('a comment typed at 40 ms while other sessions claim, advance and comment: every key in the field, none at the prompt', async () => {
+    const id = await working('Busy while typed into');
+    await t.key('ESC');
+    await t.pipeline(String(id));
+    await t.waitFor(/Busy while typed into/);
+    await t.focus('Comment');
+    const words =
+      'Typed at forty ms while the board moves around me, qzx, and not one key lost or moved.';
+    const others = (async () => {
+      await sleep(400);
+      await w.api('POST', `/api/tasks/${w.ids.ship}/stage`, {
+        action: 'claim',
+        claimer: 'agent-x',
+      });
+      await sleep(900);
+      await w.domain((c) => c.comments.add(id, 'agent-x', 'From another session'));
+      await sleep(900);
+      await w.api('POST', `/api/tasks/${id}/stage`, { action: 'advance', by: 'agent-x' });
+      await sleep(900);
+      await w.domain((c) => c.tasks.addArtifact(id, 'notes', 'Attached meanwhile', 'agent-x'));
+    })();
+    await typeAt(t, words, 40);
+    await others;
+    expect(outside(t)).not.toMatch(/qzx/);
+    await t.enter();
+    await t.waitFor(/comment added/);
+    const { comments } = await w.api<{ comments: { content: string; agent_id: string }[] }>(
+      'GET',
+      `/api/tasks/${id}?include=comments`,
+    );
+    expect(comments.map((c) => c.content)).toContain(words);
+    // What waited while the keys came in is drawn once they stopped.
+    await t.waitFor(/▸ notes/, 20_000);
+    expect(t.text()).toMatch(/From another session/);
+    expect(outside(t)).not.toMatch(/qzx/);
+  });
+});
+
+describe.skipIf(!E2E)('an artifact with a table in a narrow and a wide dock', () => {
+  const TABLE = [
+    '| Phase | Owner | Status | Notes |',
+    '| --- | --- | --- | --- |',
+    '| 1 ledger | alice | done | moved to the new schema of the ledger |',
+    '| 2 pane | bob | in review | the dock at sixty columns, then narrower |',
+  ].join('\n');
+  let w: World;
+  beforeAll(async () => {
+    w = await startWorld();
+    await w.domain((c) =>
+      c.tasks.addArtifact(w.ids.pane, 'phases-of-the-implementation-plan', TABLE, 'agent-pane'),
+    );
+  }, 2 * MIN);
+  afterAll(async () => w?.stop(), 2 * MIN);
+
+  for (const [columns, isTable] of [
+    [110, false],
+    [240, true],
+  ] as const)
+    it(`${columns} columns: ${isTable ? 'a table' : 'one row a line'}, the name on one line`, async () => {
+      const t = new ClaudeTerm(w, columns, 50, FULLSCREEN);
+      try {
+        await t.start();
+        await t.pipeline(String(w.ids.pane));
+        await t.waitFor(/Replace the web dashboard/);
+        await t.press(/phases-of-the/);
+        const s = await t.waitFor(/1 ledger/);
+        t.shot(`artifact-table-${columns}`);
+        const pane = s.split('\n').map((l) => l.split('│').slice(1).join('│'));
+        // The name never splits a word over two lines.
+        expect(pane.some((l) => /phases-of-the/.test(l))).toBe(true);
+        expect(pane.some((l) => /^\s*(implementation|plan)\b/.test(l))).toBe(false);
+        if (isTable) expect(pane.join('\n')).toMatch(/Phase\s+│?\s*Owner/);
+        else {
+          expect(pane.join('\n')).toMatch(/Phase · Owner · Status · Notes/);
+          expect(pane.join('\n')).toMatch(/2 pane · bob · in review/);
+        }
+      } finally {
+        await t.kill();
+      }
+    });
 });

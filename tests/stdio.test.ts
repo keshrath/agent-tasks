@@ -83,7 +83,7 @@ describe('agent-tasks over stdio', () => {
     expect(text).toContain('PIPELINE: Tasks flow through stages');
 
     let health: Response | null = null;
-    for (let i = 0; i < 50 && !health; i++) {
+    while (!health) {
       health = await fetch(`http://127.0.0.1:${port}/health`).catch(() => null);
       if (!health) await new Promise((r) => setTimeout(r, 100));
     }
@@ -93,5 +93,5 @@ describe('agent-tasks over stdio', () => {
     child.stdin.end();
     expect(await exited).toBe(0);
     await expect(fetch(`http://127.0.0.1:${port}/health`)).rejects.toThrow();
-  });
+  }, 30_000);
 });

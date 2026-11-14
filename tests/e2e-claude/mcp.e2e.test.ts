@@ -195,14 +195,14 @@ describe.skipIf(!E2E)('every MCP tool through claude -p', () => {
     const calls = await ask(
       STRICT +
         `1. task_update {"task_id":${parent.id},"title":"E2E parent v2","priority":6}\n` +
-        `2. task_update {"task_id":${child.id},"dependency":{"action":"add","depends_on":${parent.id},"relationship":"blocks"}}\n` +
-        `3. task_stage {"action":"claim","task_id":${child.id},"claimer":"e2e-agent"}\n` +
+        `2. task_stage {"action":"claim","task_id":${child.id},"claimer":"e2e-agent"}\n` +
+        `3. task_update {"task_id":${child.id},"dependency":{"action":"add","depends_on":${parent.id},"relationship":"blocks"}}\n` +
         `4. task_stage {"action":"advance","task_id":${child.id}}  (this one is expected to fail; report its error)`,
     );
     expect(calls.map((c) => c.name)).toEqual([
       'task_update',
-      'task_update',
       'task_stage',
+      'task_update',
       'task_stage',
     ]);
     expect(task('E2E parent v2')).toMatchObject({ id: parent.id, priority: 6 });
@@ -213,6 +213,9 @@ describe.skipIf(!E2E)('every MCP tool through claude -p', () => {
       ),
     ).toHaveLength(1);
     expect(task('E2E child')).toMatchObject({ status: 'in_progress', stage: 'spec' });
+    expect(
+      db.queryOne<{ holder: string }>(`SELECT holder FROM tasks WHERE id = ?`, [child.id])!.holder,
+    ).toMatch(/^mcp:/);
     expect(calls[3]!.isError).toBe(true);
     expect(calls[3]!.result).toContain('Blocked by incomplete dependencies');
   });

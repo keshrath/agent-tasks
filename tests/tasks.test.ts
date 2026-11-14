@@ -273,6 +273,27 @@ describe('regression', () => {
     const regressed = ctx.tasks.regress(task.id, 'implement', 'reviewer', 'Tests failed');
     expect(regressed.stage).toBe('implement');
     expect(regressed.status).toBe('in_progress');
+    expect(regressed.assigned_to).toBe('agent-1');
+  });
+
+  it('advance with `from` refuses a task that moved elsewhere meanwhile, and moves one that did not', () => {
+    const task = ctx.tasks.create({ title: 'Stale view' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    ctx.tasks.advance(task.id, 'plan');
+    ctx.tasks.regress(task.id, 'spec', 'reviewer');
+    expect(() => ctx.tasks.advance(task.id, 'implement', undefined, 'plan')).toThrow(
+      `Task ${task.id} moved to spec meanwhile, not plan.`,
+    );
+    expect(ctx.tasks.getById(task.id)!.stage).toBe('spec');
+    expect(ctx.tasks.advance(task.id, undefined, undefined, 'spec').stage).toBe('plan');
+  });
+
+  it('back in the queue stage, it waits for anyone: the claim goes', () => {
+    const task = ctx.tasks.create({ title: 'Requeue me' }, 'agent-1');
+    ctx.tasks.claim(task.id, 'agent-1');
+    ctx.holders.adopt('mcp:a', [task.id]);
+    const regressed = ctx.tasks.regress(task.id, 'backlog', 'reviewer');
+    expect(regressed).toMatchObject({ status: 'pending', assigned_to: null, holder: null });
   });
 
   it('stores rejection artifact', () => {
@@ -337,17 +358,16 @@ describe('dependencies', () => {
   it('blocks advancement when dependency is incomplete', () => {
     const dep = ctx.tasks.create({ title: 'Dependency' }, 'agent-1');
     const task = ctx.tasks.create({ title: 'Blocked' }, 'agent-1');
-    ctx.tasks.addDependency(task.id, dep.id);
-
     ctx.tasks.claim(task.id, 'agent-1');
+    ctx.tasks.addDependency(task.id, dep.id);
     expect(() => ctx.tasks.advance(task.id)).toThrow('Blocked by incomplete dependencies');
   });
 
   it('blocks completion while a dependency is open, allows it once it is done', () => {
     const dep = ctx.tasks.create({ title: 'Dependency' }, 'agent-1');
     const task = ctx.tasks.create({ title: 'Blocked' }, 'agent-1');
-    ctx.tasks.addDependency(task.id, dep.id);
     ctx.tasks.claim(task.id, 'agent-1');
+    ctx.tasks.addDependency(task.id, dep.id);
     expect(() => ctx.tasks.complete(task.id, 'done')).toThrow('Blocked by incomplete dependencies');
     expect(ctx.tasks.getById(task.id)!.status).toBe('in_progress');
 
@@ -432,9 +452,8 @@ describe('dependencies', () => {
   it('defaults to blocks relationship for backward compatibility', () => {
     const dep = ctx.tasks.create({ title: 'Dependency' }, 'agent-1');
     const task = ctx.tasks.create({ title: 'Blocked' }, 'agent-1');
-    ctx.tasks.addDependency(task.id, dep.id);
-
     ctx.tasks.claim(task.id, 'agent-1');
+    ctx.tasks.addDependency(task.id, dep.id);
     expect(() => ctx.tasks.advance(task.id)).toThrow('Blocked by incomplete dependencies');
 
     const deps = ctx.tasks.getDependenciesForTasks([task.id]);
@@ -595,6 +614,32 @@ describe('getClaimStatus', () => {
     ctx.tasks.claim(t.id, 'worker-1');
     const s = ctx.tasks.getClaimStatus(t.id);
     expect(s.status).toBe('in_progress');
+    expect(s.claimable).toBe(false);
+  });
+
+  // claim_status is what claim() does: a failed task (an auto-fail included) is said
+  // unclaimable and refused alike, and so is a blocked one.
+  it('says claimable exactly when claim() takes the task', () => {
+    const failed = ctx.tasks.create({ title: 'failed' }, 'agent-1');
+    ctx.tasks.claim(failed.id, 'worker-1');
+    ctx.tasks.fail(failed.id, 'session gone');
+    const blocker = ctx.tasks.create({ title: 'blocker' }, 'agent-1');
+    const blocked = ctx.tasks.create({ title: 'blocked' }, 'agent-1');
+    ctx.tasks.addDependency(blocked.id, blocker.id);
+    const free = ctx.tasks.create({ title: 'free' }, 'agent-1');
+
+    for (const t of [failed, blocked, free]) {
+      const { claimable } = ctx.tasks.getClaimStatus(t.id);
+      let isTaken = true;
+      try {
+        ctx.tasks.claim(t.id, 'worker-2');
+      } catch {
+        isTaken = false;
+      }
+      expect({ id: t.id, claimable }).toEqual({ id: t.id, claimable: isTaken });
+    }
+    expect(() => ctx.tasks.claim(blocked.id, 'worker-2')).toThrow(`is blocked by #${blocker.id}`);
+    expect(() => ctx.tasks.claim(failed.id, 'worker-2')).toThrow('not pending (status: failed)');
   });
 });
 
@@ -1087,5 +1132,101 @@ describe('error types', () => {
     const task = ctx.tasks.create({ title: 'T' }, 'agent-1');
     ctx.tasks.claim(task.id, 'agent-1');
     expect(() => ctx.tasks.claim(task.id, 'agent-2')).toThrow('not pending');
+  });
+});
+
+describe('reopen', () => {
+  let ctx: AppContext;
+  beforeEach(() => {
+    ctx = createTestContext();
+  });
+  afterEach(() => ctx.close());
+
+  it('opens a failed task again at the stage it failed in, unclaimed and claimable', () => {
+    const t = ctx.tasks.create({ title: 'auto-failed' }, 'lead');
+    ctx.holders.beat('mcp:gone');
+    ctx.tasks.claim(t.id, 'agent-1', true, 'mcp:gone');
+    ctx.tasks.advance(t.id);
+    ctx.tasks.fail(t.id, 'The session holding this task ended without completing it (agent-1).');
+    const r = ctx.tasks.reopen(t.id, 'lead', 'the session was only idle');
+    expect(r).toMatchObject({
+      status: 'pending',
+      stage: 'plan',
+      assigned_to: null,
+      holder: null,
+      result: null,
+    });
+    expect(ctx.tasks.getClaimStatus(t.id).claimable).toBe(true);
+    expect(ctx.tasks.claim(t.id, 'agent-2')).toMatchObject({
+      status: 'in_progress',
+      stage: 'plan',
+    });
+    const art = ctx.tasks.getArtifacts(t.id).find((a) => a.name === 'reopen');
+    expect(art).toMatchObject({ created_by: 'lead', stage: 'plan' });
+    expect(art!.content).toBe(
+      'Reopened (was failed: The session holding this task ended without completing it (agent-1).): the session was only idle',
+    );
+  });
+
+  it('opens a completed or cancelled task at the stage it was closed in', () => {
+    const done = ctx.tasks.create({ title: 'done' }, 'lead');
+    ctx.tasks.claim(done.id, 'a');
+    ctx.tasks.advance(done.id, 'implement');
+    ctx.tasks.complete(done.id, 'shipped');
+    expect(ctx.tasks.getById(done.id)).toMatchObject({ stage: 'done', closed_from: 'implement' });
+    expect(ctx.tasks.reopen(done.id, 'lead')).toMatchObject({
+      status: 'pending',
+      stage: 'implement',
+      closed_from: null,
+    });
+    const dropped = ctx.tasks.create({ title: 'dropped' }, 'lead');
+    ctx.tasks.claim(dropped.id, 'a');
+    ctx.tasks.cancel(dropped.id, 'not now');
+    expect(ctx.tasks.reopen(dropped.id, 'lead')).toMatchObject({
+      status: 'pending',
+      stage: 'spec',
+    });
+  });
+
+  it('opens one closed before 3.0 (no closed_from) before done if completed, at the start if cancelled', () => {
+    const done = ctx.tasks.create({ title: 'done' }, 'lead');
+    ctx.tasks.claim(done.id, 'a');
+    ctx.tasks.complete(done.id, 'shipped');
+    const dropped = ctx.tasks.create({ title: 'dropped' }, 'lead');
+    ctx.tasks.cancel(dropped.id, 'not now');
+    ctx.db.run(`UPDATE tasks SET closed_from = NULL`);
+    expect(ctx.tasks.reopen(done.id, 'lead')).toMatchObject({ stage: 'review' });
+    expect(ctx.tasks.reopen(dropped.id, 'lead')).toMatchObject({ stage: 'backlog' });
+  });
+
+  it('refuses a task that is still open, and says so', () => {
+    const t = ctx.tasks.create({ title: 'open' }, 'lead');
+    expect(() => ctx.tasks.reopen(t.id, 'lead')).toThrow('is still open (status: pending)');
+  });
+
+  it('emits task:reopened', () => {
+    const seen: string[] = [];
+    ctx.events.on('task:reopened', (e) => seen.push(String(e.data.from_status)));
+    const t = ctx.tasks.create({ title: 'x' }, 'lead');
+    ctx.tasks.cancel(t.id, 'no');
+    ctx.tasks.reopen(t.id, 'lead');
+    expect(seen).toEqual(['cancelled']);
+  });
+});
+
+describe('send back', () => {
+  let ctx: AppContext;
+  beforeEach(() => {
+    ctx = createTestContext();
+  });
+  afterEach(() => ctx.close());
+
+  it('records who sent it back, with or without a reason', () => {
+    const t = ctx.tasks.create({ title: 'x' }, 'lead');
+    ctx.tasks.claim(t.id, 'a');
+    ctx.tasks.advance(t.id);
+    ctx.tasks.regress(t.id, 'spec', 'reviewer');
+    const art = ctx.tasks.getArtifacts(t.id).find((a) => a.name === 'rejection');
+    expect(art).toMatchObject({ created_by: 'reviewer', content: 'Regressed from plan to spec' });
   });
 });

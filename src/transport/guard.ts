@@ -5,7 +5,7 @@
 //     (localhost:P, 127.0.0.1:P, [::1]:P), plus the bound host when the
 //     operator binds elsewhere (AGENT_TASKS_HOST). Defeats DNS rebinding.
 //   - Any Origin is rejected, loopback ones included: only browsers send it and
-//     no browser page is a caller (the /pipeline pane and the hook scripts are
+//     no browser page is a caller (the Claude Code plugin is
 //     not browsers). No CORS headers, so no page can read a response.
 //   - Requests with a body on POST/PUT/PATCH/DELETE must be application/json,
 //     so CORS-safelisted form posts never reach a handler.

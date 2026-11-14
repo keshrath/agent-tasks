@@ -269,6 +269,14 @@ describe('POST /api/tasks/:id/stage', () => {
   const stage = (id: number, body: Record<string, unknown>) =>
     api(`/api/tasks/${id}/stage`, jsonBody(body));
 
+  it('advance with the stage the pane drew refuses a task moved elsewhere: 409', async () => {
+    const t = ctx.tasks.create({ title: 'Moved under the pane' }, 'test');
+    ctx.tasks.claim(t.id, 'agent-a');
+    const res = await stage(t.id, { action: 'advance', stage: 'plan', from: 'plan', by: 'mathi' });
+    expect(res.status).toBe(409);
+    expect(ctx.tasks.getById(t.id)!.stage).toBe('spec');
+  });
+
   it('claims for the named claimer and lands in the next stage', async () => {
     const created = await (await api('/api/tasks', jsonBody({ title: 'Lifecycle task' }))).json();
     const res = await stage(created.id, { action: 'claim', by: 'mathi' });
@@ -351,6 +359,15 @@ describe('DELETE /api/tasks/:id', () => {
     const res = await api(`/api/tasks/${t.id}`, { method: 'DELETE' });
     expect(await res.json()).toEqual({ ok: true });
     expect((await api(`/api/tasks/${t.id}`, { method: 'DELETE' })).status).toBe(404);
+  });
+
+  it('refuses a parent with an open subtask: 409, naming it', async () => {
+    const parent = ctx.tasks.create({ title: 'Parent' }, 'test');
+    const child = ctx.tasks.create({ title: 'Child', parent_id: parent.id }, 'test');
+    const res = await api(`/api/tasks/${parent.id}`, { method: 'DELETE' });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain(`#${child.id}`);
+    expect(ctx.tasks.getById(child.id)).not.toBeNull();
   });
 });
 

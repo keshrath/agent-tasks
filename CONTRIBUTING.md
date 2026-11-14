@@ -86,11 +86,11 @@ tests/
   mcp.test.ts                The 8 MCP tools
   rest.test.ts               REST API endpoints and the request guard
   rest-leader.test.ts        REST leader election (retry, take over)
+  holders.test.ts            Claim holders: a claimed task lives with its session
   search.test.ts             Full-text search
   events.test.ts             Event bus
   validate.test.ts           Input validation
   manifest.test.ts           package.json, server.json and plugin manifest versions
-  hooks/hooks.test.ts        The command hook scripts
   e2e/                       Domain workflows end to end (vitest)
   e2e-claude/                The /pipeline pane in the real Claude Code CLI (npm run e2e:claude)
 ```
@@ -168,7 +168,7 @@ plugin/               Claude Code plugin: .mcp.json + the /pipeline mod (hooks/,
 2. **Storage** (`src/storage/`) — SQLite via better-sqlite3. WAL mode, FTS5, schema versioning with idempotent migrations.
 3. **Transport** (`src/transport/`) — two parallel transports:
    - **MCP** (stdio JSON-RPC) — for AI agents
-   - **REST** (node:http) — for the `/pipeline` pane, hook scripts and integrations
+   - **REST** (node:http) — for the `/pipeline` pane, the plugin's session hooks and integrations
 4. **Plugin** (`plugin/`) — the Claude Code mod. Host-specific glue lives here, never in `src/`.
 
 ### Data flow

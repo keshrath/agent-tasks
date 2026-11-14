@@ -283,7 +283,12 @@ describe('errors', () => {
     const blocker = ctx.tasks.create({ title: 'Blocker' }, 'test').id;
     const blocked = ctx.tasks.create({ title: 'Blocked' }, 'test').id;
     ctx.tasks.addDependency(blocked, blocker);
+    expect(await fails('task_stage', { action: 'claim', task_id: blocked })).toContain(
+      `is blocked by #${blocker}`,
+    );
+    ctx.tasks.removeDependency(blocked, blocker);
     ctx.tasks.claim(blocked, 'agent-a');
+    ctx.tasks.addDependency(blocked, blocker);
     expect(await fails('task_stage', { action: 'advance', task_id: blocked })).toContain(
       'Blocked by incomplete dependencies',
     );

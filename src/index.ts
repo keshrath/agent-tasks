@@ -7,8 +7,10 @@
 // official MCP SDK. Once a client has initialized, this process also serves
 // the REST API for the /pipeline pane, or keeps trying to take the port over.
 // The client closing stdin ends it, so the port passes to a live session.
+// The process holds the claims made through it (HolderService) while it runs.
 // =============================================================================
 
+import { randomUUID } from 'node:crypto';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { createContext } from './context.js';
 import { createMcpServer } from './transport/mcp.js';
@@ -17,9 +19,12 @@ import { serveRestWhenFree, type RestLeader } from './server.js';
 const REST_PORT = parseInt(process.env.AGENT_TASKS_PORT ?? '3422', 10);
 
 const appContext = createContext();
+const holder = `mcp:${randomUUID()}`;
+const release = appContext.holders.keep(holder);
 let rest: RestLeader | null = null;
 
 const server = createMcpServer(appContext, {
+  holder,
   footer: process.env.AGENT_TASKS_INSTRUCTIONS !== '0',
   onInitialized: () => {
     rest ??= serveRestWhenFree(appContext, REST_PORT);
@@ -31,6 +36,7 @@ await server.connect(new StdioServerTransport());
 process.on('SIGINT', () => process.exit(0));
 process.on('SIGTERM', () => process.exit(0));
 process.on('exit', () => {
+  release();
   rest?.close();
   appContext.close();
 });

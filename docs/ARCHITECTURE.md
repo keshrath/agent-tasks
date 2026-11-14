@@ -17,7 +17,8 @@ src/
 │   ├── comments.ts       # Threaded comments
 │   ├── collaborators.ts  # Collaborator roles (library only, no MCP tool or REST route)
 │   ├── approvals.ts      # Approvals (library only, no MCP tool or REST route)
-│   ├── cleanup.ts        # Retention purge, orphan reaper, stale-agent cleanup
+│   ├── cleanup.ts        # Retention purge, orphan reaper
+│   ├── holders.ts        # Claim holders: a claimed task lives with its session
 │   ├── agent-bridge.ts   # Agent-comm notification bridge (soft dep, HTTP, fail-open)
 │   ├── knowledge-bridge.ts # Agent-knowledge integration bridge (soft dep, HTTP, fail-open)
 │   ├── rules.ts          # IDE rule generation (.mdc, CLAUDE.md)
@@ -70,10 +71,10 @@ graph TD
 
 agent-tasks integrates with two sibling MCP servers via HTTP. Both are fail-open — agent-tasks works standalone.
 
-| Service             | Bridge class      | Env var               | Default                 | Purpose                                                |
-| ------------------- | ----------------- | --------------------- | ----------------------- | ------------------------------------------------------ |
-| **agent-comm**      | `AgentBridge`     | `AGENT_COMM_URL`      | `http://localhost:3421` | Notifications on claim/advance, agent list for cleanup |
-| **agent-knowledge** | `KnowledgeBridge` | `AGENT_KNOWLEDGE_URL` | `http://localhost:3423` | Push learning/decision artifacts on task completion    |
+| Service             | Bridge class      | Env var               | Default                 | Purpose                                             |
+| ------------------- | ----------------- | --------------------- | ----------------------- | --------------------------------------------------- |
+| **agent-comm**      | `AgentBridge`     | `AGENT_COMM_URL`      | `http://localhost:3421` | Notifications on claim/advance                      |
+| **agent-knowledge** | `KnowledgeBridge` | `AGENT_KNOWLEDGE_URL` | `http://localhost:3423` | Push learning/decision artifacts on task completion |
 
 ### AgentBridge (`agent-bridge.ts`)
 
@@ -88,33 +89,22 @@ Listens to task lifecycle events and forwards notifications to agents via agent-
 | `comment:created`    | Channel post to `general`: "Comment on task #N by {agent}"               |
 | `approval:requested` | Direct message to the reviewer: "Approval requested for task #N"         |
 
-**Cleanup integration:** Also exposes `fetchAgents()` which queries `GET /api/agents` on agent-comm. Used by `CleanupService` in two ways:
+**Orphan reaper** (`cancelOrphanedTasks`, `CleanupService`) — runs on every cleanup cycle. Cancels tasks stuck `in_progress` with no assignee for longer than `AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES` (default: 360 min / 6 hours).
 
-- **Heartbeat-based stale detection** (`failStaleAgentTasks`) — runs once, 10 s after startup, and on `task_config(action: "cleanup")` with `mode: "stale_agents"` or `"all"`. Queries all `in_progress` tasks with an `assigned_to`. For each unique agent name, checks agent-comm: if the agent is offline, unregistered, or hasn't heartbeated in 30 minutes (configurable via `timeoutMinutes`), all their in-progress tasks are auto-failed with a descriptive reason.
-- **Orphan reaper** (`cancelOrphanedTasks`) — runs on every cleanup cycle. Cancels tasks stuck `in_progress` with no assignee for longer than `AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES` (default: 360 min / 6 hours). Catches tasks that were never claimed by any agent.
+### HolderService (`holders.ts`)
 
-**Hooks (5 scripts in `scripts/hooks/`):**
-
-| Hook                    | Event             | What it does                                                                      |
-| ----------------------- | ----------------- | --------------------------------------------------------------------------------- |
-| `session-start.js`      | SessionStart      | Points the model at the MCP tools and the person at the `/pipeline` pane          |
-| `task-cleanup-start.js` | SessionStart      | Opens the DB, finds tasks assigned to agents not online in agent-comm, auto-fails |
-| `pipeline-enforcer.mjs` | UserPromptSubmit  | Checks agent-comm registration + pipeline task existence, injects reminder        |
-| `todowrite-bridge.mjs`  | PreToolUse        | Mirrors Claude Code `TodoWrite` todos into pipeline tasks                         |
-| `task-cleanup-stop.js`  | Stop/SubagentStop | Auto-fails open tasks whose `assigned_to` is no longer online in agent-comm       |
-
-All hooks fail open — errors are logged to stderr and return empty JSON. See `docs/hooks.md` for full details.
+A claimed task lives with the session that claimed it. Each MCP process is a holder (`mcp:<uuid>`) for the claims made through it and beats every 30 s while it runs (`keep()`); a host that knows its session (the Claude Code plugin, `claude:<session id>`) adopts its claims and ends its holder over REST (`POST`/`DELETE /api/holders/:holder`). Each beat also sweeps: the open tasks of a holder that ended or went silent longer than `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES` (default 10) ago fail. The first tick, and a tick that comes late (the machine slept), only beat. Tasks nothing holds are never failed. Activity plays no part: an idle session waiting on the person keeps its tasks. See `docs/hooks.md`.
 
 **Environment variables:**
 
-| Variable                               | Default                 | Description                                        |
-| -------------------------------------- | ----------------------- | -------------------------------------------------- |
-| `AGENT_COMM_URL`                       | `http://localhost:3421` | agent-comm REST base URL                           |
-| `AGENT_TASKS_COMM_TIMEOUT_MS`          | `5000`                  | Timeout for agent-comm HTTP requests               |
-| `AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES`   | `360`                   | Minutes before unassigned in-progress tasks cancel |
-| `AGENT_TASKS_COMPLETED_RETENTION_DAYS` | `7`                     | Days before completed tasks are purged             |
-| `AGENT_TASKS_CANCELLED_RETENTION_DAYS` | `1`                     | Days before cancelled tasks are purged             |
-| `AGENT_TASKS_FAILED_RETENTION_DAYS`    | `7`                     | Days before failed tasks are purged                |
+| Variable                                 | Default                 | Description                                        |
+| ---------------------------------------- | ----------------------- | -------------------------------------------------- |
+| `AGENT_COMM_URL`                         | `http://localhost:3421` | agent-comm REST base URL                           |
+| `AGENT_TASKS_DEAD_SESSION_GRACE_MINUTES` | `10`                    | Minutes a claim holder may be ended or silent      |
+| `AGENT_TASKS_ORPHAN_TIMEOUT_MINUTES`     | `360`                   | Minutes before unassigned in-progress tasks cancel |
+| `AGENT_TASKS_COMPLETED_RETENTION_DAYS`   | `7`                     | Days before completed tasks are purged             |
+| `AGENT_TASKS_CANCELLED_RETENTION_DAYS`   | `1`                     | Days before cancelled tasks are purged             |
+| `AGENT_TASKS_FAILED_RETENTION_DAYS`      | `7`                     | Days before failed tasks are purged                |
 
 ### KnowledgeBridge (`knowledge-bridge.ts`)
 
@@ -223,24 +213,24 @@ npm run check        # Full CI: typecheck + lint + format + test
 
 ## Test suites
 
-| Suite                                                                                                             | Tests | What it covers                                                                                                                                 |
-| ----------------------------------------------------------------------------------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/tasks.test.ts`                                                                                             | 103   | CRUD, stages, dependencies, artifacts, claiming, gates                                                                                         |
-| `tests/mcp.test.ts`                                                                                               | 134   | The 8 MCP tools, input validation, error formatting                                                                                            |
-| `tests/mcp-server.test.ts`                                                                                        | 11    | The SDK MCP server: handshake, tools/list, every tool, error codes, the footer                                                                 |
-| `tests/stdio.test.ts`                                                                                             | 1     | The real entry point over stdio: REST after initialized, exit when stdin closes                                                                |
-| `tests/rest.test.ts`                                                                                              | 33    | The 8 REST endpoints, error codes                                                                                                              |
-| `tests/guard.test.ts`                                                                                             | 8     | The request guard: Host, Origin, Content-Type, body size                                                                                       |
-| `tests/database.test.ts`                                                                                          | 8     | The SQLite wrapper and migrations, a 1.10.13 database opened unchanged                                                                         |
-| `tests/rest-leader.test.ts`                                                                                       | 2     | REST leader election: retry and take over                                                                                                      |
-| `tests/cleanup.test.ts`                                                                                           | 18    | Retention purge, orphan reaper, stale agents                                                                                                   |
-| `tests/hooks/hooks.test.ts`                                                                                       | 22    | The command hook scripts against scratch databases, fail-open                                                                                  |
-| `tests/comments.test.ts`, `subtasks`, `search`, `events`, `validate`, `rules`, `confidence`, `stage-instructions` | 70    | Their domain services                                                                                                                          |
-| `tests/approvals.test.ts`, `collaborators`                                                                        | 21    | The library-only approval and collaborator services                                                                                            |
-| `tests/knowledge-bridge.test.ts`                                                                                  | 5     | Pushing learnings/decisions to agent-knowledge                                                                                                 |
-| `tests/manifest.test.ts`                                                                                          | 3     | One version across package.json, server.json, the plugin                                                                                       |
-| `tests/e2e/`                                                                                                      | 13    | Full pipeline workflows, confidence flow                                                                                                       |
-| `bench/metrics.test.ts`                                                                                           | 20    | Benchmark metric helpers                                                                                                                       |
-| `tests/e2e-claude/` (5 files)                                                                                     | 86    | The `/pipeline` pane and every MCP tool in the real CLI (`npm run e2e:claude`, skipped otherwise; `COVERAGE.md` maps each control to its test) |
+| Suite                                                                                                             | Tests | What it covers                                                                                                                                                             |
+| ----------------------------------------------------------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/tasks.test.ts`                                                                                             | 104   | CRUD, stages, dependencies, artifacts, claiming, gates                                                                                                                     |
+| `tests/mcp.test.ts`                                                                                               | 135   | The 8 MCP tools, input validation, error formatting                                                                                                                        |
+| `tests/mcp-server.test.ts`                                                                                        | 11    | The SDK MCP server: handshake, tools/list, every tool, error codes, the footer                                                                                             |
+| `tests/stdio.test.ts`                                                                                             | 1     | The real entry point over stdio: REST after initialized, exit when stdin closes                                                                                            |
+| `tests/rest.test.ts`                                                                                              | 33    | The 8 REST endpoints, error codes                                                                                                                                          |
+| `tests/guard.test.ts`                                                                                             | 8     | The request guard: Host, Origin, Content-Type, body size                                                                                                                   |
+| `tests/database.test.ts`                                                                                          | 8     | The SQLite wrapper and migrations, a 1.10.13 database opened unchanged                                                                                                     |
+| `tests/rest-leader.test.ts`                                                                                       | 2     | REST leader election: retry and take over                                                                                                                                  |
+| `tests/cleanup.test.ts`                                                                                           | 16    | Retention purge, orphan reaper                                                                                                                                             |
+| `tests/holders.test.ts`                                                                                           | 17    | Claim holders: idle sessions keep, ended ones lose, the REST holder                                                                                                        |
+| `tests/comments.test.ts`, `subtasks`, `search`, `events`, `validate`, `rules`, `confidence`, `stage-instructions` | 70    | Their domain services                                                                                                                                                      |
+| `tests/approvals.test.ts`, `collaborators`                                                                        | 21    | The library-only approval and collaborator services                                                                                                                        |
+| `tests/knowledge-bridge.test.ts`                                                                                  | 5     | Pushing learnings/decisions to agent-knowledge                                                                                                                             |
+| `tests/manifest.test.ts`                                                                                          | 3     | One version across package.json, server.json, the plugin                                                                                                                   |
+| `tests/e2e/`                                                                                                      | 13    | Full pipeline workflows, confidence flow                                                                                                                                   |
+| `bench/metrics.test.ts`                                                                                           | 20    | Benchmark metric helpers                                                                                                                                                   |
+| `tests/e2e-claude/` (6 files)                                                                                     | 94    | The `/pipeline` pane, every MCP tool and the plugin's session hooks in the real CLI (`npm run e2e:claude`, skipped otherwise; `COVERAGE.md` maps each control to its test) |
 
-`npm test` runs 472 tests across 25 files (the 86 real-CLI tests are skipped there); the pane's own tests in `plugin/tests/` (29) run under `npm run plugin:check`.
+`npm test` runs 467 tests across 25 files (the 94 real-CLI tests are skipped there); the pane's own tests in `plugin/tests/` (39) run under `npm run plugin:check`.

@@ -253,6 +253,7 @@ export class TaskService {
     if (updates.assigned_to !== undefined) {
       sets.push('assigned_to = ?');
       params.push(updates.assigned_to || null);
+      if ((updates.assigned_to || null) !== task.assigned_to) sets.push('holder = NULL');
     }
 
     if (!sets.length) throw new ValidationError('No fields to update.');
@@ -390,20 +391,20 @@ export class TaskService {
   }
 
   /**
-   * Take ownership of a pending task. With `advance` (the default) a task
-   * sitting on the pipeline's first stage moves to the second, which is right
+   * Take ownership of a pending, unblocked task. With `advance` (the default) a
+   * task sitting on the pipeline's first stage moves to the second, which is right
    * when that first stage is a queue ("backlog") rather than work. Pass false
    * for pipelines whose first stage is itself a do-work stage, so the claim
-   * does not skip it.
+   * does not skip it. `holder` names the session the claim lives with
+   * (HolderService); null leaves it held by nothing.
    */
-  claim(taskId: number, claimerName: string, advance = true): Task {
+  claim(taskId: number, claimerName: string, advance = true, holder: string | null = null): Task {
     validateAssignee(claimerName);
 
     return this.db.transaction(() => {
       const task = this.requireTask(taskId);
-      if (task.status !== 'pending') {
-        throw new ConflictError(`Task ${taskId} is not pending (status: ${task.status}).`);
-      }
+      const refusal = this.claimRefusal(task);
+      if (refusal) throw new ConflictError(refusal);
 
       // Confidence gate: refuse to hand a vague task to an agent if a
       // threshold is configured for the project.
@@ -432,8 +433,8 @@ export class TaskService {
       const newStatus = synced === 'pending' ? 'in_progress' : synced;
 
       this.db.run(
-        `UPDATE tasks SET status = ?, stage = ?, assigned_to = ?, updated_at = datetime('now') WHERE id = ?`,
-        [newStatus, newStage, claimerName, taskId],
+        `UPDATE tasks SET status = ?, stage = ?, assigned_to = ?, holder = ?, updated_at = datetime('now') WHERE id = ?`,
+        [newStatus, newStage, claimerName, holder, taskId],
       );
       const claimed = this.getById(taskId)!;
       this.events.emit('task:claimed', { task: claimed, claimer: claimerName });
@@ -507,8 +508,8 @@ export class TaskService {
       const doneStage = stages.filter((s) => s !== 'cancelled').pop() ?? 'done';
 
       this.db.run(
-        `UPDATE tasks SET status = 'completed', stage = ?, result = ?, updated_at = datetime('now') WHERE id = ?`,
-        [doneStage, result, taskId],
+        `UPDATE tasks SET status = 'completed', stage = ?, closed_from = ?, result = ?, updated_at = datetime('now') WHERE id = ?`,
+        [doneStage, task.stage, result, taskId],
       );
 
       this.propagateLearnings(task);
@@ -548,7 +549,7 @@ export class TaskService {
       }
 
       this.db.run(
-        `UPDATE tasks SET status = 'cancelled', stage = 'cancelled', result = ?, updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET status = 'cancelled', stage = 'cancelled', closed_from = stage, result = ?, updated_at = datetime('now') WHERE id = ?`,
         [reason, taskId],
       );
       const cancelled = this.getById(taskId)!;
@@ -557,14 +558,67 @@ export class TaskService {
     });
   }
 
+  /**
+   * Opens a finished task again (failed, completed or cancelled), unclaimed, so an agent can
+   * claim it, at the stage it was closed in (a failed one keeps its stage; one closed before
+   * 3.0 goes to the stage before done if completed, to the start if cancelled). Who reopened
+   * it, and why, is kept as a `reopen` artifact.
+   */
+  reopen(taskId: number, by: string, reason?: string): Task {
+    if (reason) validateResult(reason);
+
+    return this.db.transaction(() => {
+      const task = this.requireTask(taskId);
+      if (task.status === 'pending' || task.status === 'in_progress') {
+        throw new ConflictError(`Task ${taskId} is still open (status: ${task.status}).`);
+      }
+      const stages = this.getPipelineStages(task.project ?? undefined).filter(
+        (s) => s !== 'cancelled',
+      );
+      const closedIn = task.status === 'failed' ? task.stage : task.closed_from;
+      const stage =
+        closedIn && stages.slice(0, -1).includes(closedIn)
+          ? closedIn
+          : task.status === 'completed'
+            ? (stages.at(-2) ?? stages[0]!)
+            : stages[0]!;
+
+      this.db.run(
+        `UPDATE tasks SET status = 'pending', stage = ?, assigned_to = NULL, holder = NULL, result = NULL,
+           closed_from = NULL, updated_at = datetime('now') WHERE id = ?`,
+        [stage, taskId],
+      );
+      this.db.run(
+        `INSERT INTO task_artifacts (task_id, stage, name, content, created_by) VALUES (?, ?, ?, ?, ?)`,
+        [
+          taskId,
+          stage,
+          'reopen',
+          `Reopened (was ${task.status}${task.result ? `: ${task.result}` : ''})${reason ? `: ${reason}` : ''}`,
+          by,
+        ],
+      );
+      const reopened = this.getById(taskId)!;
+      this.events.emit('task:reopened', { task: reopened, from_status: task.status });
+      return reopened;
+    });
+  }
+
   // ---- Pipeline Advancement ----
 
-  advance(taskId: number, toStage?: string, comment?: string): Task {
+  /**
+   * Moves a task on: to `toStage`, else exactly the next stage. `from`, the stage the caller
+   * saw it in, guards a move decided on a stale view: a task moved elsewhere meanwhile is
+   * refused, never moved on from where it is now.
+   */
+  advance(taskId: number, toStage?: string, comment?: string, from?: string): Task {
     return this.db.transaction(() => {
       const task = this.requireTask(taskId);
       if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
         throw new ConflictError(`Task ${taskId} is ${task.status} — cannot advance.`);
       }
+      if (from !== undefined && task.stage !== from)
+        throw new ConflictError(`Task ${taskId} moved to ${task.stage} meanwhile, not ${from}.`);
 
       const stages = this.getPipelineStages(task.project ?? undefined);
       const activeStages = stages.filter((s) => s !== 'cancelled');
@@ -605,8 +659,10 @@ export class TaskService {
       const autoAssignee = this.getAutoAssignee(newStage, task.project ?? undefined);
 
       this.db.run(
-        `UPDATE tasks SET stage = ?, status = ?, ${autoAssignee ? 'assigned_to = ?, ' : ''}updated_at = datetime('now') WHERE id = ?`,
-        autoAssignee ? [newStage, newStatus, autoAssignee, taskId] : [newStage, newStatus, taskId],
+        `UPDATE tasks SET stage = ?, status = ?, ${autoAssignee && autoAssignee !== task.assigned_to ? 'assigned_to = ?, holder = NULL, ' : ''}updated_at = datetime('now') WHERE id = ?`,
+        autoAssignee && autoAssignee !== task.assigned_to
+          ? [newStage, newStatus, autoAssignee, taskId]
+          : [newStage, newStatus, taskId],
       );
       const advanced = this.getById(taskId)!;
       this.events.emit('task:advanced', {
@@ -621,6 +677,10 @@ export class TaskService {
   regress(taskId: number, toStage: string, by: string, reason?: string): Task {
     return this.db.transaction(() => {
       const task = this.requireTask(taskId);
+      if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled')
+        throw new ConflictError(
+          `Task ${taskId} is ${task.status}: open it again with task_stage action "reopen".`,
+        );
 
       const stages = this.getPipelineStages(task.project ?? undefined);
       const currentIdx = stages.indexOf(task.stage);
@@ -635,25 +695,25 @@ export class TaskService {
       }
 
       const newStatus = syncStatusForStage(toStage, stages);
+      // Back in the queue it waits for anyone to claim it: the claim it had goes.
+      const requeued = newStatus === 'pending' ? ', assigned_to = NULL, holder = NULL' : '';
 
       this.db.run(
-        `UPDATE tasks SET stage = ?, status = ?, updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET stage = ?, status = ?${requeued}, updated_at = datetime('now') WHERE id = ?`,
         [toStage, newStatus, taskId],
       );
 
-      if (reason) {
-        validateResult(reason);
-        this.db.run(
-          `INSERT INTO task_artifacts (task_id, stage, name, content, created_by) VALUES (?, ?, ?, ?, ?)`,
-          [
-            taskId,
-            task.stage,
-            'rejection',
-            `Regressed from ${task.stage} to ${toStage}: ${reason}`,
-            by,
-          ],
-        );
-      }
+      if (reason) validateResult(reason);
+      this.db.run(
+        `INSERT INTO task_artifacts (task_id, stage, name, content, created_by) VALUES (?, ?, ?, ?, ?)`,
+        [
+          taskId,
+          task.stage,
+          'rejection',
+          `Regressed from ${task.stage} to ${toStage}${reason ? `: ${reason}` : ''}`,
+          by,
+        ],
+      );
 
       const regressed = this.getById(taskId)!;
       this.events.emit('task:regressed', {
@@ -980,17 +1040,10 @@ export class TaskService {
   }
 
   /**
-   * Returns whether a task can be claimed RIGHT NOW (its direct `blocks`
-   * dependencies are all done) and, if not, lists the specific incomplete
-   * blocker tasks. A pre-computed view of what `claim()` would either
-   * accept or reject — so callers can show "claimable" or "blocked by X, Y"
-   * in a UI without trying claim and catching the exception.
-   *
-   * `claimable` is true iff every direct blocker has status in
-   * (completed, cancelled, failed). Tasks that are already in_progress
-   * or completed themselves are still reported with their current status,
-   * so the caller can also use this to answer "could a fresh worker pick
-   * this up?" — answer is `claimable && status === 'pending'`.
+   * Whether `claim()` takes the task right now, and if not what holds it: its own
+   * status (only a pending task is claimed) or the direct `blocks` dependencies not
+   * yet closed (completed, cancelled or failed), listed so a caller can say
+   * "blocked by X, Y" without trying the claim.
    */
   getClaimStatus(taskId: number): {
     status: string;
@@ -998,14 +1051,10 @@ export class TaskService {
     blocked_by: Array<{ id: number; title: string; status: string; stage: string }>;
   } {
     const task = this.requireTask(taskId);
-    const blockers = this.db.queryAll<Task>(
-      `SELECT t.* FROM tasks t JOIN task_dependencies d ON t.id = d.depends_on
-       WHERE d.task_id = ? AND d.relationship = 'blocks' AND t.status NOT IN ('completed', 'cancelled', 'failed')`,
-      [taskId],
-    );
+    const blockers = this.openBlockers(taskId);
     return {
       status: task.status,
-      claimable: blockers.length === 0,
+      claimable: task.status === 'pending' && blockers.length === 0,
       blocked_by: blockers.map((b) => ({
         id: b.id,
         title: b.title,
@@ -1013,6 +1062,24 @@ export class TaskService {
         stage: b.stage,
       })),
     };
+  }
+
+  private openBlockers(taskId: number): Task[] {
+    return this.db.queryAll<Task>(
+      `SELECT t.* FROM tasks t JOIN task_dependencies d ON t.id = d.depends_on
+       WHERE d.task_id = ? AND d.relationship = 'blocks' AND t.status NOT IN ('completed', 'cancelled', 'failed')`,
+      [taskId],
+    );
+  }
+
+  /** Why `claim()` refuses the task, or null when it takes it. */
+  private claimRefusal(task: Task): string | null {
+    if (task.status !== 'pending')
+      return `Task ${task.id} is not pending (status: ${task.status}).`;
+    const blockers = this.openBlockers(task.id);
+    if (blockers.length)
+      return `Task ${task.id} is blocked by ${blockers.map((b) => `#${b.id}`).join(', ')}: claim it once they are done.`;
+    return null;
   }
 
   // ---- Artifacts ----
@@ -1152,10 +1219,39 @@ export class TaskService {
 
   // ---- Delete ----
 
+  /**
+   * Deletes a task with its artifacts, comments and finished subtasks (all levels down). A task
+   * with an open subtask anywhere below it is refused: that work is someone's, and deleting the
+   * parent would delete it too.
+   */
   delete(taskId: number): void {
     const task = this.requireTask(taskId);
+    const open = this.openDescendants(taskId);
+    if (open.length)
+      throw new ConflictError(
+        `Task ${taskId} has open subtasks (${open.map((t) => `#${t.id}`).join(', ')}): finish, cancel or delete them first.`,
+      );
     this.db.run('DELETE FROM tasks WHERE id = ?', [taskId]);
     this.events.emit('task:deleted', { task });
+  }
+
+  /** Every task below `taskId` (subtasks, theirs, …), nearest first. */
+  descendants(taskId: number): Task[] {
+    return this.db.queryAll<Task>(
+      `WITH RECURSIVE below(id, depth) AS (
+         SELECT id, 1 FROM tasks WHERE parent_id = ?
+         UNION ALL
+         SELECT t.id, b.depth + 1 FROM tasks t JOIN below b ON t.parent_id = b.id
+       )
+       SELECT t.* FROM tasks t JOIN below b ON t.id = b.id ORDER BY b.depth, t.id`,
+      [taskId],
+    );
+  }
+
+  private openDescendants(taskId: number): Task[] {
+    return this.descendants(taskId).filter(
+      (t) => t.status === 'pending' || t.status === 'in_progress',
+    );
   }
 
   // ---- Internal ----
@@ -1263,11 +1359,7 @@ export class TaskService {
   }
 
   private checkDependencies(taskId: number): void {
-    const blockers = this.db.queryAll<Task>(
-      `SELECT t.* FROM tasks t JOIN task_dependencies d ON t.id = d.depends_on
-       WHERE d.task_id = ? AND d.relationship = 'blocks' AND t.status NOT IN ('completed', 'cancelled', 'failed')`,
-      [taskId],
-    );
+    const blockers = this.openBlockers(taskId);
     if (blockers.length > 0) {
       const names = blockers.map((b) => `#${b.id} "${b.title}" (${b.stage})`).join(', ');
       throw new ConflictError(`Blocked by incomplete dependencies: ${names}`);
