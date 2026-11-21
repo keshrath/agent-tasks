@@ -74,17 +74,18 @@ Every control, key, command form, view state, notice, toast and output a person 
 
 ## Keys and focus
 
-| What                                                                              | Covered by                                                                                        |
-| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `1` `2` `3` switch tabs; the shown tab's digit lands its first row                | pane > digits switch Board, Done and New while the pane holds the keyboard                        |
-| Typing header in a field (digits dropped, "Tab leaves…"; "Tab next field" in New) | pane > digits switch… (New); board > Tab and shift+Tab walk the rows; above the first row is Find |
-| Tab / shift+Tab order on the board                                                | board > Tab and shift+Tab walk the rows…                                                          |
-| Esc: keys to the prompt, "ctrl+x tab…" hint, digits typed there                   | board > Esc gives the keyboard to the prompt; ctrl+x tab takes it back                            |
-| ctrl+x tab: keys back, ring where the person left it                              | board > Esc gives the keyboard…                                                                   |
-| `r` refreshes (up)                                                                | board > r refreshes: a task another session made shows at once                                    |
-| `r` refreshes (down), "still no board (time)"                                     | pane > says so instead of showing a stale board…                                                  |
-| Back from a board task lands on its row                                           | board > back from a task opened on the board lands on its row                                     |
-| Enter opens a row (inline)                                                        | board > the board takes the keyboard: rows open with Enter                                        |
+| What                                                                                | Covered by                                                                                        |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `1` `2` `3` switch tabs; the shown tab's digit lands its first row                  | pane > digits switch Board, Done and New while the pane holds the keyboard                        |
+| Typing header in a field (digits dropped, "Tab leaves…"; "Tab next field" in New)   | pane > digits switch… (New); board > Tab and shift+Tab walk the rows; above the first row is Find |
+| Tab / shift+Tab order on the board                                                  | board > Tab and shift+Tab walk the rows…                                                          |
+| Esc: keys to the prompt, "ctrl+x tab…" hint, digits typed there                     | board > Esc gives the keyboard to the prompt; ctrl+x tab takes it back                            |
+| ctrl+x tab: keys back, ring where the person left it                                | board > Esc gives the keyboard…                                                                   |
+| `r` refreshes (up)                                                                  | board > r refreshes: a task another session made shows at once                                    |
+| `r` refreshes (down), "still no board (time)"                                       | pane > says so instead of showing a stale board…                                                  |
+| Back from a board task lands on its row                                             | board > back from a task opened on the board lands on its row                                     |
+| Enter opens a row (inline)                                                          | board > the board takes the keyboard: rows open with Enter                                        |
+| Stage columns at 150+ columns; Enter opens a card, back returns to it (inline, 200) | board > draws a column per stage; a card opens with Enter…                                        |
 
 ## Mouse (fullscreen)
 

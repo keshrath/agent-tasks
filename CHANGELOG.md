@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.0] - 2026-11-21
+
+The `/pipeline` pane gets the old web dashboard's layout back where the surface can draw it: the Claude desktop app shows a kanban board.
+
+### Added
+
+- **Desktop board** (`plugin/hooks/desktop.tsx`): in the Claude desktop app the pane is a kanban board, with one column per pipeline stage (empty stages included) and a card per task showing its title, status mark, id, priority, assignee, age, project, subtasks, tags and the tasks it waits for. A header holds the Board and Done tabs, Refresh and `New task` as the main action. A filter bar below it holds Find and, as the web dashboard had, project and assignee pickers. Stat tiles show the open, in-progress, blocked and recently failed counts. Two charts show the open tasks per stage (in progress and waiting) and the tasks finished on each of the last 7 days (completed and failed). A card opens its task in a detail panel beside the board, with the same actions, description, artifacts, subtasks, dependencies and comments as the terminal. `Close` shuts the panel, and the board stays usable while it is open.
+- **Wide terminal board**: a terminal pane 150 columns wide or more (the pane above the prompt in a wide terminal) shows the Board tab as the same stage columns of cards. Narrower panes keep the list.
+- **Widget**: minimized to a widget in the desktop app, the pane shows a summary: the share of open tasks in progress as a bar, the counts per stage and the tasks this session holds.
+
+### Changed
+
+- The terminal pane is unchanged in what it does. Its flows (open, find, detail, every stage action, create, comment, Done, reopen, server down, empty states) are now tested on both the terminal and the desktop surface.
+
 ## [3.0.0] - 2026-11-13
 
 The plugin is the whole Claude Code integration: no command hooks, nothing in `settings.json`. A claimed task now lives as long as the session that claimed it, so an idle session no longer loses its work.

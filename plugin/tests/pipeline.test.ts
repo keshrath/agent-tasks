@@ -16,6 +16,7 @@ import {
   when,
 } from '../hooks/view';
 import { isWorkPrompt } from '../hooks/work';
+import { stageChart, throughputChart } from '../hooks/desktop';
 
 type Row = {
   id: number;
@@ -269,7 +270,7 @@ const RUN = {
   origin: { kind: 'composer' },
   presentation: { isFullscreen: true, columns: 134 },
 } as const;
-const pane = (placement: 'dock' | 'inline', bodyColumns = 58) =>
+const pane = (placement: 'dock' | 'inline' | 'widget', bodyColumns = 58) =>
   ({
     title: 'agent-tasks',
     isFocused: true,
@@ -279,6 +280,8 @@ const pane = (placement: 'dock' | 'inline', bodyColumns = 58) =>
     view: {},
   }) as never;
 const SURFACES = ['terminal', 'desktop', 'vscode', 'mobile'] as const;
+/** Every flow runs on both: the terminal's list and the desktop's board beside its detail. */
+const BOTH = ['terminal', 'desktop'] as const;
 
 const BOARD = (): Row[] => [
   task(1, 'Write the spec', {
@@ -356,7 +359,9 @@ test('/pipeline opens a plain sidebar pane with the board on every surface', asy
     await expect(ui.drawn()).resolves.toMatchObject({ type: 'Box' });
     expect(await ui.find({ key: 'open:1' })).toBeDefined();
     expect(await ui.find({ key: 'open:4' })).toBeUndefined(); // finished: under Done
-    expect(await ui.find({ type: 'Text', text: /^Spec$/ })).toBeDefined();
+    expect(
+      await ui.find({ type: 'Text', text: surface === 'desktop' ? 'SPEC' : /^Spec$/ }),
+    ).toBeDefined();
     await ui.unmount();
   }
   // A task opened by its number: the pane shows it, the transcript (and the model) get nothing.
@@ -376,124 +381,141 @@ test('/pipeline says why when the pane is not placed', async ($, on) => {
   expect(out.text).toBe('3 open tasks · 2 in progress\npane not shown: below 110 columns');
 });
 
-test('Find narrows the board by id, title, agent, project or tag; a blocked task says what it waits for', async ($, on) => {
-  server(on, { tasks: BOARD(), deps: [{ task_id: 2, depends_on: 1, relationship: 'blocks' }] });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  const out = await $.command.run({ command: 'pipeline', args: 'docs', ...RUN });
-  expect(out.text).toBeUndefined(); // the pane says "1 shown"
-  const ui = await mount($);
-  // The ring starts on the first row shown when the pane takes the keys.
-  expect(await ui.find({ key: 'open:3' })).toMatchObject({ props: { autoFocus: true } });
-  expect(await ui.find({ key: 'open:1' })).toBeUndefined();
-  expect(await ui.find({ type: 'Text', text: /1 shown/ })).toBeDefined();
-  expect(await ui.find({ type: 'Select' })).toBeUndefined(); // no project select: Find has it
-  expect(await ui.find({ key: 'find:1' })).toMatchObject({
-    props: { value: 'docs', placeholder: 'id, title, agent, project or tag' },
-  });
-  await ui.input({ key: 'find:1', text: '' });
-  expect(await ui.find({ key: 'clear-filter' })).toBeUndefined(); // nothing to clear
-  expect(await ui.find({ type: 'Text', text: /waits for #1/ })).toBeDefined();
-  // A find lands on the first row it shows (once that board is drawn: e2e checks the ring).
-  await ui.input({ key: 'find:2', text: 'agent-b' });
-  expect(await ui.find({ key: 'open:2' })).toMatchObject({ props: { autoFocus: true } });
-  expect(await ui.find({ key: 'open:3' })).toBeUndefined();
-  expect(await ui.find({ key: 'clear-filter' })).toBeDefined();
-  // Found by a tag: the row says which, tags being nowhere else on it.
-  await ui.input({ key: 'find:3', text: 'release' });
-  expect(await ui.find({ key: 'open:3' })).toBeDefined();
-  expect(await ui.find({ type: 'Text', text: /tag release/ })).toBeDefined();
-  await ui.input({ key: 'find:4', text: 'nothing like this' });
-  expect(await ui.find({ type: 'Text', text: /No open task matches/ })).toBeDefined();
-  expect(await ui.find({ key: 'clear-filter' })).toMatchObject({ props: { autoFocus: true } });
-  await ui.press({ key: 'clear-filter' });
-  expect(await ui.find({ key: 'open:2' })).toBeDefined();
-  // The whole board back: the ring on the first task in progress, not on the queue.
-  expect(await ui.find({ key: 'open:1' })).toMatchObject({ props: { autoFocus: true } });
-  // A find that matches nothing is said in the transcript too.
-  expect((await $.command.run({ command: 'pipeline', args: 'zzz', ...RUN })).text).toBe(
-    'no open task matches "zzz"',
-  );
-});
-
-test('/pipeline and /pipeline <id> drop the text the last /pipeline <text> found', async ($, on) => {
-  server(on, { tasks: BOARD() });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: 'docs', ...RUN });
-  await $.command.run({ command: 'pipeline', args: '1', ...RUN });
-  const ui = await mount($);
-  await ui.press({ key: 'back' });
-  expect(await ui.find({ key: 'open:2' })).toBeDefined();
-  expect(await ui.find({ key: 'clear-filter' })).toBeUndefined();
-  await $.command.run({ command: 'pipeline', args: 'docs', ...RUN });
-  await $.command.run({ command: 'pipeline', args: '', ...RUN });
-  expect(await ui.find({ key: 'open:2' })).toBeDefined();
-});
-
-test('advance and complete as the person, the next step offered first', async ($, on) => {
-  const s = server(on, { tasks: BOARD() });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '#2', ...RUN });
-  for (const surface of ['terminal', 'desktop'] as const) {
+for (const surface of BOTH)
+  test(`Find narrows the board by id, title, agent, project or tag; a blocked task says what it waits for (${surface})`, async ($, on) => {
+    server(on, { tasks: BOARD(), deps: [{ task_id: 2, depends_on: 1, relationship: 'blocks' }] });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    const out = await $.command.run({ command: 'pipeline', args: 'docs', ...RUN });
+    expect(out.text).toBeUndefined(); // the pane says "1 shown"
     const ui = await mount($, surface);
-    expect(await ui.find({ type: 'Text', text: /Ship the pane/ })).toBeDefined();
-    await ui.unmount();
-  }
-  const ui = await mount($);
-  await ui.press({ key: 'advance:test' });
-  // The stage the button names: a second press of a stale Advance is refused, never a skip.
-  expect(s.calls.at(-1)).toEqual({
-    method: 'POST',
-    path: '/api/tasks/2/stage',
-    body: { action: 'advance', stage: 'test', from: 'implement', by: 'mathi' },
+    // The ring starts on the first row shown when the pane takes the keys.
+    expect(await ui.find({ key: 'open:3' })).toMatchObject({ props: { autoFocus: true } });
+    expect(await ui.find({ key: 'open:1' })).toBeUndefined();
+    expect(
+      await ui.find({
+        type: 'Text',
+        text: surface === 'terminal' ? /1 shown/ : /1 open task matches "docs"/,
+      }),
+    ).toBeDefined();
+    // The terminal has no project picker (Find has it); the desktop board has the dashboard's.
+    if (surface === 'terminal') expect(await ui.find({ type: 'Select' })).toBeUndefined();
+    expect(await ui.find({ key: 'find:1' })).toMatchObject({
+      props: {
+        value: 'docs',
+        placeholder: `${surface === 'terminal' ? '' : 'Find: '}id, title, agent, project or tag`,
+      },
+    });
+    await ui.input({ key: 'find:1', text: '' });
+    expect(await ui.find({ key: 'clear-filter' })).toBeUndefined(); // nothing to clear
+    expect(await ui.find({ type: 'Text', text: /waits for #1/ })).toBeDefined();
+    // A find lands on the first row it shows (once that board is drawn: e2e checks the ring).
+    await ui.input({ key: 'find:2', text: 'agent-b' });
+    expect(await ui.find({ key: 'open:2' })).toMatchObject({ props: { autoFocus: true } });
+    expect(await ui.find({ key: 'open:3' })).toBeUndefined();
+    expect(await ui.find({ key: 'clear-filter' })).toBeDefined();
+    // Found by a tag: the row says which, tags being nowhere else on it.
+    await ui.input({ key: 'find:3', text: 'release' });
+    expect(await ui.find({ key: 'open:3' })).toBeDefined();
+    expect(
+      await ui.find({ type: 'Text', text: surface === 'terminal' ? /tag release/ : /^#release$/ }),
+    ).toBeDefined();
+    await ui.input({ key: 'find:4', text: 'nothing like this' });
+    expect(await ui.find({ type: 'Text', text: /No open task matches/ })).toBeDefined();
+    expect(await ui.find({ key: 'clear-filter' })).toMatchObject({ props: { autoFocus: true } });
+    await ui.press({ key: 'clear-filter' });
+    expect(await ui.find({ key: 'open:2' })).toBeDefined();
+    // The whole board back: the ring on the first task in progress, not on the queue.
+    expect(await ui.find({ key: 'open:1' })).toMatchObject({ props: { autoFocus: true } });
+    // A find that matches nothing is said in the transcript too.
+    expect((await $.command.run({ command: 'pipeline', args: 'zzz', ...RUN })).text).toBe(
+      'no open task matches "zzz"',
+    );
   });
-  expect(await ui.find({ type: 'Text', text: /#2 moved to test/ })).toBeDefined();
-  await ui.press({ key: 'advance:review' });
-  expect(await ui.find({ key: 'advance:done' })).toBeUndefined(); // review: the next step is done
-  await ui.press({ key: 'complete:review' });
-  await ui.input({ key: 'form:complete', text: '  ' });
-  expect(await ui.find({ type: 'Text', text: /a result is needed/ })).toBeDefined();
-  await ui.input({ key: 'form:complete', text: 'pane merged' });
-  expect(s.calls.at(-1)).toMatchObject({ body: { action: 'complete', result: 'pane merged' } });
-  expect(await ui.find({ type: 'Text', text: /completed/ })).toBeDefined();
-  expect(s.toasts).toEqual([]); // the pane's own acts are not toasted
-});
 
-test('an unclaimed task is left for the agents to claim', async ($, on) => {
-  const s = server(on, { tasks: BOARD() });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '3', ...RUN });
-  const ui = await mount($);
-  expect(await ui.find({ type: 'Text', text: /Docs pass/ })).toBeDefined();
-  expect(await ui.find({ key: 'claim' })).toBeUndefined();
-  expect(await ui.find({ key: 'advance:spec' })).toBeUndefined();
-  expect(await ui.find({ type: 'Text', text: /once an agent claims it/ })).toBeDefined();
-  expect(await ui.find({ key: 'ask:cancel' })).toBeDefined();
-  expect(s.calls).toEqual([]);
-});
+for (const surface of BOTH)
+  test(`/pipeline and /pipeline <id> drop the text the last /pipeline <text> found (${surface})`, async ($, on) => {
+    server(on, { tasks: BOARD() });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: 'docs', ...RUN });
+    await $.command.run({ command: 'pipeline', args: '1', ...RUN });
+    const ui = await mount($, surface);
+    await ui.press({ key: 'back' });
+    expect(await ui.find({ key: 'open:2' })).toBeDefined();
+    expect(await ui.find({ key: 'clear-filter' })).toBeUndefined();
+    await $.command.run({ command: 'pipeline', args: 'docs', ...RUN });
+    await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    expect(await ui.find({ key: 'open:2' })).toBeDefined();
+  });
 
-test('an assigned task that has not started says who it waits for', async ($, on) => {
-  const tasks = BOARD();
-  tasks[2] = { ...tasks[2]!, assigned_to: 'agent-c' };
-  server(on, { tasks });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '3', ...RUN });
-  const ui = await mount($);
-  expect(await ui.find({ type: 'Text', text: 'Waiting for agent-c to start it.' })).toBeDefined();
-  expect(await ui.find({ type: 'Text', text: /Unclaimed/ })).toBeUndefined();
-});
+for (const surface of BOTH)
+  test(`advance and complete as the person, the next step offered first (${surface})`, async ($, on) => {
+    const s = server(on, { tasks: BOARD() });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '#2', ...RUN });
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await mount($, surface);
+      expect(await ui.find({ type: 'Text', text: /Ship the pane/ })).toBeDefined();
+      await ui.unmount();
+    }
+    const ui = await mount($, surface);
+    await ui.press({ key: 'advance:test' });
+    // The stage the button names: a second press of a stale Advance is refused, never a skip.
+    expect(s.calls.at(-1)).toEqual({
+      method: 'POST',
+      path: '/api/tasks/2/stage',
+      body: { action: 'advance', stage: 'test', from: 'implement', by: 'mathi' },
+    });
+    expect(await ui.find({ type: 'Text', text: /#2 moved to test/ })).toBeDefined();
+    await ui.press({ key: 'advance:review' });
+    expect(await ui.find({ key: 'advance:done' })).toBeUndefined(); // review: the next step is done
+    await ui.press({ key: 'complete:review' });
+    await ui.input({ key: 'form:complete', text: '  ' });
+    expect(await ui.find({ type: 'Text', text: /a result is needed/ })).toBeDefined();
+    await ui.input({ key: 'form:complete', text: 'pane merged' });
+    expect(s.calls.at(-1)).toMatchObject({ body: { action: 'complete', result: 'pane merged' } });
+    expect(await ui.find({ type: 'Text', text: /completed/ })).toBeDefined();
+    expect(s.toasts).toEqual([]); // the pane's own acts are not toasted
+  });
 
-test("an action form's button submits what was typed, as Enter does", async ($, on) => {
-  const s = server(on, { tasks: BOARD() });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '2', ...RUN });
-  const ui = await mount($);
-  await ui.press({ key: 'ask:fail' });
-  await ui.press({ key: 'form-submit' });
-  expect(await ui.find({ type: 'Text', text: /what went wrong is needed/ })).toBeDefined();
-  await ui.input({ key: 'form:fail', text: 'flaky CI', kind: 'change' });
-  await ui.press({ key: 'form-submit' });
-  expect(s.calls.at(-1)).toMatchObject({ body: { action: 'fail', result: 'flaky CI' } });
-});
+for (const surface of BOTH)
+  test(`an unclaimed task is left for the agents to claim (${surface})`, async ($, on) => {
+    const s = server(on, { tasks: BOARD() });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '3', ...RUN });
+    const ui = await mount($, surface);
+    expect(await ui.find({ type: 'Text', text: /Docs pass/ })).toBeDefined();
+    expect(await ui.find({ key: 'claim' })).toBeUndefined();
+    expect(await ui.find({ key: 'advance:spec' })).toBeUndefined();
+    expect(await ui.find({ type: 'Text', text: /once an agent claims it/ })).toBeDefined();
+    expect(await ui.find({ key: 'ask:cancel' })).toBeDefined();
+    expect(s.calls).toEqual([]);
+  });
+
+for (const surface of BOTH)
+  test(`an assigned task that has not started says who it waits for (${surface})`, async ($, on) => {
+    const tasks = BOARD();
+    tasks[2] = { ...tasks[2]!, assigned_to: 'agent-c' };
+    server(on, { tasks });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '3', ...RUN });
+    const ui = await mount($, surface);
+    expect(await ui.find({ type: 'Text', text: 'Waiting for agent-c to start it.' })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: /Unclaimed/ })).toBeUndefined();
+  });
+
+for (const surface of BOTH)
+  test(`an action form's button submits what was typed, as Enter does (${surface})`, async ($, on) => {
+    const s = server(on, { tasks: BOARD() });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '2', ...RUN });
+    const ui = await mount($, surface);
+    await ui.press({ key: 'ask:fail' });
+    await ui.press({ key: 'form-submit' });
+    expect(await ui.find({ type: 'Text', text: /what went wrong is needed/ })).toBeDefined();
+    await ui.input({ key: 'form:fail', text: 'flaky CI', kind: 'change' });
+    await ui.press({ key: 'form-submit' });
+    expect(s.calls.at(-1)).toMatchObject({ body: { action: 'fail', result: 'flaky CI' } });
+  });
 
 test('summary parts break between parts, no line ending or starting on the separator', () => {
   expect(packParts(['8 open tasks', '2 in progress', '1 blocked'], 30)).toEqual([
@@ -563,123 +585,129 @@ test('widths count terminal columns: wide characters two, marks none', () => {
   expect(clip('short', 10)).toBe('short');
 });
 
-test('send back picks the stage; fail and cancel need their words; delete asks first', async ($, on) => {
-  const s = server(on, { tasks: BOARD() });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '2', ...RUN });
-  const ui = await mount($, 'terminal', 80);
-  await ui.press({ key: 'ask:regress' });
-  await ui.select({ key: 'form-stage', value: 'spec' });
-  await ui.input({ key: 'form:regress', text: 'needs a spec' });
-  expect(s.calls.at(-1)).toMatchObject({
-    body: { action: 'regress', stage: 'spec', reason: 'needs a spec' },
+for (const surface of BOTH)
+  test(`send back picks the stage; fail and cancel need their words; delete asks first (${surface})`, async ($, on) => {
+    const s = server(on, { tasks: BOARD() });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '2', ...RUN });
+    const ui = await mount($, surface, 80);
+    await ui.press({ key: 'ask:regress' });
+    await ui.select({ key: 'form-stage', value: 'spec' });
+    await ui.input({ key: 'form:regress', text: 'needs a spec' });
+    expect(s.calls.at(-1)).toMatchObject({
+      body: { action: 'regress', stage: 'spec', reason: 'needs a spec' },
+    });
+    await ui.press({ key: 'ask:fail' });
+    await ui.press({ key: 'form-dismiss' });
+    expect(await ui.find({ key: 'form:fail' })).toBeUndefined();
+    expect(await ui.find({ key: 'ask:fail' })).toBeDefined();
+    await ui.press({ key: 'ask:cancel' });
+    await ui.input({ key: 'form:cancel', text: 'duplicate' });
+    expect(s.calls.at(-1)).toMatchObject({ body: { action: 'cancel', reason: 'duplicate' } });
+    // A dropped task is no success: its outcome wears the task's own mark, not a green ✓.
+    const said = await ui.find({ type: 'Text', text: '– #2 cancelled' });
+    expect(said).toBeDefined();
+    expect(said?.props).not.toHaveProperty('color');
+    await ui.press({ key: 'ask-delete' });
+    await ui.press({ key: 'confirm-no' });
+    expect(s.calls.some((c) => c.method === 'DELETE')).toBe(false);
+    await ui.press({ key: 'ask-delete' });
+    await ui.press({ key: 'confirm-yes' });
+    expect(s.calls.at(-1)).toEqual({ method: 'DELETE', path: '/api/tasks/2', body: undefined });
+    expect(await ui.find({ key: 'open:1' })).toBeDefined(); // back on the board
   });
-  await ui.press({ key: 'ask:fail' });
-  await ui.press({ key: 'form-dismiss' });
-  expect(await ui.find({ key: 'form:fail' })).toBeUndefined();
-  expect(await ui.find({ key: 'ask:fail' })).toBeDefined();
-  await ui.press({ key: 'ask:cancel' });
-  await ui.input({ key: 'form:cancel', text: 'duplicate' });
-  expect(s.calls.at(-1)).toMatchObject({ body: { action: 'cancel', reason: 'duplicate' } });
-  // A dropped task is no success: its outcome wears the task's own mark, not a green ✓.
-  const said = await ui.find({ type: 'Text', text: '– #2 cancelled' });
-  expect(said).toBeDefined();
-  expect(said?.props).not.toHaveProperty('color');
-  await ui.press({ key: 'ask-delete' });
-  await ui.press({ key: 'confirm-no' });
-  expect(s.calls.some((c) => c.method === 'DELETE')).toBe(false);
-  await ui.press({ key: 'ask-delete' });
-  await ui.press({ key: 'confirm-yes' });
-  expect(s.calls.at(-1)).toEqual({ method: 'DELETE', path: '/api/tasks/2', body: undefined });
-  expect(await ui.find({ key: 'open:1' })).toBeDefined(); // back on the board
-});
 
-test('a blocked task offers no advance or complete and says what it waits for; blockers open from the detail', async ($, on) => {
-  server(on, { tasks: BOARD(), deps: [{ task_id: 2, depends_on: 1, relationship: 'blocks' }] });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '2', ...RUN });
-  const ui = await mount($);
-  expect(await ui.find({ key: 'advance:test' })).toBeUndefined();
-  expect(await ui.find({ key: 'complete:implement' })).toBeUndefined();
-  expect(await ui.find({ key: 'ask:fail' })).toBeDefined();
-  expect(await ui.find({ type: 'Text', text: /It moves on once #1 is done/ })).toBeDefined();
-  await ui.press({ key: 'dep:1' });
-  expect(await ui.find({ type: 'Text', text: /Write the spec/ })).toBeDefined();
-  // The way back names the task it goes to, by its title.
-  expect(await ui.find({ key: 'back' })).toMatchObject({ props: { label: '‹ Ship the pane' } });
-  // #2 under Blocks is marked as the board marks it: blocked, not in progress.
-  expect(await ui.find({ type: 'Text', text: /^!$/ })).toBeDefined();
-  expect(await ui.find({ type: 'Text', text: /^●$/ })).toBeUndefined();
-  await ui.press({ key: 'back' });
-  expect(await ui.find({ type: 'Text', text: /Ship the pane/ })).toBeDefined();
-});
+for (const surface of BOTH)
+  test(`a blocked task offers no advance or complete and says what it waits for; blockers open from the detail (${surface})`, async ($, on) => {
+    server(on, { tasks: BOARD(), deps: [{ task_id: 2, depends_on: 1, relationship: 'blocks' }] });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '2', ...RUN });
+    const ui = await mount($, surface);
+    expect(await ui.find({ key: 'advance:test' })).toBeUndefined();
+    expect(await ui.find({ key: 'complete:implement' })).toBeUndefined();
+    expect(await ui.find({ key: 'ask:fail' })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: /It moves on once #1 is done/ })).toBeDefined();
+    await ui.press({ key: 'dep:1' });
+    expect(await ui.find({ type: 'Text', text: /Write the spec/ })).toBeDefined();
+    // The way back names the task it goes to, by its title.
+    expect(await ui.find({ key: 'back' })).toMatchObject({ props: { label: '‹ Ship the pane' } });
+    // #2 under Blocks is marked as the board marks it: blocked, not in progress.
+    expect(await ui.find({ type: 'Text', text: /^!$/ })).toBeDefined();
+    // On desktop the board stays beside the detail, its in-progress cards marked ● too.
+    if (surface === 'terminal')
+      expect(await ui.find({ type: 'Text', text: /^●$/ })).toBeUndefined();
+    await ui.press({ key: 'back' });
+    expect(await ui.find({ type: 'Text', text: /Ship the pane/ })).toBeDefined();
+  });
 
-test('comments are sent as the person; artifacts unfold', async ($, on) => {
-  const s = server(on, {
-    tasks: BOARD(),
-    artifacts: [
-      {
-        id: 7,
-        task_id: 1,
-        stage: 'spec',
-        name: 'spec',
-        content: '# Spec\n- one',
-        version: 2,
-        created_by: 'agent-a',
-        created_at: '2026-10-09 20:10:00',
-      },
-    ],
+for (const surface of BOTH)
+  test(`comments are sent as the person; artifacts unfold (${surface})`, async ($, on) => {
+    const s = server(on, {
+      tasks: BOARD(),
+      artifacts: [
+        {
+          id: 7,
+          task_id: 1,
+          stage: 'spec',
+          name: 'spec',
+          content: '# Spec\n- one',
+          version: 2,
+          created_by: 'agent-a',
+          created_at: '2026-10-09 20:10:00',
+        },
+      ],
+    });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '1', ...RUN });
+    const ui = await mount($, surface);
+    await ui.press({ key: 'art:7:shut' });
+    expect(await ui.find({ type: 'Markdown' })).toMatchObject({ props: { text: '# Spec\n- one' } });
+    // The toggle's key names its state, so the ring lands on it once that state is drawn.
+    expect(await ui.find({ key: 'art:7:open' })).toBeDefined();
+    await ui.press({ key: 'art:7:open' });
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined();
+    await ui.input({ key: 'comment:0', text: 'looks good' });
+    expect(s.calls.at(-1)).toEqual({
+      method: 'POST',
+      path: '/api/tasks/1/comments',
+      body: { content: 'looks good', agent_id: 'mathi' },
+    });
+    expect(await ui.find({ key: 'comment:1' })).toBeDefined(); // a fresh, empty field
+    expect(await ui.find({ type: 'Text', text: 'looks good' })).toBeDefined();
   });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '1', ...RUN });
-  const ui = await mount($);
-  await ui.press({ key: 'art:7:shut' });
-  expect(await ui.find({ type: 'Markdown' })).toMatchObject({ props: { text: '# Spec\n- one' } });
-  // The toggle's key names its state, so the ring lands on it once that state is drawn.
-  expect(await ui.find({ key: 'art:7:open' })).toBeDefined();
-  await ui.press({ key: 'art:7:open' });
-  expect(await ui.find({ type: 'Markdown' })).toBeUndefined();
-  await ui.input({ key: 'comment:0', text: 'looks good' });
-  expect(s.calls.at(-1)).toEqual({
-    method: 'POST',
-    path: '/api/tasks/1/comments',
-    body: { content: 'looks good', agent_id: 'mathi' },
-  });
-  expect(await ui.find({ key: 'comment:1' })).toBeDefined(); // a fresh, empty field
-  expect(await ui.find({ type: 'Text', text: 'looks good' })).toBeDefined();
-});
 
-test('new task: Tab walks the fields and Enter in any of them creates; nothing is drawn anew under the typing', async ($, on) => {
-  const s = server(on, { tasks: BOARD() });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '', ...RUN });
-  const ui = await mount($);
-  await ui.press({ key: 'tab:new' });
-  await ui.input({ key: 'new-title:1', text: 'Try the pane', kind: 'change' });
-  await ui.input({ key: 'new-project:1', text: 'agent-tasks', kind: 'change' });
-  // Typed into, the fields keep their keys and their drawn value: a value fed back on each key
-  // would replace what the person is typing, dropping keys typed fast.
-  expect((await ui.find({ key: 'new-title:1' }))?.props.value).toBe('');
-  expect(await ui.find({ key: 'new-description:1' })).toMatchObject({ props: { rows: 3 } });
-  // Enter with a priority that is no number: said at its field, nothing created.
-  await ui.input({ key: 'new-priority:1', text: 'high' });
-  expect(s.calls).toEqual([]);
-  expect(await ui.find({ type: 'Text', text: /a whole number, like 0 or 5/ })).toBeDefined();
-  // Drawn anew, the fields hold what was typed.
-  expect((await ui.find({ key: 'new-title:2' }))?.props.value).toBe('Try the pane');
-  expect((await ui.find({ key: 'new-priority:2' }))?.props.value).toBe('high');
-  // Enter in the title, the priority fixed: created with every field.
-  await ui.input({ key: 'new-priority:2', text: '3', kind: 'change' });
-  await ui.input({ key: 'new-title:2', text: 'Try the pane' });
-  expect(s.calls.at(-1)).toEqual({
-    method: 'POST',
-    path: '/api/tasks',
-    body: { title: 'Try the pane', priority: 3, created_by: 'mathi', project: 'agent-tasks' },
+for (const surface of BOTH)
+  test(`new task: Tab walks the fields and Enter in any of them creates; nothing is drawn anew under the typing (${surface})`, async ($, on) => {
+    const s = server(on, { tasks: BOARD() });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    const ui = await mount($, surface);
+    await ui.press({ key: 'tab:new' });
+    await ui.input({ key: 'new-title:1', text: 'Try the pane', kind: 'change' });
+    await ui.input({ key: 'new-project:1', text: 'agent-tasks', kind: 'change' });
+    // Typed into, the fields keep their keys and their drawn value: a value fed back on each key
+    // would replace what the person is typing, dropping keys typed fast.
+    expect((await ui.find({ key: 'new-title:1' }))?.props.value).toBe('');
+    expect(await ui.find({ key: 'new-description:1' })).toMatchObject({ props: { rows: 3 } });
+    // Enter with a priority that is no number: said at its field, nothing created.
+    await ui.input({ key: 'new-priority:1', text: 'high' });
+    expect(s.calls).toEqual([]);
+    expect(await ui.find({ type: 'Text', text: /a whole number, like 0 or 5/ })).toBeDefined();
+    // Drawn anew, the fields hold what was typed.
+    expect((await ui.find({ key: 'new-title:2' }))?.props.value).toBe('Try the pane');
+    expect((await ui.find({ key: 'new-priority:2' }))?.props.value).toBe('high');
+    // Enter in the title, the priority fixed: created with every field.
+    await ui.input({ key: 'new-priority:2', text: '3', kind: 'change' });
+    await ui.input({ key: 'new-title:2', text: 'Try the pane' });
+    expect(s.calls.at(-1)).toEqual({
+      method: 'POST',
+      path: '/api/tasks',
+      body: { title: 'Try the pane', priority: 3, created_by: 'mathi', project: 'agent-tasks' },
+    });
+    expect(await ui.find({ type: 'Text', text: 'Try the pane' })).toBeDefined(); // its detail
+    await ui.press({ key: 'tab:new' });
+    expect(await ui.find({ key: 'new-title:3' })).toMatchObject({ props: { value: '' } });
   });
-  expect(await ui.find({ type: 'Text', text: 'Try the pane' })).toBeDefined(); // its detail
-  await ui.press({ key: 'tab:new' });
-  expect(await ui.find({ key: 'new-title:3' })).toMatchObject({ props: { value: '' } });
-});
 
 test('a toast says what finished or reached review since the last poll', async ($, on) => {
   const world: World = { tasks: BOARD() };
@@ -731,34 +759,35 @@ test('a row keeps whole facts: one that does not fit is left out, never cut', ()
   expect(fitFacts(facts, 5)).toEqual([]);
 });
 
-test('a stage gate is said up front: what it needs before the task leaves its stage', async ($, on) => {
-  const gate = {
-    stage: 'implement',
-    comment: true,
-    artifact: false,
-    artifacts: ['review-notes'],
-    min_artifacts: 0,
-    approval: false,
-  };
-  server(on, {
-    tasks: BOARD().map((t) => (t.id === 2 ? { ...t, gate_needs: gate } : t)),
+for (const surface of BOTH)
+  test(`a stage gate is said up front: what it needs before the task leaves its stage (${surface})`, async ($, on) => {
+    const gate = {
+      stage: 'implement',
+      comment: true,
+      artifact: false,
+      artifacts: ['review-notes'],
+      min_artifacts: 0,
+      approval: false,
+    };
+    server(on, {
+      tasks: BOARD().map((t) => (t.id === 2 ? { ...t, gate_needs: gate } : t)),
+    });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '2', ...RUN });
+    const ui = await mount($, surface);
+    expect(
+      await ui.find({
+        type: 'Text',
+        text: /Needs a comment and artifact review-notes before it leaves implement: add the comment below; an agent attaches artifacts\./,
+      }),
+    ).toBeDefined();
+    // An artifact only an agent attaches: Advance and Complete cannot pass it from here, so
+    // neither is offered. The ring lands on the way back, never in the comment field.
+    expect(await ui.find({ key: 'advance:test' })).toBeUndefined();
+    expect(await ui.find({ key: 'complete:implement' })).toBeUndefined();
+    expect(await ui.find({ key: 'ask:fail' })).toBeDefined();
+    expect(await ui.find({ key: 'back' })).toMatchObject({ props: { autoFocus: true } });
   });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '2', ...RUN });
-  const ui = await mount($);
-  expect(
-    await ui.find({
-      type: 'Text',
-      text: /Needs a comment and artifact review-notes before it leaves implement: add the comment below; an agent attaches artifacts\./,
-    }),
-  ).toBeDefined();
-  // An artifact only an agent attaches: Advance and Complete cannot pass it from here, so
-  // neither is offered. The ring lands on the way back, never in the comment field.
-  expect(await ui.find({ key: 'advance:test' })).toBeUndefined();
-  expect(await ui.find({ key: 'complete:implement' })).toBeUndefined();
-  expect(await ui.find({ key: 'ask:fail' })).toBeDefined();
-  expect(await ui.find({ key: 'back' })).toMatchObject({ props: { autoFocus: true } });
-});
 
 test('a comment-only gate keeps Advance: the comment is given here', async ($, on) => {
   const gate = {
@@ -835,60 +864,66 @@ test('a refusal the gate hint explains says only that it held; Complete keeps it
   expect(s.calls.at(-1)?.body).toMatchObject({ action: 'complete', result: 'shipped' });
 });
 
-test('the Done tab lists finished tasks with their result', async ($, on) => {
-  server(on, { tasks: BOARD() });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '', ...RUN });
-  const ui = await mount($);
-  await ui.press({ key: 'tab:done' });
-  expect(await ui.find({ type: 'Text', text: /merged/ })).toBeDefined();
-  await ui.press({ key: 'open:4' });
-  expect(await ui.find({ key: 'back' })).toMatchObject({ props: { label: '‹ Done' } });
-  expect(await ui.find({ key: 'complete:done' })).toBeUndefined();
-});
-
-test('a finished task opens again: Reopen sends it back unclaimed, the board shows it', async ($, on) => {
-  const world: World = { tasks: BOARD() };
-  const s = server(on, world);
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '4', ...RUN });
-  const ui = await mount($);
-  expect(await ui.find({ key: 'ask:fail' })).toBeUndefined();
-  await ui.press({ key: 'reopen' });
-  expect(s.calls.at(-1)).toEqual({
-    method: 'POST',
-    path: '/api/tasks/4/stage',
-    body: { action: 'reopen', by: 'mathi' },
+for (const surface of BOTH)
+  test(`the Done tab lists finished tasks with their result (${surface})`, async ($, on) => {
+    server(on, { tasks: BOARD() });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    const ui = await mount($, surface);
+    await ui.press({ key: 'tab:done' });
+    expect(await ui.find({ type: 'Text', text: /merged/ })).toBeDefined();
+    await ui.press({ key: 'open:4' });
+    // On desktop the detail is a panel beside the list: its way out closes it.
+    expect(await ui.find({ key: 'back' })).toMatchObject({
+      props: surface === 'terminal' ? { label: '‹ Done' } : { label: 'Close', role: 'dismiss' },
+    });
+    expect(await ui.find({ key: 'complete:done' })).toBeUndefined();
   });
-  expect(
-    await ui.find({ type: 'Text', text: '✓ #4 open again in review, unclaimed' }),
-  ).toBeDefined();
-  expect(await ui.find({ key: 'reopen' })).toBeUndefined();
-});
 
-test('server down: what to do, offline in the status line, a Refresh that says it tried', async ($, on) => {
-  const world: World = { tasks: BOARD(), isDown: true };
-  const s = server(on, world);
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  const out = await $.command.run({ command: 'pipeline', args: '', ...RUN });
-  expect(out.text).toContain('nothing answers at http://127.0.0.1:3422');
-  expect(s.status.at(-1)).toBe('offline');
-  const ui = await mount($);
-  expect(await ui.find({ type: 'Text', text: /not reachable/ })).toBeDefined();
-  expect(await ui.find({ key: 'retry' })).toMatchObject({ props: { autoFocus: true } });
-  await ui.press({ key: 'retry' });
-  expect(
-    await ui.find({
-      type: 'Text',
-      text: /✗ still nothing answers at http:\/\/127\.0\.0\.1:3422 \(\d\d:\d\d:\d\d\)/,
-    }),
-  ).toBeDefined();
-  // The tabs stay while it is down, so a digit stays in the pane.
-  expect(await ui.find({ key: 'tab:done' })).toBeDefined();
-  world.isDown = false;
-  await ui.press({ key: 'retry' });
-  expect(await ui.find({ key: 'open:1' })).toMatchObject({ props: { autoFocus: true } });
-});
+for (const surface of BOTH)
+  test(`a finished task opens again: Reopen sends it back unclaimed, the board shows it (${surface})`, async ($, on) => {
+    const world: World = { tasks: BOARD() };
+    const s = server(on, world);
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '4', ...RUN });
+    const ui = await mount($, surface);
+    expect(await ui.find({ key: 'ask:fail' })).toBeUndefined();
+    await ui.press({ key: 'reopen' });
+    expect(s.calls.at(-1)).toEqual({
+      method: 'POST',
+      path: '/api/tasks/4/stage',
+      body: { action: 'reopen', by: 'mathi' },
+    });
+    expect(
+      await ui.find({ type: 'Text', text: '✓ #4 open again in review, unclaimed' }),
+    ).toBeDefined();
+    expect(await ui.find({ key: 'reopen' })).toBeUndefined();
+  });
+
+for (const surface of BOTH)
+  test(`server down: what to do, offline in the status line, a Refresh that says it tried (${surface})`, async ($, on) => {
+    const world: World = { tasks: BOARD(), isDown: true };
+    const s = server(on, world);
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    const out = await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    expect(out.text).toContain('nothing answers at http://127.0.0.1:3422');
+    expect(s.status.at(-1)).toBe('offline');
+    const ui = await mount($, surface);
+    expect(await ui.find({ type: 'Text', text: /not reachable/ })).toBeDefined();
+    expect(await ui.find({ key: 'retry' })).toMatchObject({ props: { autoFocus: true } });
+    await ui.press({ key: 'retry' });
+    expect(
+      await ui.find({
+        type: 'Text',
+        text: /✗ still nothing answers at http:\/\/127\.0\.0\.1:3422 \(\d\d:\d\d:\d\d\)/,
+      }),
+    ).toBeDefined();
+    // The tabs stay while it is down, so a digit stays in the pane.
+    expect(await ui.find({ key: 'tab:done' })).toBeDefined();
+    world.isDown = false;
+    await ui.press({ key: 'retry' });
+    expect(await ui.find({ key: 'open:1' })).toMatchObject({ props: { autoFocus: true } });
+  });
 
 test('an agent-tasks from before the board on the port is named, not taken for nothing', async ($, on) => {
   const s = server(on, { tasks: BOARD(), old: '1.9.3' });
@@ -1015,16 +1050,17 @@ test('an older server taking the port while a task is open shows that, not a mis
   expect(await ui.find({ type: 'Text', text: /Write the spec/ })).toBeDefined();
 });
 
-test('a related or duplicate link is shown and opens, without blocking', async ($, on) => {
-  server(on, { tasks: BOARD(), deps: [{ task_id: 2, depends_on: 1, relationship: 'related' }] });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '2', ...RUN });
-  const ui = await mount($);
-  expect(await ui.find({ type: 'Text', text: /^Related$/ })).toBeDefined();
-  expect(await ui.find({ key: 'advance:test' })).toBeDefined();
-  await ui.press({ key: 'related:1' });
-  expect(await ui.find({ type: 'Text', text: /Write the spec/ })).toBeDefined();
-});
+for (const surface of BOTH)
+  test(`a related or duplicate link is shown and opens, without blocking (${surface})`, async ($, on) => {
+    server(on, { tasks: BOARD(), deps: [{ task_id: 2, depends_on: 1, relationship: 'related' }] });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '2', ...RUN });
+    const ui = await mount($, surface);
+    expect(await ui.find({ type: 'Text', text: /^Related$/ })).toBeDefined();
+    expect(await ui.find({ key: 'advance:test' })).toBeDefined();
+    await ui.press({ key: 'related:1' });
+    expect(await ui.find({ type: 'Text', text: /Write the spec/ })).toBeDefined();
+  });
 
 const STAGE_TOOL = 'mcp__plugin_agent-tasks_agent-tasks__task_stage';
 const END = { reason: 'prompt_input_exit', sessionId: 'sess-1', resume: { id: 'sess-1' } } as const;
@@ -1664,64 +1700,65 @@ function strings(node: unknown, out: string[] = []): string[] {
   return out;
 }
 
-test('control characters in what agents wrote never reach a drawn text, in any view', async ($, on) => {
-  const world: World = {
-    tasks: [
-      task(1, `Spec ${NOISY}`, {
-        stage: 'spec',
-        status: 'in_progress',
-        assigned_to: `agent ${NOISY}`,
-        description: `Steps ${NOISY}`,
-        tags: JSON.stringify([`tag${NOISY}`]),
-        project: 'ansi',
-      }),
-      task(2, `Done ${NOISY}`, { status: 'completed', stage: 'done', result: `ok ${NOISY}` }),
-    ],
-    comments: [
-      {
-        id: 7,
-        task_id: 1,
-        agent_id: 'agent-a',
-        content: `log ${NOISY}`,
-        created_at: '2026-10-09 21:00:00',
-      },
-    ],
-    artifacts: [
-      {
-        id: 9,
-        task_id: 1,
-        stage: 'spec',
-        name: `out${NOISY}`,
-        content: `# Output\n${NOISY}`,
-        version: 1,
-        created_by: 'agent-a',
-        created_at: '2026-10-09 21:00:00',
-      },
-    ],
-  };
-  server(on, world);
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '', ...RUN });
-  const ui = await mount($);
-  const clean = async (view: string) => {
-    // A drawn text the pane would still have to clean is one the CLI refuses.
-    const bad = strings(await ui.drawn()).filter((x) => printable(x) !== x);
-    expect({ view, bad }).toEqual({ view, bad: [] });
-  };
-  await clean('board');
-  expect(await ui.find({ type: 'Text', text: /red bold!/ })).toBeDefined();
-  await ui.press({ key: 'tab:done' });
-  await clean('done');
-  await ui.press({ key: 'open:2' });
-  await clean('a finished task');
-  await ui.press({ key: 'back' });
-  await ui.press({ key: 'tab:board' });
-  await ui.press({ key: 'open:1' });
-  await ui.press({ key: 'art:9:shut' });
-  await ui.press({ key: 'ask:fail' });
-  await clean('a task with its comment, artifact and a form');
-  expect(await ui.find({ type: 'Text', text: /line.end/ })).toBeDefined();
-});
+for (const surface of BOTH)
+  test(`control characters in what agents wrote never reach a drawn text, in any view (${surface})`, async ($, on) => {
+    const world: World = {
+      tasks: [
+        task(1, `Spec ${NOISY}`, {
+          stage: 'spec',
+          status: 'in_progress',
+          assigned_to: `agent ${NOISY}`,
+          description: `Steps ${NOISY}`,
+          tags: JSON.stringify([`tag${NOISY}`]),
+          project: 'ansi',
+        }),
+        task(2, `Done ${NOISY}`, { status: 'completed', stage: 'done', result: `ok ${NOISY}` }),
+      ],
+      comments: [
+        {
+          id: 7,
+          task_id: 1,
+          agent_id: 'agent-a',
+          content: `log ${NOISY}`,
+          created_at: '2026-10-09 21:00:00',
+        },
+      ],
+      artifacts: [
+        {
+          id: 9,
+          task_id: 1,
+          stage: 'spec',
+          name: `out${NOISY}`,
+          content: `# Output\n${NOISY}`,
+          version: 1,
+          created_by: 'agent-a',
+          created_at: '2026-10-09 21:00:00',
+        },
+      ],
+    };
+    server(on, world);
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    const ui = await mount($, surface);
+    const clean = async (view: string) => {
+      // A drawn text the pane would still have to clean is one the CLI refuses.
+      const bad = strings(await ui.drawn()).filter((x) => printable(x) !== x);
+      expect({ view, bad }).toEqual({ view, bad: [] });
+    };
+    await clean('board');
+    expect(await ui.find({ type: 'Text', text: /red bold!/ })).toBeDefined();
+    await ui.press({ key: 'tab:done' });
+    await clean('done');
+    await ui.press({ key: 'open:2' });
+    await clean('a finished task');
+    await ui.press({ key: 'back' });
+    await ui.press({ key: 'tab:board' });
+    await ui.press({ key: 'open:1' });
+    await ui.press({ key: 'art:9:shut' });
+    await ui.press({ key: 'ask:fail' });
+    await clean('a task with its comment, artifact and a form');
+    expect(await ui.find({ type: 'Text', text: /line.end/ })).toBeDefined();
+  });
 
 test('the tasks this session holds are marked on the board and in their detail', async ($, on) => {
   const s = server(on, { tasks: BOARD(), held: { 'claude:sess-1': [2] } });
@@ -1897,29 +1934,31 @@ test('the New tab takes the ring into Title only when the press asked to type', 
   expect((await ui.find({ type: 'Input' }))?.props.autoFocus).toBe(true);
 });
 
-test('New task on an empty board opens the form to type in', async ($, on) => {
-  server(on, { tasks: [] });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '', ...RUN });
-  const ui = await mount($);
-  await ui.press({ key: 'empty-new' });
-  expect((await ui.find({ type: 'Input' }))?.props.autoFocus).toBe(true);
-});
-
-test('an empty Done says why and offers the next step', async ($, on) => {
-  server(on, { tasks: BOARD().filter((t) => t.status !== 'completed') });
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
-  await $.command.run({ command: 'pipeline', args: '', ...RUN });
-  const ui = await mount($);
-  await ui.press({ key: 'tab:done' });
-  expect(await ui.find({ type: 'Text', text: 'Nothing finished yet.' })).toBeDefined();
-  expect(await ui.find({ type: 'Text', text: /completed, failed or cancelled/ })).toBeDefined();
-  expect(await ui.find({ key: 'empty-board' })).toMatchObject({
-    props: { autoFocus: true, variant: 'primary', label: 'Board' },
+for (const surface of BOTH)
+  test(`New task on an empty board opens the form to type in (${surface})`, async ($, on) => {
+    server(on, { tasks: [] });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    const ui = await mount($, surface);
+    await ui.press({ key: 'empty-new' });
+    expect((await ui.find({ type: 'Input' }))?.props.autoFocus).toBe(true);
   });
-  await ui.press({ key: 'empty-board' });
-  expect(await ui.find({ key: 'open:1' })).toBeDefined();
-});
+
+for (const surface of BOTH)
+  test(`an empty Done says why and offers the next step (${surface})`, async ($, on) => {
+    server(on, { tasks: BOARD().filter((t) => t.status !== 'completed') });
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    const ui = await mount($, surface);
+    await ui.press({ key: 'tab:done' });
+    expect(await ui.find({ type: 'Text', text: 'Nothing finished yet.' })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: /completed, failed or cancelled/ })).toBeDefined();
+    expect(await ui.find({ key: 'empty-board' })).toMatchObject({
+      props: { autoFocus: true, variant: 'primary', label: 'Board' },
+    });
+    await ui.press({ key: 'empty-board' });
+    expect(await ui.find({ key: 'open:1' })).toBeDefined();
+  });
 
 test('a delete asks with the safe button first and the ring on it; the other names what it deletes', async ($, on) => {
   server(on, { tasks: BOARD() });
@@ -1958,4 +1997,183 @@ test('ages count days from 24 hours; times are HH:MM today and dated before; a w
   expect(when('2026-10-07 12:00:00', now)).toBe('3d ago');
   expect(when('2026-09-20 12:00:00', now)).toMatch(/^2026-09-2\d \d\d:\d\d$/);
   expect(time('2026-09-20 12:00:00', now)).toMatch(/^2026-09-2\d \d\d:\d\d$/);
+});
+
+test('desktop: the board is kanban columns, every stage of the pipeline, with tiles and two charts', async ($, on) => {
+  server(on, { tasks: BOARD(), deps: [{ task_id: 2, depends_on: 1, relationship: 'blocks' }] });
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true });
+  await $.command.run({ command: 'pipeline', args: '', ...RUN });
+  const ui = await mount($, 'desktop', 160);
+  // A column per stage, the empty ones too, so the pipeline reads left to right.
+  for (const stage of ['BACKLOG', 'SPEC', 'PLAN', 'IMPLEMENT', 'TEST', 'REVIEW'])
+    expect(await ui.find({ type: 'Text', text: stage })).toBeDefined();
+  expect(await ui.find({ type: 'Text', text: 'DONE' })).toBeUndefined(); // nothing open is done
+  expect(await ui.find({ type: 'Text', text: '1 in progress · 1' })).toBeDefined();
+  expect(await ui.find({ type: 'Text', text: 'Nothing here' })).toBeDefined();
+  // Cards: mark and id, the title, priority, who and project; the tags and what it waits for.
+  expect(await ui.find({ key: 'open:1' })).toMatchObject({ text: 'Write the spec' });
+  expect(await ui.find({ type: 'Text', text: '● #1' })).toBeDefined();
+  expect(await ui.find({ type: 'Text', text: 'p5 agent-a · agent-tasks' })).toBeDefined();
+  expect(await ui.find({ type: 'Text', text: '#release' })).toBeDefined();
+  expect(await ui.find({ type: 'Text', text: 'waits for #1' })).toBeDefined();
+  // Tiles and the charts, each told in words for a reader that cannot see it.
+  expect(await ui.find({ type: 'Text', text: 'in progress' })).toBeDefined();
+  expect(await ui.find({ type: 'Text', text: 'blocked' })).toBeDefined();
+  // Nothing finished this week: only the stage chart is drawn (the unit test below has the other).
+  const charts = (await ui.findAll({ type: 'Svg' })) ?? [];
+  expect(charts.map((c) => (c.props as { alt: string }).alt)).toEqual([
+    expect.stringMatching(
+      /^Open tasks by stage: backlog 1 \(0 in progress\), spec 1 \(1 in progress\)/,
+    ),
+  ]);
+  // The main action is New task; the tab shown is marked.
+  expect(await ui.find({ key: 'tab:new' })).toMatchObject({
+    props: { label: 'New task', variant: 'primary' },
+  });
+  expect(await ui.find({ key: 'tab:board' })).toMatchObject({ props: { variant: 'primary' } });
+});
+
+test('desktop: a card opens its detail beside the board, Close shuts it', async ($, on) => {
+  server(on, { tasks: BOARD() });
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true });
+  await $.command.run({ command: 'pipeline', args: '', ...RUN });
+  const ui = await mount($, 'desktop', 160);
+  await ui.press({ key: 'open:2' });
+  // The detail and the board at once: another card is a press away.
+  expect(await ui.find({ key: 'advance:test' })).toMatchObject({
+    props: { variant: 'primary' },
+  });
+  expect(await ui.find({ key: 'open:1' })).toBeDefined();
+  expect(await ui.find({ key: 'back' })).toMatchObject({
+    props: { label: 'Close', role: 'dismiss' },
+  });
+  await ui.press({ key: 'open:1' });
+  expect(await ui.find({ type: 'Text', text: 'Write the spec' })).toBeDefined();
+  // Walked from one to another, the way back names where it goes.
+  expect(await ui.find({ key: 'back' })).toMatchObject({ props: { label: '‹ Ship the pane' } });
+  await ui.press({ key: 'back' });
+  await ui.press({ key: 'back' });
+  expect(await ui.find({ key: 'back' })).toBeUndefined();
+  expect(await ui.find({ key: 'open:2' })).toBeDefined();
+});
+
+test('desktop: Find and the project and assignee pickers narrow the columns and say how many match', async ($, on) => {
+  server(on, { tasks: BOARD() });
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true });
+  await $.command.run({ command: 'pipeline', args: '', ...RUN });
+  const ui = await mount($, 'desktop', 160);
+  await ui.input({ key: 'find:1', text: 'agent-b' });
+  expect(await ui.find({ key: 'open:2' })).toBeDefined();
+  expect(await ui.find({ key: 'open:1' })).toBeUndefined();
+  expect(await ui.find({ type: 'Text', text: '1 open task matches "agent-b"' })).toBeDefined();
+  await ui.press({ key: 'clear-filter' });
+  expect(await ui.find({ key: 'open:1' })).toBeDefined();
+  // The pickers, as the web dashboard had: one project, one assignee.
+  expect(await ui.find({ key: 'facet:project' })).toMatchObject({
+    props: { value: '*', options: expect.arrayContaining([{ value: 'docs', label: 'docs' }]) },
+  });
+  await ui.select({ key: 'facet:project', value: 'docs' });
+  expect(await ui.find({ key: 'open:3' })).toBeDefined();
+  expect(await ui.find({ key: 'open:1' })).toBeUndefined();
+  expect(await ui.find({ type: 'Text', text: '1 open task matches docs' })).toBeDefined();
+  await ui.select({ key: 'facet:project', value: '*' });
+  await ui.select({ key: 'facet:assignee', value: 'agent-a' });
+  expect(await ui.find({ key: 'open:1' })).toBeDefined();
+  expect(await ui.find({ key: 'open:2' })).toBeUndefined();
+  await ui.select({ key: 'facet:assignee', value: 'unclaimed' });
+  expect(await ui.find({ key: 'open:3' })).toBeDefined();
+  expect(await ui.find({ key: 'open:1' })).toBeUndefined();
+  await ui.press({ key: 'clear-filter' });
+  expect(await ui.find({ key: 'open:1' })).toBeDefined();
+  expect(await ui.find({ key: 'facet:assignee' })).toMatchObject({ props: { value: '*' } });
+  // Done ignores the pickers, so it draws none.
+  await ui.press({ key: 'tab:done' });
+  expect(await ui.find({ key: 'facet:project' })).toBeUndefined();
+});
+
+test('desktop: an empty board says so and offers New task; no charts drawn for nothing', async ($, on) => {
+  server(on, { tasks: [] });
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true });
+  await $.command.run({ command: 'pipeline', args: '', ...RUN });
+  const ui = await mount($, 'desktop', 160);
+  expect(await ui.find({ type: 'Text', text: 'Nothing open on the board.' })).toBeDefined();
+  expect(await ui.find({ type: 'Svg' })).toBeUndefined();
+  await ui.press({ key: 'empty-new' });
+  expect((await ui.find({ type: 'Input' }))?.props.autoFocus).toBe(true);
+});
+
+const widget = ($: Engine, surface: Surface) =>
+  $.ui.mount({
+    plugin: 'agent-tasks',
+    surface,
+    component: 'Pane',
+    props: pane('widget', 40),
+    requestId: 'agent-tasks',
+  });
+
+for (const surface of BOTH)
+  test(`the widget is a glance: counts per stage, the share in progress, this session's tasks (${surface})`, async ($, on) => {
+    const world: World = { tasks: BOARD(), held: { 'claude:sess-1': [1] } };
+    server(on, world);
+    await $.session.start({ cwd: '/', surface, isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    const ui = await widget($, surface);
+    // The share in progress as a bar (Progress, drawn by the surface), its figure beside.
+    expect(await ui.find({ type: 'Text', text: /^3 open tasks · 2 in progress/ })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: '2/3 in progress' })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: 'backlog 1 · spec 1 · implement 1' })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: 'This session' })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: /Write the spec/ })).toBeDefined();
+    // A glance: nothing to press, a click may not reach it.
+    expect(await ui.find({ type: 'Button' })).toBeUndefined();
+    await ui.unmount();
+    world.isDown = true;
+    await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    const down = await widget($, surface);
+    expect(await down.find({ type: 'Text', text: /not reachable/ })).toBeDefined();
+  });
+
+test('the charts escape what they draw and count by outcome', () => {
+  const snap: AgentTasksSnapshot = {
+    isUp: true,
+    origin: 'http://127.0.0.1:3422',
+    old: null,
+    stages: ['back<log>', 'done'],
+    pipelines: {},
+    open: [],
+    recent: [
+      { status: 'completed', updated_at: '2026-10-09 10:00:00' },
+      { status: 'failed', updated_at: '2026-10-09 11:00:00' },
+      { status: 'completed', updated_at: '2026-10-01 11:00:00' },
+    ] as AgentTasksTask[],
+    me: 'mathi',
+  };
+  expect(stageChart(snap).source).toContain('back&lt;log&gt;');
+  const flow = throughputChart(snap, new Date('2026-10-09T12:00:00Z'));
+  expect(flow.alt).toMatch(/1 completed, 1 failed or cancelled$/);
+  expect(flow.alt).not.toContain('2 completed');
+  expect(flow.total).toBe(2);
+  expect(stageChart(snap).alt).not.toContain('done');
+});
+
+test('a terminal pane 150 columns wide draws the board as stage columns; narrower, as a list', async ($, on) => {
+  server(on, { tasks: BOARD() });
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+  await $.command.run({ command: 'pipeline', args: '', ...RUN });
+  const wide = await mount($, 'terminal', 160);
+  expect(await wide.find({ type: 'Text', text: 'IMPLEMENT' })).toBeDefined();
+  expect(await wide.find({ type: 'Text', text: 'Nothing here' })).toBeDefined();
+  expect(await wide.find({ key: 'open:1' })).toMatchObject({ props: { autoFocus: true } });
+  // The summary and Find stay above the columns; a find narrows them.
+  expect(await wide.find({ type: 'Text', text: '3 open tasks' })).toBeDefined();
+  await wide.input({ key: 'find:1', text: 'docs' });
+  expect(await wide.find({ type: 'Text', text: '1 open task matches "docs"' })).toBeDefined();
+  expect(await wide.findAll({ key: 'clear-filter' })).toHaveLength(1);
+  await wide.press({ key: 'clear-filter' });
+  await wide.press({ key: 'open:2' });
+  expect(await wide.find({ key: 'advance:test' })).toBeDefined();
+  await wide.press({ key: 'back' });
+  await wide.unmount();
+  const narrow = await mount($, 'terminal', 149);
+  expect(await narrow.find({ type: 'Text', text: 'IMPLEMENT' })).toBeUndefined();
 });

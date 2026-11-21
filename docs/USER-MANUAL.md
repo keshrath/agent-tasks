@@ -175,9 +175,20 @@ In the fullscreen layout (for example `CLAUDE_CODE_NO_FLICKER=1`) the pane docks
 
 ![The narrow dock](images/manual/narrow.png)
 
-In the default layout the pane sits above the prompt, keyboard only.
+In the default layout the pane sits above the prompt, keyboard only. When the pane is 150 columns wide or more, the board shows as stage columns of cards, as in the desktop app.
 
 ![The pane above the prompt](images/manual/inline.png)
+
+### In the Claude desktop app
+
+In the desktop app the pane is drawn natively and laid out as a kanban board:
+
+- **Header**: the Board and Done tabs, Refresh and **New task**; under it Find and the project and assignee pickers.
+- **Overview**: tiles for open, in progress, blocked and recently failed tasks, a chart of the open tasks per stage (in progress and waiting), and a chart of the tasks finished on each of the last 7 days (completed and failed).
+- **Board**: one column per pipeline stage, empty stages included. Each card shows the task's title, status mark, id, priority, assignee, age, project, subtasks, tags and any task it waits for. Find narrows the columns and says how many tasks match.
+- **Detail**: clicking a card opens the task in a panel beside the board, with the same actions, facts, description, subtasks, artifacts and comments as in the terminal. **Close** shuts the panel. When the pane is under 110 columns wide, the detail takes the whole pane instead.
+
+Minimized to a widget, the pane shows a summary: the share of open tasks in progress, the counts per stage and the tasks this session holds.
 
 ### The header and the keys
 

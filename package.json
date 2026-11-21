@@ -1,6 +1,6 @@
 {
   "name": "agent-tasks",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Pipeline-driven task management for AI coding agents — stages, dependencies, artifacts, multi-agent claiming, and a native Claude Code /pipeline pane",
   "type": "module",
   "main": "dist/index.js",

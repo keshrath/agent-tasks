@@ -676,4 +676,30 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       expect((await w.task(id)).title).toBe('Typed inline');
     });
   });
+  describe('the wide board inline (200 columns): stage columns of cards', () => {
+    let w: World;
+    let t: ClaudeTerm;
+    beforeAll(async () => {
+      w = await startWorld();
+      t = new ClaudeTerm(w, 200, 60);
+      await t.start();
+      await t.pipeline();
+      await t.waitFor(/IMPLEMENT/);
+    }, 2 * MIN);
+    afterAll(async () => {
+      await t?.kill();
+      await w?.stop();
+    }, 2 * MIN);
+
+    it('draws a column per stage; a card opens with Enter and the way back returns to it', async () => {
+      expect(t.text()).toMatch(/BACKLOG[\s\S]*SPEC/);
+      await landsOn(t, 'Write the e2e harness');
+      shot(t, 'wide-board');
+      await t.enter();
+      await t.waitFor(/‹ Board/);
+      await t.press('‹ Board');
+      await t.waitFor(/IMPLEMENT/);
+      await landsOn(t, 'Write the e2e harness');
+    });
+  });
 });

@@ -137,6 +137,9 @@ export type AgentTasksForm = {
 /** The order the board and Done were drawn in (task ids), each its own. */
 export type AgentTasksPinned = { board: number[]; done: number[] };
 
+/** The desktop board's pickers: one project, one assignee ('unclaimed' for none); '' is any. */
+export type AgentTasksFacets = { project: string; assignee: string };
+
 /** The New tab's fields as typed. */
 export type AgentTasksDraft = {
   title: string;
@@ -183,6 +186,8 @@ declare module 'claude-code' {
       pinned: AgentTasksPinned | null;
       /** The open tasks this session holds (its claims), marked on the board and in a task. */
       mine: number[];
+      /** The desktop board's project and assignee pickers; '' shows all. */
+      facets: AgentTasksFacets;
     };
   }
 }

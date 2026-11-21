@@ -1,12 +1,14 @@
 // Trees for the /pipeline pane. Pure: state in, elements out; the actions come from
 // register.tsx. Laid out for the docked sidebar first (about 38 to 70 columns): a
 // one-line tab bar, one status line, two-line rows, labels beside wrapping values,
-// summary lines that break between their parts. Wider panes only get more room.
+// summary lines that break between their parts. From KANBAN_COLS (150) the board is
+// stage columns of cards (`Kanban`, which the desktop app's board draws too).
 import type { Elements } from 'claude-code';
 
 import type {
   AgentTasksDetail,
   AgentTasksDraft,
+  AgentTasksFacets,
   AgentTasksForm,
   AgentTasksGate,
   AgentTasksPinned,
@@ -20,7 +22,8 @@ import type {
 
 /** The elements the pane draws with; mobile has no `Input` or `Select`. */
 export type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown' | 'Progress'> &
-  Partial<Pick<Elements['terminal'], 'Input' | 'Select'>>;
+  Partial<Pick<Elements['terminal'], 'Input' | 'Select'>> &
+  Partial<Pick<Elements['desktop'], 'Svg'>>;
 
 export type Actions = {
   refresh: () => void;
@@ -31,6 +34,8 @@ export type Actions = {
   back: () => void;
   find: (query: string) => void;
   clearFilter: () => void;
+  /** Picks a project or assignee for the desktop board ('' for any). */
+  facet: (name: keyof AgentTasksFacets, value: string) => void;
   /** Moves the task on to `stage`, the one the button names. */
   advance: (id: number, stage: string) => void;
   /** Opens the field an action needs its words in. */
@@ -59,16 +64,19 @@ export type Actions = {
 };
 
 // Theme keys, so the pane follows the person's theme (light, dark, colorblind).
-const OK = 'success';
-const BAD = 'error';
-const WARN = 'warning';
-const ACCENT = 'suggestion';
+/** From this many columns a terminal pane draws the board as stage columns. */
+export const KANBAN_COLS = 150;
+
+export const OK = 'success';
+export const BAD = 'error';
+export const WARN = 'warning';
+export const ACCENT = 'suggestion';
 
 /** Optional props are left out, never passed as undefined: a remote surface refuses undefined. */
-const color = (c: string | false | undefined) => (c ? { color: c } : {});
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+export const color = (c: string | false | undefined) => (c ? { color: c } : {});
+export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const pad2 = (n: number) => String(n).padStart(2, '0');
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+export const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 /** Terminal columns of one code point: wide East Asian and emoji take two, marks none. */
 function charCols(ch: string): number {
   const c = ch.codePointAt(0)!;
@@ -285,7 +293,7 @@ export function matches(t: AgentTasksTask, query: string): boolean {
 }
 
 /** The tags the filter is found in: a row draws them, tags being nowhere else on it. */
-const tagsFound = (t: AgentTasksTask, query: string) =>
+export const tagsFound = (t: AgentTasksTask, query: string) =>
   needle(query) ? t.tags.filter((tag) => tag.toLowerCase().includes(needle(query))) : [];
 
 /** Every stage the board has a section for, in pipeline order: the default, then custom ones. */
@@ -418,7 +426,10 @@ export const isOutOfReach = (g: AgentTasksGate | null) =>
 
 type Look = { mark: string; tone: string | undefined; word: string };
 
-function look(t: { status: AgentTasksStatus; assigned_to?: string | null }, blocked = false): Look {
+export function look(
+  t: { status: AgentTasksStatus; assigned_to?: string | null },
+  blocked = false,
+): Look {
   if (blocked && isOpen(t.status)) return { mark: '!', tone: WARN, word: 'blocked' };
   switch (t.status) {
     case 'in_progress':
@@ -434,7 +445,7 @@ function look(t: { status: AgentTasksStatus; assigned_to?: string | null }, bloc
   }
 }
 
-type ViewProps = {
+export type ViewProps = {
   el: El;
   on: Actions;
   /** The key the ring starts on when the pane takes the keys: drawn `autoFocus`. */
@@ -442,10 +453,11 @@ type ViewProps = {
 };
 
 /** `autoFocus` for the element `auto` names. */
-const af = (auto: string | null, key: string) => (auto === key ? { autoFocus: true as const } : {});
+export const af = (auto: string | null, key: string) =>
+  auto === key ? { autoFocus: true as const } : {};
 
 /** A section heading: bold, with an optional dim count or aside. */
-function Heading({ el, title, aside }: { el: El; title: string; aside?: string }) {
+export function Heading({ el, title, aside }: { el: El; title: string; aside?: string }) {
   const { Text } = el;
   return (
     <Text wrap="truncate">
@@ -562,6 +574,8 @@ export type PaneProps = Omit<ViewProps, 'auto'> & {
   pinned: AgentTasksPinned | null;
   /** This session's open tasks. */
   mine: number[];
+  /** The desktop board's pickers. */
+  facets: AgentTasksFacets;
 };
 
 /**
@@ -603,13 +617,13 @@ export const isField = (key: string | null) =>
  * What Find matches, longest first: the longest that fits beside `Find: ` and, while the
  * field has the focus, ` ⏎ find` (13 columns) is drawn, so the hint never wraps.
  */
-const FINDS = ['id, title, agent, project or tag', 'id, title, agent, project'];
-const fitting = (hints: string[], width: number) =>
+export const FINDS = ['id, title, agent, project or tag', 'id, title, agent, project'];
+export const fitting = (hints: string[], width: number) =>
   hints.find((h) => cols(h) <= width) ?? hints.at(-1)!;
 
 /** An outcome's tone, by the mark `act` in register.tsx leads it with: ✓ done, ✗ failed. */
 /** ✓ done, ✗ refused or failed, ! changed elsewhere, – nothing happened (default). */
-const noticeTone = (notice: string) =>
+export const noticeTone = (notice: string) =>
   notice.startsWith('✓')
     ? { color: OK }
     : notice.startsWith('✗')
@@ -619,7 +633,7 @@ const noticeTone = (notice: string) =>
         : {};
 
 /** Why there is no board: nothing answers, or an agent-tasks from before the board does. */
-function Down({ el, snap }: { el: El; snap: AgentTasksSnapshot }) {
+export function Down({ el, snap }: { el: El; snap: AgentTasksSnapshot }) {
   const { Box, Text } = el;
   return (
     <Box flexDirection="column">
@@ -638,7 +652,7 @@ function Down({ el, snap }: { el: El; snap: AgentTasksSnapshot }) {
 }
 
 /** A task's title as the board or Done has it. */
-const titleOf = (snap: AgentTasksSnapshot, id: number | undefined) =>
+export const titleOf = (snap: AgentTasksSnapshot, id: number | undefined) =>
   id === undefined
     ? null
     : ([...snap.open, ...snap.recent].find((t) => t.id === id)?.title ?? null);
@@ -684,6 +698,7 @@ export function Pane(p: PaneProps) {
         expanded={p.expanded}
         pinned={p.pinned?.board ?? null}
         mine={p.mine}
+        {...(width >= KANBAN_COLS ? { kanban: <Kanban p={p} /> } : {})}
       />
     );
   else if (route.tab === 'done')
@@ -849,6 +864,7 @@ function Board({
   expanded,
   pinned,
   mine,
+  kanban,
 }: ViewProps & {
   snap: AgentTasksSnapshot;
   filter: string;
@@ -857,6 +873,8 @@ function Board({
   expanded: string[];
   pinned: number[] | null;
   mine: number[];
+  /** A wide pane's board as stage columns, drawn in place of the stage list. */
+  kanban?: unknown;
 }) {
   const { Box, Text, Button, Input } = el;
   if (snap.open.length === 0)
@@ -915,7 +933,7 @@ function Board({
             onInput={on.typing}
             onSubmit={on.find}
           />
-          {isFiltered && (
+          {isFiltered && !kanban && (
             <Button
               key="clear-filter"
               label="Clear the filter"
@@ -925,8 +943,9 @@ function Board({
           )}
         </Box>
       )}
-      {shownCount === 0 && <Text dimColor>No open task matches.</Text>}
-      {groups.map((g) => {
+      {kanban ? (kanban as never) : null}
+      {!kanban && shownCount === 0 && <Text dimColor>No open task matches.</Text>}
+      {(kanban ? [] : groups).map((g) => {
         // A find shows every match, folded or not: no toggle that would do nothing.
         const isUnfolded = !isFiltered && g.hidden === 0 && expanded.includes(`stage:${g.stage}`);
         // Unfolded, the toggle stays where it was: the rows it showed follow it.
@@ -975,7 +994,7 @@ function Board({
   );
 }
 
-function Done({
+export function Done({
   el,
   on,
   auto,
@@ -1065,7 +1084,7 @@ const FIELDS: [keyof AgentTasksDraft, string, string[]][] = [
   ['description', 'Description', ['optional']],
 ];
 
-function NewTask({
+export function NewTask({
   el,
   on,
   auto,
@@ -1117,6 +1136,8 @@ function NewTask({
 type DetailProps = ViewProps & {
   /** The task is one this session holds. */
   isMine: boolean;
+  /** Drawn beside the board (desktop): its way out closes the panel. */
+  isPanel?: boolean;
   /** The title of the task the way back goes to, when it is one. */
   backTitle: string | null;
   d: AgentTasksDetail;
@@ -1161,7 +1182,7 @@ function Refs({ el, on, auto, k, refs }: ViewProps & { k: string; refs: AgentTas
   );
 }
 
-function Detail({
+export function Detail({
   el,
   on,
   auto,
@@ -1174,6 +1195,7 @@ function Detail({
   width,
   isMine,
   backTitle,
+  isPanel = false,
 }: DetailProps) {
   const { Box, Text, Button, Input, Markdown } = el;
   const waiting = d.blockers.filter((b) => isOpen(b.status));
@@ -1207,14 +1229,26 @@ function Detail({
   return (
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column">
-        <Button
-          key="back"
-          label={`‹ ${backLabel}`}
-          plain
-          dimColor
-          {...af(auto, 'back')}
-          onPress={on.back}
-        />
+        {isPanel && route.trail.length === 0 ? (
+          <Box justifyContent="flex-end">
+            <Button
+              key="back"
+              label="Close"
+              role="dismiss"
+              {...af(auto, 'back')}
+              onPress={on.back}
+            />
+          </Box>
+        ) : (
+          <Button
+            key="back"
+            label={`‹ ${backLabel}`}
+            plain
+            dimColor
+            {...af(auto, 'back')}
+            onPress={on.back}
+          />
+        )}
         <Text wrap="wrap">
           <Text dimColor>#{d.id} </Text>
           <Text bold>{d.title}</Text>
@@ -1584,6 +1618,196 @@ function ActionForm({
           onPress={() => on.finish(d.id, form.action)}
         />
         <Button key="form-dismiss" label="Never mind" onPress={on.dismiss} />
+      </Box>
+    </Box>
+  );
+}
+
+// --- The board as kanban columns: the desktop app's, and a wide terminal's -------------
+
+/** A kanban column's least width, in cells: narrower ones scroll sideways instead. */
+const COLUMN_MIN = 26;
+
+/**
+ * A task as a kanban card, as the web dashboard drew it: mark, id and age; the title (the
+ * Button that opens it); priority, who and project; subtasks, tags and what it waits for.
+ */
+function Card({
+  el,
+  on,
+  auto,
+  t,
+  filter,
+  isOpened,
+  isMine,
+}: ViewProps & { t: AgentTasksTask; filter: string; isOpened: boolean; isMine: boolean }) {
+  const { Box, Text, Button } = el;
+  const lk = look(t, t.blocked_by.length > 0);
+  const tags = filter ? tagsFound(t, filter) : t.tags;
+  return (
+    <Box
+      key={`card:${t.id}`}
+      flexDirection="column"
+      borderStyle="round"
+      {...(isOpened ? { borderColor: ACCENT } : { borderDimColor: true })}
+      paddingX={1}
+      hover={{ borderColor: ACCENT }}
+    >
+      <Box justifyContent="space-between" columnGap={1}>
+        <Text wrap="truncate">
+          <Text {...color(lk.tone)}>{lk.mark}</Text>
+          <Text dimColor> #{t.id}</Text>
+          {isMine ? <Text color={ACCENT}> · this session</Text> : null}
+        </Text>
+        <Text dimColor>{ago(t.updated_at)}</Text>
+      </Box>
+      <Button
+        key={`open:${t.id}`}
+        {...af(auto, `open:${t.id}`)}
+        plain
+        onPress={() => on.open(t.id)}
+      >
+        <Text bold wrap="wrap">
+          {t.title.replace(/\s+/g, ' ')}
+        </Text>
+      </Button>
+      <Text wrap="truncate">
+        {t.priority ? (
+          <Text {...(t.priority >= 5 ? { color: WARN } : { dimColor: true })}>p{t.priority} </Text>
+        ) : null}
+        <Text dimColor>
+          {[t.assigned_to ?? 'unclaimed', t.project].filter(Boolean).join(' · ')}
+        </Text>
+      </Text>
+      {(t.subtasks || t.parent_id !== null) && (
+        <Text dimColor wrap="truncate">
+          {[
+            t.subtasks && `${t.subtasks.done}/${t.subtasks.total} subtasks`,
+            t.parent_id !== null && `part of #${t.parent_id}`,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </Text>
+      )}
+      {tags.length > 0 && (
+        <Text color={ACCENT} wrap="wrap">
+          {tags.map((g) => `#${g}`).join(' ')}
+        </Text>
+      )}
+      {t.blocked_by.length > 0 && (
+        <Text color={WARN} wrap="wrap">
+          waits for {t.blocked_by.map((b) => `#${b}`).join(', ')}
+        </Text>
+      )}
+    </Box>
+  );
+}
+
+/** The pickers' value for "any": no project or agent is named `*`. */
+export const ANY = '*';
+
+/** A task the project and assignee pickers let through. */
+const picked = (t: AgentTasksTask, f: AgentTasksFacets) =>
+  (f.project === '' || t.project === f.project) &&
+  (f.assignee === '' || (t.assigned_to ?? 'unclaimed') === f.assignee);
+
+/** The board as columns, one per stage of the pipeline, each with its cards. */
+export function Kanban({ p }: { p: PaneProps }) {
+  const { Box, Text, Button } = p.el;
+  const { on } = p;
+  if (p.snap.open.length === 0)
+    return (
+      <Box flexDirection="column" gap="sm" paddingY="md" alignItems="flex-start">
+        <Text bold>Nothing open on the board.</Text>
+        <Text dimColor>
+          Tasks agents create land here, by pipeline stage.
+          {p.snap.recent.length ? ` ${plural(p.snap.recent.length, 'recent one')} under Done.` : ''}
+        </Text>
+        <Button
+          key="empty-new"
+          label="New task"
+          variant="primary"
+          {...af(p.landing, 'empty-new')}
+          onPress={on.newTask}
+        />
+      </Box>
+    );
+  const snap = { ...p.snap, open: p.snap.open.filter((t) => picked(t, p.facets)) };
+  // Every stage is a column, empty ones too, so the pipeline reads left to right.
+  const unfolded = [...stageOrder(snap), 'other stages'].map((s) => `stage:${s}`);
+  const groups = boardGroups(snap, p.filter, unfolded, p.pinned?.board ?? null);
+  const stages = stageOrder(snap).filter((s) => s !== 'done' || groups.some((g) => g.stage === s));
+  if (groups.some((g) => g.stage === 'other stages')) stages.push('other stages');
+  const shown = groups.reduce((n, g) => n + g.tasks.length, 0);
+  const asked = [p.filter && `"${p.filter}"`, p.facets.project, p.facets.assignee].filter(Boolean);
+  return (
+    <Box flexDirection="column" gap="sm">
+      {asked.length > 0 && (
+        <Box columnGap="sm" alignItems="center">
+          <Text color={ACCENT}>
+            {shown === 0
+              ? `No open task matches ${asked.join(', ')}.`
+              : `${plural(shown, 'open task')} ${shown === 1 ? 'matches' : 'match'} ${asked.join(', ')}`}
+          </Text>
+          <Button
+            key="clear-filter"
+            label="Clear the filter"
+            {...af(p.landing, 'clear-filter')}
+            onPress={() => {
+              if (p.facets.project) on.facet('project', '');
+              if (p.facets.assignee) on.facet('assignee', '');
+              on.clearFilter();
+            }}
+          />
+        </Box>
+      )}
+      <Box overflowX="scroll">
+        <Box columnGap="sm" alignItems="flex-start">
+          {stages.map((stage) => {
+            const g = groups.find((x) => x.stage === stage);
+            const tasks = g ? [...g.tasks] : [];
+            const working = tasks.filter((t) => t.status === 'in_progress').length;
+            return (
+              <Box
+                key={`col:${stage}`}
+                flexDirection="column"
+                gap="xs"
+                minWidth={COLUMN_MIN}
+                flexGrow={1}
+                flexShrink={1}
+                padding="xs"
+                backgroundColor="userMessageBackground"
+              >
+                <Box justifyContent="space-between" columnGap={1} paddingX="xs">
+                  <Text bold wrap="truncate">
+                    {stage.toUpperCase()}
+                  </Text>
+                  <Text dimColor>
+                    {working ? `${working} in progress · ` : ''}
+                    {tasks.length}
+                  </Text>
+                </Box>
+                {tasks.length === 0 && (
+                  <Box paddingX="xs">
+                    <Text dimColor>Nothing here</Text>
+                  </Box>
+                )}
+                {tasks.map((t) => (
+                  <Card
+                    key={`card:${t.id}`}
+                    el={p.el}
+                    on={on}
+                    auto={p.landing}
+                    t={t}
+                    filter={p.filter}
+                    isOpened={p.route.task === t.id}
+                    isMine={p.mine.includes(t.id)}
+                  />
+                ))}
+              </Box>
+            );
+          })}
+        </Box>
       </Box>
     </Box>
   );

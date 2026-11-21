@@ -719,8 +719,8 @@ describe.skipIf(!E2E)('/pipeline while other sessions change the board', () => {
       25_000,
     );
     await landsOn(t, /^(\[ )?Complete( \])?$/, 10_000);
-    // The header is the keys' again, not a field's.
-    expect(t.text()).toMatch(/1: Board\s+2: Done/);
+    // The header is the keys' again, not a field's: drawn once the ring's move is recorded.
+    await t.waitFor(/1: Board\s+2: Done/);
     // Enter there, once the person sees it, opens the form with the words; nothing moved the task.
     await t.settle(500, 3_000);
     await t.enter();

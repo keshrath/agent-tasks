@@ -48,7 +48,9 @@ import {
   priorityOf,
   refreshKey,
   type Actions,
+  ANY,
 } from './view';
+import { DesktopPane, Glance } from './desktop';
 import { PIPELINE_REMINDER, isWorkPrompt } from './work';
 
 const PANE = 'agent-tasks';
@@ -90,6 +92,10 @@ const notice = atom({ plugin: 'agent-tasks', key: 'notice' } as const, null);
 const focused = atom({ plugin: 'agent-tasks', key: 'focused' } as const, null);
 const pinned = atom({ plugin: 'agent-tasks', key: 'pinned' } as const, null);
 const mine = atom({ plugin: 'agent-tasks', key: 'mine' } as const, []);
+const facets = atom({ plugin: 'agent-tasks', key: 'facets' } as const, {
+  project: '',
+  assignee: '',
+});
 
 // REST bodies are server JSON; read defensively, never trusted for shape.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -958,6 +964,12 @@ async function refilter($: EngineInterface, query: string) {
   await land($, null, since);
 }
 
+/** Narrows the desktop board to one project or assignee ('' for any). */
+async function refacet($: EngineInterface, name: 'project' | 'assignee', value: string) {
+  await update($, facets, (f) => ({ ...f, [name]: value }));
+  await update($, pinned, () => null);
+}
+
 async function reset($: EngineInterface) {
   await update($, confirm, () => null);
   await update($, form, () => null);
@@ -1272,6 +1284,7 @@ function actionsOf($: EngineInterface): Actions {
     back: () => void back($),
     find: (q) => void refilter($, q.trim()),
     clearFilter: () => void refilter($, ''),
+    facet: (name, value) => void refacet($, name, value),
     // The stage the button names: a second press before the redraw is refused, not a skip.
     // Moved on, the ring goes to the way out: left on the next Advance, a second Enter would
     // move the task a stage further than meant.
@@ -1577,7 +1590,10 @@ export const register: Register = (on, options) => {
       $.ui.log(`agent-tasks select ${e.element}: its handler was gone: ${String(err)}`, {
         to: 'debug',
       });
+      const facet = /^facet:(project|assignee)$/.exec(e.element ?? '')?.[1];
       if (e.element === 'form-stage') actions($).pickStage(e.value);
+      else if (facet)
+        actions($).facet(facet as 'project' | 'assignee', e.value === ANY ? '' : e.value);
       else await say($, '– that list was drawn again as you picked: pick it again');
       return { element: e.element, value: e.value };
     }
@@ -1602,7 +1618,7 @@ export const register: Register = (on, options) => {
     const snap = await read($, snapshot);
     if (!snap) return <el.Progress label="The board" valueText="loading…" />;
     // Read together: a drawing that waits on each value in turn leaves the pane blank longer.
-    const [r, q, d, ex, c, f, dr, n, fr, b, no, fo, auto, pin, my] = await Promise.all([
+    const [r, q, d, ex, c, f, dr, n, fr, b, no, fo, auto, pin, my, fa] = await Promise.all([
       read($, route),
       read($, filter),
       read($, detail),
@@ -1618,11 +1634,14 @@ export const register: Register = (on, options) => {
       landing($, null),
       read($, pinned),
       read($, mine),
+      read($, facets),
     ]);
 
     drawnVersion = Math.max(drawnVersion, seen);
+    if (e.props.placement === 'widget') return <Glance el={el} snap={snap} mine={my} />;
+    const Layout = e.surface === 'desktop' ? DesktopPane : Pane;
     return (
-      <Pane
+      <Layout
         el={el}
         snap={snap}
         route={r}
@@ -1642,6 +1661,7 @@ export const register: Register = (on, options) => {
         landing={auto}
         pinned={pin}
         mine={my}
+        facets={fa}
         on={actions($)}
       />
     );
