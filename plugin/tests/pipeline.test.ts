@@ -7,11 +7,11 @@ import {
   boardGroups,
   clip,
   cols,
-  fitFacts,
   gateHint,
   isField,
   packParts,
   printable,
+  rowLayout,
   time,
   when,
 } from '../hooks/view';
@@ -88,6 +88,8 @@ type World = {
   isHung?: boolean;
   /** The session's id (a /clear moves it on); 'sess-1' when unset. */
   sid?: string;
+  /** The web dashboard's address /health reports. */
+  dashboard?: string;
 };
 
 type Call = { method: string; path: string; body: Record<string, unknown> | undefined };
@@ -157,6 +159,11 @@ function server(on: On, world: World) {
       return wait ? wait.then(() => board) : board;
     }
     if (p === '/api/pipeline') return reply({ stages: STAGES, gate_config: null });
+    if (p === '/health')
+      return reply({
+        status: 'ok',
+        ...(world.dashboard ? { dashboard_url: world.dashboard } : {}),
+      });
     if (p === '/api/tasks' && method === 'POST') {
       const t = task(100, String(body?.title), {
         project: (body?.project as string) ?? null,
@@ -351,7 +358,7 @@ test('/pipeline opens a plain sidebar pane with the board on every surface', asy
   const out = await $.command.run({ command: 'pipeline', args: '', ...RUN });
   // The open pane says it all: nothing goes into the transcript (nor to the model).
   expect(out.text).toBeUndefined();
-  expect(s.status.at(-1)).toBe('3 open tasks · 2 in progress');
+  expect(s.status.at(-1)).toBe('3 open · 2 in progress');
   expect(s.opens).toEqual([expect.objectContaining({ id: 'agent-tasks', focus: true })]);
   expect(s.opens[0]).not.toHaveProperty('closeOnEscape');
   for (const surface of SURFACES) {
@@ -378,7 +385,7 @@ test('/pipeline says why when the pane is not placed', async ($, on) => {
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
   const out = await $.command.run({ command: 'pipeline', args: '', ...RUN });
   // No pane to show the board: the summary goes with the reason.
-  expect(out.text).toBe('3 open tasks · 2 in progress\npane not shown: below 110 columns');
+  expect(out.text).toBe('3 open · 2 in progress\npane not shown: below 110 columns');
 });
 
 for (const surface of BOTH)
@@ -416,9 +423,7 @@ for (const surface of BOTH)
     // Found by a tag: the row says which, tags being nowhere else on it.
     await ui.input({ key: 'find:3', text: 'release' });
     expect(await ui.find({ key: 'open:3' })).toBeDefined();
-    expect(
-      await ui.find({ type: 'Text', text: surface === 'terminal' ? /tag release/ : /^#release$/ }),
-    ).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: /^#release$/ })).toBeDefined();
     await ui.input({ key: 'find:4', text: 'nothing like this' });
     expect(await ui.find({ type: 'Text', text: /No open task matches/ })).toBeDefined();
     expect(await ui.find({ key: 'clear-filter' })).toMatchObject({ props: { autoFocus: true } });
@@ -555,6 +560,7 @@ test('a long backlog folds past five rows; a find or a stage at work never does'
     ],
     recent: [],
     me: 'mathi',
+    dashboard: null,
   };
   const [backlog, implement] = boardGroups(snap, '', []);
   expect(backlog).toMatchObject({ stage: 'backlog', hidden: 25 });
@@ -689,15 +695,19 @@ for (const surface of BOTH)
     // would replace what the person is typing, dropping keys typed fast.
     expect((await ui.find({ key: 'new-title:1' }))?.props.value).toBe('');
     expect(await ui.find({ key: 'new-description:1' })).toMatchObject({ props: { rows: 3 } });
-    // Enter with a priority that is no number: said at its field, nothing created.
+    // Enter with a priority that is no number: said once, nothing created; fixed, said no more.
     await ui.input({ key: 'new-priority:1', text: 'high' });
     expect(s.calls).toEqual([]);
-    expect(await ui.find({ type: 'Text', text: /a whole number, like 0 or 5/ })).toBeDefined();
+    expect(
+      await ui.find({ type: 'Text', text: '✗ the priority is a whole number, like 0 or 5' }),
+    ).toBeDefined();
+    expect(await ui.findAll({ type: 'Text', text: /whole number, like/ })).toHaveLength(1);
     // Drawn anew, the fields hold what was typed.
     expect((await ui.find({ key: 'new-title:2' }))?.props.value).toBe('Try the pane');
     expect((await ui.find({ key: 'new-priority:2' }))?.props.value).toBe('high');
     // Enter in the title, the priority fixed: created with every field.
     await ui.input({ key: 'new-priority:2', text: '3', kind: 'change' });
+    expect(await ui.find({ type: 'Text', text: /whole number, like/ })).toBeUndefined();
     await ui.input({ key: 'new-title:2', text: 'Try the pane' });
     expect(s.calls.at(-1)).toEqual({
       method: 'POST',
@@ -752,11 +762,39 @@ test('a toast names a task cut by display width, and with the pane shown says no
   expect(name.endsWith('…')).toBe(true);
 });
 
-test('a row keeps whole facts: one that does not fit is left out, never cut', () => {
-  const facts = ['agent-pane', 'part of #1', false as const, 'agent-tasks', '5m ago'];
-  expect(fitFacts(facts, 40)).toEqual(['agent-pane', 'part of #1', 'agent-tasks']);
-  expect(fitFacts(facts, 24)).toEqual(['agent-pane', 'part of #1']);
-  expect(fitFacts(facts, 5)).toEqual([]);
+test('a list keeps whole columns beside its titles: one that does not fit is left out, never cut', () => {
+  const t = (id: number, over: Partial<AgentTasksTask>): AgentTasksTask => ({
+    id,
+    title: 'A task',
+    stage: 'spec',
+    status: 'in_progress',
+    priority: 0,
+    project: null,
+    assigned_to: null,
+    tags: [],
+    parent_id: null,
+    result: null,
+    updated_at: '2026-10-09 20:00:00',
+    blocked_by: [],
+    subtasks: null,
+    ...over,
+  });
+  const tasks = [t(7, { priority: 5, assigned_to: 'agent-release' }), t(12, { project: 'docs' })];
+  const cells = [
+    { get: (x: AgentTasksTask) => x.priority > 0 && `p${x.priority}` },
+    { get: (x: AgentTasksTask) => x.assigned_to, isLeft: true as const },
+    { get: () => null },
+    { get: (x: AgentTasksTask) => x.project, isLeft: true as const },
+  ];
+  const widths = (cols: number) => rowLayout(tasks, cols, cells).columns.map((c) => c.width);
+  // Each column as wide as its widest cell; one nobody fills is not drawn.
+  expect(rowLayout(tasks, 100, cells).idCols).toBe(3);
+  expect(widths(100)).toEqual([2, 13, 4]);
+  // Narrower, a column that does not fit is left out and a later one that does is kept.
+  expect(widths(50)).toEqual([2, 4]);
+  // The title keeps its room first: a narrow dock keeps the priority alone, then nothing.
+  expect(widths(40)).toEqual([2]);
+  expect(widths(30)).toEqual([]);
 });
 
 for (const surface of BOTH)
@@ -915,7 +953,7 @@ for (const surface of BOTH)
     expect(
       await ui.find({
         type: 'Text',
-        text: /✗ still nothing answers at http:\/\/127\.0\.0\.1:3422 \(\d\d:\d\d:\d\d\)/,
+        text: /^✗ still nothing answers \(\d\d:\d\d:\d\d\)$/,
       }),
     ).toBeDefined();
     // The tabs stay while it is down, so a digit stays in the pane.
@@ -950,7 +988,7 @@ test("a poll that answers after the pane's own act was drawn neither undoes it n
   await tick;
   await s.clock.advance(10_000);
   expect(s.toasts).toEqual([]);
-  expect(s.status.at(-1)).toBe('2 open tasks · 1 in progress');
+  expect(s.status.at(-1)).toBe('2 open · 1 in progress');
 });
 
 /** The plugin with its pipeline reminder on. */
@@ -1625,6 +1663,31 @@ test('Send back starts on its stage; Enter in an empty Why sends nothing; back i
   expect(s.calls.at(-1)).toMatchObject({ body: { action: 'regress', stage: 'backlog' } });
 });
 
+test('a form or the delete box opened by Enter takes a second Enter that reached its send', async ($, on) => {
+  const s = server(on, { tasks: BOARD() });
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+  await $.command.run({ command: 'pipeline', args: '2', ...RUN });
+  const ui = await mount($);
+  await s.clock.advance(1_000);
+  // The form drawn where the actions were: the ring kept by its place sits on its send.
+  await ui.press({ key: 'ask:regress' });
+  await ui.hurried({ key: 'form-submit' });
+  await s.clock.advance(1_000);
+  await ui.press({ key: 'form-dismiss' });
+  await s.clock.advance(1_000);
+  await ui.press({ key: 'ask-delete' });
+  await ui.hurried({ key: 'confirm-yes' });
+  expect(s.calls).toEqual([]);
+  expect(
+    await ui.find({ type: 'Text', text: /that press came as the view changed/ }),
+  ).toBeDefined();
+  // Back from the box, the actions are drawn again: a press at once is taken too.
+  await s.clock.advance(1_000);
+  await ui.press({ key: 'confirm-no' });
+  await ui.hurried({ key: 'ask:fail' });
+  expect(await ui.find({ type: 'Text', text: /Mark #2 failed/ })).toBeUndefined();
+});
+
 test('a press while an act runs waits for it; a task moved elsewhere is no failure (M5, M3)', async ($, on) => {
   const world: World = { tasks: BOARD() };
   const s = server(on, world);
@@ -1932,6 +1995,13 @@ test('the New tab takes the ring into Title only when the press asked to type', 
   expect((await ui.find({ type: 'Input' }))?.props.autoFocus).toBeUndefined();
   await ui.press({ key: 'tab:new' }); // pressed again: to type
   expect((await ui.find({ type: 'Input' }))?.props.autoFocus).toBe(true);
+  // Created, the task opens; the tab pressed once from there lands on the tab again, so the
+  // same digit pressed next is no title.
+  await ui.input({ key: 'new-title:1', text: 'Made here' });
+  expect(await ui.find({ type: 'Text', text: 'Made here' })).toBeDefined();
+  await ui.press({ key: 'tab:new' });
+  expect(await ui.find({ key: 'tab:new' })).toMatchObject({ props: { autoFocus: true } });
+  expect((await ui.find({ type: 'Input' }))?.props.autoFocus).toBeUndefined();
 });
 
 for (const surface of BOTH)
@@ -2008,7 +2078,8 @@ test('desktop: the board is kanban columns, every stage of the pipeline, with ti
   for (const stage of ['BACKLOG', 'SPEC', 'PLAN', 'IMPLEMENT', 'TEST', 'REVIEW'])
     expect(await ui.find({ type: 'Text', text: stage })).toBeDefined();
   expect(await ui.find({ type: 'Text', text: 'DONE' })).toBeUndefined(); // nothing open is done
-  expect(await ui.find({ type: 'Text', text: '1 in progress · 1' })).toBeDefined();
+  // A column counts as the list's stage heading does: the in-progress share only when partial.
+  expect(await ui.find({ type: 'Text', text: /in progress · \d/ })).toBeUndefined();
   expect(await ui.find({ type: 'Text', text: 'Nothing here' })).toBeDefined();
   // Cards: mark and id, the title, priority, who and project; the tags and what it waits for.
   expect(await ui.find({ key: 'open:1' })).toMatchObject({ text: 'Write the spec' });
@@ -2026,11 +2097,12 @@ test('desktop: the board is kanban columns, every stage of the pipeline, with ti
       /^Open tasks by stage: backlog 1 \(0 in progress\), spec 1 \(1 in progress\)/,
     ),
   ]);
-  // The main action is New task; the tab shown is marked.
+  // The one main action is New task; the tabs not shown are dim.
   expect(await ui.find({ key: 'tab:new' })).toMatchObject({
     props: { label: 'New task', variant: 'primary' },
   });
-  expect(await ui.find({ key: 'tab:board' })).toMatchObject({ props: { variant: 'primary' } });
+  expect((await ui.find({ key: 'tab:board' }))?.props).not.toHaveProperty('dimColor');
+  expect(await ui.find({ key: 'tab:done' })).toMatchObject({ props: { dimColor: true } });
 });
 
 test('desktop: a card opens its detail beside the board, Close shuts it', async ($, on) => {
@@ -2119,7 +2191,7 @@ for (const surface of BOTH)
     await $.command.run({ command: 'pipeline', args: '', ...RUN });
     const ui = await widget($, surface);
     // The share in progress as a bar (Progress, drawn by the surface), its figure beside.
-    expect(await ui.find({ type: 'Text', text: /^3 open tasks · 2 in progress/ })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: /^3 open · 2 in progress/ })).toBeDefined();
     expect(await ui.find({ type: 'Text', text: '2/3 in progress' })).toBeDefined();
     expect(await ui.find({ type: 'Text', text: 'backlog 1 · spec 1 · implement 1' })).toBeDefined();
     expect(await ui.find({ type: 'Text', text: 'This session' })).toBeDefined();
@@ -2147,6 +2219,7 @@ test('the charts escape what they draw and count by outcome', () => {
       { status: 'completed', updated_at: '2026-10-01 11:00:00' },
     ] as AgentTasksTask[],
     me: 'mathi',
+    dashboard: null,
   };
   expect(stageChart(snap).source).toContain('back&lt;log&gt;');
   const flow = throughputChart(snap, new Date('2026-10-09T12:00:00Z'));
@@ -2165,7 +2238,7 @@ test('a terminal pane 150 columns wide draws the board as stage columns; narrowe
   expect(await wide.find({ type: 'Text', text: 'Nothing here' })).toBeDefined();
   expect(await wide.find({ key: 'open:1' })).toMatchObject({ props: { autoFocus: true } });
   // The summary and Find stay above the columns; a find narrows them.
-  expect(await wide.find({ type: 'Text', text: '3 open tasks' })).toBeDefined();
+  expect(await wide.find({ type: 'Text', text: '3 open' })).toBeDefined();
   await wide.input({ key: 'find:1', text: 'docs' });
   expect(await wide.find({ type: 'Text', text: '1 open task matches "docs"' })).toBeDefined();
   expect(await wide.findAll({ key: 'clear-filter' })).toHaveLength(1);
@@ -2177,3 +2250,45 @@ test('a terminal pane 150 columns wide draws the board as stage columns; narrowe
   const narrow = await mount($, 'terminal', 149);
   expect(await narrow.find({ type: 'Text', text: 'IMPLEMENT' })).toBeUndefined();
 });
+
+for (const surface of BOTH)
+  test(`the docked pane: counts in its header, a line per task under its stage, the browser link only when served (${surface})`, async ($, on) => {
+    const world: World = {
+      tasks: BOARD(),
+      deps: [{ task_id: 2, depends_on: 1, relationship: 'blocks' }],
+    };
+    server(on, world);
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true });
+    await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    const ui = await mount($, surface);
+    expect(await ui.find({ type: 'Link' })).toBeUndefined();
+    if (surface === 'terminal') {
+      expect(await ui.find({ type: 'Text', text: '3 open' })).toBeDefined();
+      expect(await ui.find({ type: 'Text', text: '1 blocked' })).toBeDefined();
+      // A stage heading: its name, its count, a rule to the pane's edge.
+      expect(await ui.find({ type: 'Text', text: /^ 1 ─+$/ })).toBeDefined();
+      // One line per task, its chips beside the title: priority and who; a blocker beneath.
+      expect(await ui.find({ type: 'Text', text: 'p5' })).toBeDefined();
+      expect(await ui.find({ type: 'Text', text: 'agent-a' })).toBeDefined();
+      expect(await ui.find({ type: 'Text', text: 'waits for #1' })).toBeDefined();
+      expect(await ui.find({ type: 'Text', text: /unclaimed/ })).toBeUndefined();
+    }
+    await ui.unmount();
+    world.dashboard = 'http://127.0.0.1:3422/';
+    await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    const linked = await mount($, surface);
+    // Named localhost: the one plain-http host the desktop app makes a link of.
+    expect(await linked.find({ type: 'Link' })).toMatchObject({
+      props: { href: 'http://localhost:3422/' },
+    });
+    // The header is every view's: the link stays in a task and on Done.
+    await linked.press({ key: 'open:1' });
+    expect(await linked.find({ key: 'back' })).toBeDefined();
+    expect(await linked.find({ type: 'Link' })).toBeDefined();
+    await linked.press({ key: 'tab:done' });
+    expect(await linked.find({ type: 'Link' })).toBeDefined();
+    // A link to anything but http(s) is no dashboard.
+    world.dashboard = 'javascript:alert(1)';
+    await $.command.run({ command: 'pipeline', args: '', ...RUN });
+    expect(await linked.find({ type: 'Link' })).toBeUndefined();
+  });

@@ -2,12 +2,17 @@
 // agent-tasks — REST transport
 //
 // Lightweight HTTP API using only node:http. No framework dependencies.
-// The JSON API the Claude Code plugin (the /pipeline pane and its session hooks) calls.
+// The JSON API the Claude Code plugin (the /pipeline pane and its session hooks) and
+// the web dashboard call, and the dashboard itself (GET /, built into dist/ui by
+// src/ui/build.mjs) under a CSP that allows only its own script, style and API.
 // Host, Origin and Content-Type are checked by the request guard (guard.ts)
 // before a request reaches the router.
 // =============================================================================
 
 import type { IncomingMessage, ServerResponse } from 'http';
+import { readFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import type { AppContext } from '../context.js';
 import { readPackageMeta } from '../package-meta.js';
 import { TasksError, ValidationError } from '../types.js';
@@ -28,6 +33,52 @@ function json(res: ServerResponse, data: unknown, status = 200): void {
     'X-Content-Type-Options': 'nosniff',
   });
   res.end(JSON.stringify(data));
+}
+
+const UI_DIR = new URL('../../dist/ui/', import.meta.url);
+const ASSETS: Record<string, [file: string, type: string]> = {
+  '/': ['index.html', 'text/html; charset=utf-8'],
+  '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/app.css': ['app.css', 'text/css; charset=utf-8'],
+};
+const CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "connect-src 'self'",
+  'img-src data:',
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
+
+/** Who acts from the dashboard: AGENT_TASKS_USER, else the OS user (as the pane does). */
+function dashboardUser(): string {
+  try {
+    return process.env.AGENT_TASKS_USER || userInfo().username;
+  } catch {
+    return 'dashboard';
+  }
+}
+
+function asset(res: ServerResponse, path: string): void {
+  const [file, type] = ASSETS[path]!;
+  let body: Buffer;
+  try {
+    body = readFileSync(fileURLToPath(new URL(file, UI_DIR)));
+  } catch {
+    json(res, { error: 'The dashboard is not built (npm run build).' }, 503);
+    return;
+  }
+  res.writeHead(200, {
+    'Content-Type': type,
+    'Content-Security-Policy': CSP,
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Cache-Control': 'no-cache',
+  });
+  res.end(body);
 }
 
 /** The request's JSON object body, at most MAX_BODY_SIZE bytes. */
@@ -81,7 +132,7 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
 
   function route(method: string, path: string, handler: RouteHandler): void {
     const paramNames: string[] = [];
-    const pattern = path.replace(/:(\w+)/g, (_match, name) => {
+    const pattern = path.replace(/\./g, '\\.').replace(/:(\w+)/g, (_match, name) => {
       paramNames.push(name);
       return '([^/]+)';
     });
@@ -98,12 +149,16 @@ export function createRouter(ctx: AppContext): (req: IncomingMessage, res: Serve
   // API routes
   // -----------------------------------------------------------------------
 
-  route('GET', '/health', (_req, res) => {
+  for (const path of Object.keys(ASSETS)) route('GET', path, (_req, res) => asset(res, path));
+
+  route('GET', '/health', (req, res) => {
     json(res, {
       status: 'ok',
       version: pkg.version,
       uptime: process.uptime(),
       tasks: ctx.tasks.count(),
+      dashboard_url: `http://${req.headers.host}/`,
+      user: dashboardUser(),
     });
   });
 

@@ -22,7 +22,7 @@ import type {
 
 /** The elements the pane draws with; mobile has no `Input` or `Select`. */
 export type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown' | 'Progress'> &
-  Partial<Pick<Elements['terminal'], 'Input' | 'Select'>> &
+  Partial<Pick<Elements['terminal'], 'Input' | 'Select' | 'Link'>> &
   Partial<Pick<Elements['desktop'], 'Svg'>>;
 
 export type Actions = {
@@ -96,23 +96,6 @@ function charCols(ch: string): number {
 
 /** Display width in terminal columns, which is what wraps a line; `length` counts UTF-16 units. */
 export const cols = (s: string) => [...s].reduce((n, ch) => n + charCols(ch), 0);
-
-/**
- * Whole facts, in order, as many as fit `width` columns joined by ` · `: a fact cut in half
- * (`agent-tas…`) or a separator left dangling says less than one left out.
- */
-export function fitFacts(facts: (Part | false | null | undefined)[], width: number): Part[] {
-  const shown: Part[] = [];
-  let used = 0;
-  for (const f of facts) {
-    if (!f) continue;
-    const w = cols(typeof f === 'string' ? f : f.text) + (shown.length ? 3 : 0);
-    if (used + w > width) break;
-    shown.push(f);
-    used += w;
-  }
-  return shown;
-}
 
 /** What a terminal escape sequence looks like: OSC (to BEL or ST), CSI, or a two-key escape. */
 const ESCAPES =
@@ -244,10 +227,6 @@ export function gateText(g: AgentTasksGate): string {
   return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]!;
 }
 
-/**
- * The gate's line under the actions: what it needs and who gives it. A comment is added in the
- * field below; artifacts come from an agent; no tool records an approval.
- */
 /** What the delete box asks, or why there is nothing to delete yet. */
 export function deleteQuestion(d: Pick<AgentTasksDetail, 'id' | 'subtree'>): string {
   const { open, finished } = d.subtree;
@@ -260,6 +239,10 @@ export function deleteQuestion(d: Pick<AgentTasksDetail, 'id' | 'subtree'>): str
   return `Delete #${d.id} with its ${along}? There is no undo.`;
 }
 
+/**
+ * The gate's line under the actions: what it needs and who gives it. A comment is added in the
+ * field below; artifacts come from an agent; no tool records an approval.
+ */
 export function gateHint(g: AgentTasksGate, stage: string): string {
   const who = [
     g.comment && 'add the comment below',
@@ -269,13 +252,18 @@ export function gateHint(g: AgentTasksGate, stage: string): string {
   return `Needs ${gateText(g)} before it leaves ${stage}: ${who.join('; ')}.`;
 }
 
-/** The board's summary line as text: the status line entry reads the same. */
-export function headline(open: AgentTasksTask[]): string {
+/**
+ * The board in one line, as the pane's header reads it: the status line entry, the widget,
+ * and `/pipeline` without a pane. `mine` adds the tasks this session works on.
+ */
+export function headline(open: AgentTasksTask[], mine: number[] = []): string {
   const n = tally(open);
+  const own = open.filter((t) => mine.includes(t.id)).map((t) => `#${t.id}`);
   return [
-    plural(n.open, 'open task'),
+    `${n.open} open`,
     `${n.working} in progress`,
     n.blocked ? `${n.blocked} blocked` : '',
+    own.length ? `this session ${own.join(', ')}` : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -324,11 +312,6 @@ export function boardOrder(
 export const FOLD_ROWS = 5;
 
 /**
- * The board's groups as drawn: open tasks matching `filter` by stage, and how many rows each
- * folds away. A stage where nothing is in progress (a backlog) folds past FOLD_ROWS, so a long
- * queue never buries the work in flight below it; a find shows every match.
- */
-/**
  * `tasks` in the order `pinned` drew them, the ones it does not hold after, as they came: a
  * poll then never moves a row under the ring while the pane holds the keyboard.
  */
@@ -339,6 +322,11 @@ export function pinOrder<T extends { id: number }>(tasks: T[], pinned: number[] 
   return [...held, ...tasks.filter((t) => !at.has(t.id))];
 }
 
+/**
+ * The board's groups as drawn: open tasks matching `filter` by stage, and how many rows each
+ * folds away. A stage where nothing is in progress (a backlog) folds past FOLD_ROWS, so a long
+ * queue never buries the work in flight below it; a find shows every match.
+ */
 export function boardGroups(
   snap: AgentTasksSnapshot,
   filter: string,
@@ -456,25 +444,55 @@ export type ViewProps = {
 export const af = (auto: string | null, key: string) =>
   auto === key ? { autoFocus: true as const } : {};
 
-/** A section heading: bold, with an optional dim count or aside. */
-export function Heading({ el, title, aside }: { el: El; title: string; aside?: string }) {
+/**
+ * A section heading: bold, an optional dim count or aside, and a dim rule to `width` that
+ * sets the section off without a blank line of its own.
+ */
+export function Heading({
+  el,
+  title,
+  aside,
+  width = 0,
+}: {
+  el: El;
+  title: string;
+  aside?: string;
+  width?: number;
+}) {
   const { Text } = el;
+  const tail = aside ? ` ${aside} ` : ' ';
+  const rule = Math.max(0, width - cols(title) - cols(tail));
   return (
     <Text wrap="truncate">
       <Text bold>{title}</Text>
-      {aside ? <Text dimColor> {aside}</Text> : null}
+      <Text dimColor>
+        {tail}
+        {'─'.repeat(rule)}
+      </Text>
     </Text>
   );
 }
 
-const LABEL = 11;
+/** The label column: the detail's longest label (`Duplicate`), the New tab's (`Description`). */
+const LABEL = 9;
+const FIELD_LABEL = 11;
 
 /** A label column beside a value that wraps under itself. */
-function Fact({ el, label, children }: { el: El; label: string; children: unknown }) {
+function Fact({
+  el,
+  label,
+  labelCols = LABEL,
+  children,
+}: {
+  el: El;
+  label: string;
+  labelCols?: number;
+  children: unknown;
+}) {
   const { Box, Text } = el;
   return (
     <Box columnGap={1}>
-      <Box width={LABEL} flexShrink={0}>
+      <Box width={labelCols} flexShrink={0}>
         <Text dimColor>{label}</Text>
       </Box>
       <Box flexGrow={1} flexShrink={1} flexDirection="column">
@@ -595,7 +613,7 @@ const TABS: [AgentTasksTab, string, string][] = [
 const KEYS = [
   'Tab moves · Enter presses · ↑↓ scroll · Esc to the prompt',
   'Tab moves · Enter presses · Esc to the prompt',
-  'Tab · Enter · Esc to the prompt',
+  'Tab moves · Enter presses · Esc leaves',
 ];
 /** On a Select ↑↓ pick its option, not scroll the pane. */
 const CHOOSING = [
@@ -621,8 +639,7 @@ export const FINDS = ['id, title, agent, project or tag', 'id, title, agent, pro
 export const fitting = (hints: string[], width: number) =>
   hints.find((h) => cols(h) <= width) ?? hints.at(-1)!;
 
-/** An outcome's tone, by the mark `act` in register.tsx leads it with: ✓ done, ✗ failed. */
-/** ✓ done, ✗ refused or failed, ! changed elsewhere, – nothing happened (default). */
+/** An outcome's tone, by the mark `act` in register.tsx leads it with: ✓ done, ✗ refused or failed, ! changed elsewhere, – nothing happened (default). */
 export const noticeTone = (notice: string) =>
   notice.startsWith('✓')
     ? { color: OK }
@@ -651,6 +668,20 @@ export function Down({ el, snap }: { el: El; snap: AgentTasksSnapshot }) {
   );
 }
 
+/** The words of the link to the web dashboard. */
+const BROWSER = 'Open in browser ↗';
+
+/** The web dashboard, as a link a click opens (the server reports its address). */
+export function DashboardLink({ el, href }: { el: El; href: string }) {
+  const { Text, Link } = el;
+  if (!Link) return null;
+  return (
+    <Text color={ACCENT} wrap="truncate">
+      <Link href={href} label={BROWSER} />
+    </Text>
+  );
+}
+
 /** A task's title as the board or Done has it. */
 export const titleOf = (snap: AgentTasksSnapshot, id: number | undefined) =>
   id === undefined
@@ -660,7 +691,8 @@ export const titleOf = (snap: AgentTasksSnapshot, id: number | undefined) =>
 export function Pane(p: PaneProps) {
   const { Box, Text, Button } = p.el;
   const { snap, route, on } = p;
-  const width = p.columns;
+  // One column kept free on the right: nothing runs into the pane's edge.
+  const width = p.columns - 1;
   const isTyping = p.isFocused && isField(p.focused);
 
   let body;
@@ -698,7 +730,7 @@ export function Pane(p: PaneProps) {
         expanded={p.expanded}
         pinned={p.pinned?.board ?? null}
         mine={p.mine}
-        {...(width >= KANBAN_COLS ? { kanban: <Kanban p={p} /> } : {})}
+        {...(p.columns >= KANBAN_COLS ? { kanban: <Kanban p={p} fit={width} /> } : {})}
       />
     );
   else if (route.tab === 'done')
@@ -726,31 +758,49 @@ export function Pane(p: PaneProps) {
       />
     );
 
+  const n = tally(snap.open);
+  const found = p.filter ? snap.open.filter((t) => matches(t, p.filter)).length : null;
+  const summary: Part[] = snap.isUp
+    ? [
+        { text: `${n.open} open`, bold: true },
+        `${n.working} in progress`,
+        ...(n.blocked ? [{ text: `${n.blocked} blocked`, color: WARN }] : []),
+        ...(found !== null && route.tab === 'board' && route.task === null
+          ? [{ text: `${found} shown`, color: ACCENT }]
+          : []),
+      ]
+    : [{ text: 'offline', color: BAD }];
+  const summaryCols = summary.reduce<number>((s, x, i) => s + cols(partText(x)) + (i ? 3 : 0), 0);
+  const isLinked = Boolean(snap.dashboard) && p.el.Link !== undefined;
+  const isLinkBeside = isLinked && summaryCols + 2 + cols(BROWSER) <= width;
+
   return (
     <Box flexDirection="column" gap={1} width={width}>
       <Box flexDirection="column">
-        <Box flexWrap="wrap" columnGap={2}>
-          {/* The tab shown takes its key too: pressed again it lands the ring on its first row.
+        <Box justifyContent="space-between" columnGap={2}>
+          <Box flexWrap="wrap" columnGap={2}>
+            {/* The tab shown takes its key too: pressed again it lands the ring on its first row.
               Drawn while the server is down too, so a digit stays in the pane. */}
-          {TABS.map(([tab, label, hotkey]) => (
-            <Button
-              key={`tab:${tab}`}
-              {...af(p.landing, `tab:${tab}`)}
-              label={label}
-              {...(isTyping ? {} : { hotkey })}
-              plain
-              {...(route.tab === tab ? {} : { dimColor: true })}
-              onPress={() => on.go(tab)}
-            >
-              {route.tab === tab && route.task === null ? (
-                <Text bold underline>
-                  {label}
-                </Text>
-              ) : (
-                label
-              )}
-            </Button>
-          ))}
+            {TABS.map(([tab, label, hotkey]) => (
+              <Button
+                key={`tab:${tab}`}
+                {...af(p.landing, `tab:${tab}`)}
+                label={label}
+                {...(isTyping ? {} : { hotkey })}
+                plain
+                {...(route.tab === tab ? {} : { dimColor: true })}
+                onPress={() => on.go(tab)}
+              >
+                {route.tab === tab && route.task === null ? (
+                  <Text bold underline>
+                    {label}
+                  </Text>
+                ) : (
+                  label
+                )}
+              </Button>
+            ))}
+          </Box>
           <Button
             key={refreshKey(snap.isUp, p.frame)}
             label="Refresh"
@@ -760,6 +810,17 @@ export function Pane(p: PaneProps) {
             onPress={on.refresh}
           />
         </Box>
+        <Box justifyContent="space-between" columnGap={2}>
+          <Box flexShrink={1}>
+            <Parts
+              el={p.el}
+              parts={summary}
+              width={width - (isLinkBeside ? cols(BROWSER) + 2 : 0)}
+            />
+          </Box>
+          {isLinkBeside && <DashboardLink el={p.el} href={snap.dashboard!} />}
+        </Box>
+        {isLinked && !isLinkBeside && <DashboardLink el={p.el} href={snap.dashboard!} />}
         {/* One status line under the tabs: the action in flight, else its outcome, else the
             keys. Only an outcome long enough to wrap (a refusal's reason) takes more. */}
         {p.busy ? (
@@ -790,27 +851,58 @@ export function Pane(p: PaneProps) {
   );
 }
 
+/**
+ * A column right of the titles: what one task shows in it (nothing when it has none), and
+ * whether it lines up on the left, as names do; figures line up on the right.
+ */
+type Cell = { get: (t: AgentTasksTask) => Part | false | null | undefined; isLeft?: true };
+
+/** A list's columns: the ids' width, and the cells right of the titles, each one width. */
+type RowLayout = { idCols: number; columns: (Cell & { width: number })[] };
+
+/** The share of a row its cells may take, and the columns its title keeps: a row is read by its title. */
+const CELL_SHARE = 0.45;
+const TITLE_KEEPS = 28;
+
+/**
+ * The columns of a list of `tasks` in `width`: of `cells`, most telling first, those some
+ * task fills, as many as fit their share of the row; every row then lines them up.
+ */
+export function rowLayout(tasks: AgentTasksTask[], width: number, cells: Cell[]): RowLayout {
+  const idCols = Math.max(2, ...tasks.map((t) => String(t.id).length + 1));
+  const rest = width - 3 - idCols;
+  let room = Math.min(Math.floor(rest * CELL_SHARE), rest - TITLE_KEEPS);
+  const columns: RowLayout['columns'] = [];
+  for (const cell of cells) {
+    const w = Math.max(0, ...tasks.map((t) => cols(partText(cell.get(t) || ''))));
+    const need = w + (columns.length ? 2 : 0);
+    if (w === 0 || need > room) continue;
+    columns.push({ ...cell, width: w });
+    room -= need;
+  }
+  return { idCols, columns };
+}
+
 type RowProps = ViewProps & {
   t: AgentTasksTask;
-  facts: (Part | false | null | undefined)[];
   width: number;
-  /** A third line: a finished task's result, in red for a failure. */
-  result?: string | null;
+  layout: RowLayout;
+  /** A line beneath: what a blocked task waits for, a finished task's result. */
+  note?: Part | null;
 };
 
 /**
- * Mark, id and title as one Button, cut to one line, the priority right after it (no
- * priority draws nothing: a '' child would take a column and wrap the title); its facts
- * beneath; then any result.
+ * One line per task: mark, id and title as one Button (cut to the line), then its cells in
+ * the list's columns; a note beneath only when there is something to act on.
  */
-function Row({ el, on, auto, t, facts, width, result }: RowProps) {
+function Row({ el, on, auto, t, width, layout, note }: RowProps) {
   const { Box, Text, Button } = el;
   const lk = look(t, t.blocked_by.length > 0);
-  const prio = t.priority ? `p${t.priority}` : '';
-  const room = width - 4 - String(t.id).length - (prio ? prio.length + 1 : 0);
+  const head = 2 + layout.idCols + 1;
+  const cells = layout.columns.reduce((n, c) => n + c.width + 2, 0);
   return (
     <Box flexDirection="column">
-      <Box columnGap={1}>
+      <Box justifyContent="space-between">
         <Box flexShrink={1}>
           <Button
             key={`open:${t.id}`}
@@ -818,40 +910,66 @@ function Row({ el, on, auto, t, facts, width, result }: RowProps) {
             plain
             onPress={() => on.open(t.id)}
           >
-            <Text {...color(lk.tone)}>{lk.mark}</Text> <Text dimColor>#{t.id}</Text>{' '}
-            {clip(t.title.replace(/\s+/g, ' '), Math.max(10, room))}
+            <Text {...color(lk.tone)}>{lk.mark}</Text>{' '}
+            <Text dimColor>{`#${t.id}`.padStart(layout.idCols)}</Text>{' '}
+            {clip(t.title.replace(/\s+/g, ' '), width - head - cells)}
           </Button>
         </Box>
-        {prio ? (
+        {cells > 0 && (
           <Box flexShrink={0}>
-            <Text {...(t.priority >= 5 ? { color: WARN } : { dimColor: true })}>{prio}</Text>
+            <Text>
+              {layout.columns.map(({ width: w, get, isLeft }, i) => {
+                const c = get(t) || '';
+                const { text, color: tone } = typeof c === 'string' ? { text: c } : c;
+                const pad = ' '.repeat(w - cols(text));
+                return (
+                  <Text key={`cell:${i}`}>
+                    {isLeft ? '  ' : `  ${pad}`}
+                    <Text {...(tone ? { color: tone } : { dimColor: true })}>{text}</Text>
+                    {isLeft ? pad : ''}
+                  </Text>
+                );
+              })}
+            </Text>
           </Box>
-        ) : null}
+        )}
       </Box>
-      <Box paddingLeft={2}>
-        <Text dimColor wrap="truncate">
-          {fitFacts(facts, width - 2).map((f, i) =>
-            typeof f === 'string' ? (
-              `${i > 0 ? ' · ' : ''}${f}`
-            ) : (
-              <Text {...color(f.color)}>
-                {i > 0 ? ' · ' : ''}
-                {f.text}
-              </Text>
-            ),
-          )}
-        </Text>
-      </Box>
-      {result ? (
-        <Box paddingLeft={2}>
-          <Text wrap="truncate" {...(t.status === 'failed' ? { color: BAD } : { dimColor: true })}>
-            {firstLine(result)}
+      {note ? (
+        <Box paddingLeft={head}>
+          <Text
+            wrap="truncate"
+            {...(typeof note !== 'string' && note.color
+              ? { color: note.color }
+              : { dimColor: true })}
+          >
+            {partText(note)}
           </Text>
         </Box>
       ) : null}
     </Box>
   );
 }
+
+/** A stage heading's count, and how many of them are worked on when not all are. */
+const stageAside = (count: number, shown: AgentTasksTask[]) => {
+  const working = shown.filter((t) => t.status === 'in_progress').length;
+  return `${count}${working && working < count ? ` · ${working} in progress` : ''}`;
+};
+
+/** A priority cell: p5 and up in the warning colour, lower dim, none for p0. */
+const prioCell: Cell = {
+  get: (t) =>
+    t.priority > 0 && { text: `p${t.priority}`, ...(t.priority >= 5 ? { color: WARN } : {}) },
+};
+/** Who works on it: this session marked, an agent's name cut short. */
+const whoCell = (mine: number[]): Cell => ({
+  get: (t) =>
+    mine.includes(t.id)
+      ? { text: 'this session', color: ACCENT }
+      : t.assigned_to && clip(t.assigned_to, 16),
+  isLeft: true,
+});
+const ageCell: Cell = { get: (t) => ago(t.updated_at) };
 
 function Board({
   el,
@@ -896,32 +1014,27 @@ function Board({
         />
       </Box>
     );
-  const n = tally(snap.open);
   const groups = boardGroups(snap, filter, expanded, pinned);
   const shownCount = groups.reduce((sum, g) => sum + g.tasks.length + g.hidden, 0);
   const isFiltered = filter !== '';
+  const layout = rowLayout(
+    groups.flatMap((g) => g.tasks),
+    width,
+    [
+      prioCell,
+      whoCell(mine),
+      {
+        get: (t) => tagsFound(t, filter).map((tag) => ({ text: `#${tag}`, color: ACCENT }))[0],
+        isLeft: true,
+      },
+      { get: (t) => t.subtasks && `${t.subtasks.done}/${t.subtasks.total}` },
+      { get: (t) => t.project, isLeft: true },
+      ageCell,
+    ],
+  );
 
   return (
     <Box flexDirection="column" gap={1}>
-      <Box flexDirection="column">
-        <Parts
-          el={el}
-          width={width}
-          parts={[
-            { text: plural(n.open, 'open task'), bold: true },
-            `${n.working} in progress`,
-            n.blocked > 0 && { text: `${n.blocked} blocked`, color: WARN },
-            isFiltered && { text: `${shownCount} shown`, color: ACCENT },
-          ]}
-        />
-        {groups.length > 0 && (
-          <Parts
-            el={el}
-            width={width}
-            parts={groups.map((g) => `${g.stage} ${g.tasks.length + g.hidden}`)}
-          />
-        )}
-      </Box>
       {Input && (
         <Box flexDirection="column">
           <Input
@@ -958,33 +1071,33 @@ function Board({
             auto={auto}
             t={t}
             width={width}
-            facts={[
-              t.blocked_by.length > 0 && {
-                text: `waits for ${t.blocked_by.map((b) => `#${b}`).join(', ')}`,
-                color: WARN,
-              },
-              mine.includes(t.id) && { text: 'this session', color: ACCENT },
-              t.assigned_to ?? 'unclaimed',
-              t.subtasks && `${t.subtasks.done}/${t.subtasks.total} subtasks`,
-              t.parent_id !== null && `part of #${t.parent_id}`,
-              t.project,
-              ...tagsFound(t, filter).map((tag) => ({ text: `tag ${tag}`, color: ACCENT })),
-              ago(t.updated_at),
-            ]}
+            layout={layout}
+            note={
+              t.blocked_by.length > 0
+                ? { text: `waits for ${t.blocked_by.map((b) => `#${b}`).join(', ')}`, color: WARN }
+                : null
+            }
           />
         );
         return (
           <Box key={`stage:${g.stage}`} flexDirection="column">
-            <Heading el={el} title={cap(g.stage)} aside={String(g.tasks.length + g.hidden)} />
+            <Heading
+              el={el}
+              title={cap(g.stage)}
+              aside={stageAside(g.tasks.length + g.hidden, g.tasks)}
+              width={width}
+            />
             {g.tasks.slice(0, at).map(row)}
             {(g.hidden > 0 || isUnfolded) && (
-              <Button
-                key={foldKey(`stage:${g.stage}`, isUnfolded)}
-                plain
-                dimColor
-                label={g.hidden > 0 ? `▸ ${g.hidden} more` : '▾ Show less'}
-                onPress={() => on.toggle(`stage:${g.stage}`)}
-              />
+              <Box paddingLeft={2}>
+                <Button
+                  key={foldKey(`stage:${g.stage}`, isUnfolded)}
+                  plain
+                  dimColor
+                  label={g.hidden > 0 ? `▸ ${g.hidden} more` : '▾ Show less'}
+                  onPress={() => on.toggle(`stage:${g.stage}`)}
+                />
+              </Box>
             )}
             {g.tasks.slice(at).map(row)}
           </Box>
@@ -1032,9 +1145,13 @@ export function Done({
     snap.recent.filter((t) => matches(t, filter)),
     pinned,
   );
+  const layout = rowLayout(shown, width, [
+    ageCell,
+    whoCell([]),
+    { get: (t) => t.project, isLeft: true },
+  ]);
   return (
     <Box flexDirection="column" gap={1}>
-      <Heading el={el} title="Recently finished" aside="newest first" />
       {filter !== '' && (
         <Box flexDirection="column">
           <Text>
@@ -1048,7 +1165,8 @@ export function Done({
           />
         </Box>
       )}
-      <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column">
+        <Heading el={el} title="Recently finished" aside="newest first" width={width} />
         {shown.map((t) => (
           <Row
             key={`row:${t.id}`}
@@ -1057,8 +1175,12 @@ export function Done({
             auto={auto}
             t={t}
             width={width}
-            facts={[`${look(t).word} ${ago(t.updated_at)}`, t.assigned_to, t.project]}
-            result={t.result}
+            layout={layout}
+            note={
+              t.result
+                ? { text: firstLine(t.result), ...(t.status === 'failed' ? { color: BAD } : {}) }
+                : null
+            }
           />
         ))}
       </Box>
@@ -1098,30 +1220,25 @@ export function NewTask({
     return <Text dimColor>New tasks are created where a text field can be typed in.</Text>;
   return (
     <Box flexDirection="column" gap={1}>
-      <Box flexDirection="column">
-        <Heading
-          el={el}
-          title="New task"
-          aside={`lands in ${snap.stages[0] ?? 'backlog'}, unclaimed`}
-        />
-        <Text dimColor>Tab moves to the next field; Enter in any field creates the task.</Text>
-      </Box>
+      <Heading
+        el={el}
+        title="New task"
+        aside={`lands in ${snap.stages[0] ?? 'backlog'}, unclaimed`}
+        width={width}
+      />
       <Box flexDirection="column">
         {FIELDS.map(([field, label, hints]) => (
-          <Fact key={`field:${field}`} el={el} label={label}>
+          <Fact key={`field:${field}`} el={el} label={label} labelCols={FIELD_LABEL}>
             <Input
               key={`new-${field}:${rev}`}
               {...af(auto, `new-${field}:${rev}`)}
-              placeholder={fitting(hints, width - LABEL - 1 - ' ⏎ create'.length)}
+              placeholder={fitting(hints, width - FIELD_LABEL - 1 - ' ⏎ create'.length)}
               value={draft[field]}
               submitLabel="create"
               {...(field === 'description' ? { rows: 3 } : {})}
               onInput={(v) => on.edit(field, v)}
               onSubmit={(v) => on.submitField(field, v)}
             />
-            {field === 'priority' && priorityOf(draft) === null && (
-              <Text color={BAD}>a whole number, like 0 or 5</Text>
-            )}
           </Fact>
         ))}
       </Box>
@@ -1419,7 +1536,7 @@ export function Detail({
 
       {d.description.trim() !== '' && (
         <Box flexDirection="column">
-          <Heading el={el} title="Description" />
+          <Heading el={el} title="Description" width={width} />
           <Markdown
             text={
               isDescOpen ? d.description.trim() : descLines.slice(0, DESC_LINES).join('\n').trim()
@@ -1445,6 +1562,7 @@ export function Detail({
             el={el}
             title="Subtasks"
             aside={`${d.subtasks.filter((s) => s.status === 'completed').length}/${d.subtasks.length} done`}
+            width={width}
           />
           <Refs el={el} on={on} auto={auto} k="sub" refs={d.subtasks} />
         </Box>
@@ -1452,7 +1570,7 @@ export function Detail({
 
       {(isLive || d.artifacts.length > 0) && (
         <Box flexDirection="column">
-          <Heading el={el} title="Artifacts" aside={String(d.artifacts.length)} />
+          <Heading el={el} title="Artifacts" aside={String(d.artifacts.length)} width={width} />
           {d.artifacts.length === 0 && <Text dimColor>None yet.</Text>}
           {d.artifacts.map((a) => {
             const part = `art:${a.id}`;
@@ -1494,7 +1612,7 @@ export function Detail({
       )}
 
       <Box flexDirection="column">
-        <Heading el={el} title="Comments" aside={String(d.commentCount)} />
+        <Heading el={el} title="Comments" aside={String(d.commentCount)} width={width} />
         {d.comments.length > COMMENTS_SHOWN && (
           <Button
             key={foldKey('comments', isAllComments)}
@@ -1711,8 +1829,11 @@ const picked = (t: AgentTasksTask, f: AgentTasksFacets) =>
   (f.project === '' || t.project === f.project) &&
   (f.assignee === '' || (t.assigned_to ?? 'unclaimed') === f.assignee);
 
-/** The board as columns, one per stage of the pipeline, each with its cards. */
-export function Kanban({ p }: { p: PaneProps }) {
+/**
+ * The board as columns, one per stage of the pipeline, each with its cards. With `fit` (a
+ * terminal pane's width) the columns share it evenly, an empty stage as wide as a full one.
+ */
+export function Kanban({ p, fit }: { p: PaneProps; fit?: number }) {
   const { Box, Text, Button } = p.el;
   const { on } = p;
   if (p.snap.open.length === 0)
@@ -1766,15 +1887,19 @@ export function Kanban({ p }: { p: PaneProps }) {
           {stages.map((stage) => {
             const g = groups.find((x) => x.stage === stage);
             const tasks = g ? [...g.tasks] : [];
-            const working = tasks.filter((t) => t.status === 'in_progress').length;
             return (
               <Box
                 key={`col:${stage}`}
                 flexDirection="column"
                 gap="xs"
-                minWidth={COLUMN_MIN}
-                flexGrow={1}
-                flexShrink={1}
+                {...(fit
+                  ? {
+                      width: Math.max(
+                        COLUMN_MIN,
+                        Math.floor((fit - stages.length + 1) / stages.length),
+                      ),
+                    }
+                  : { minWidth: COLUMN_MIN, flexGrow: 1, flexShrink: 1 })}
                 padding="xs"
                 backgroundColor="userMessageBackground"
               >
@@ -1782,10 +1907,7 @@ export function Kanban({ p }: { p: PaneProps }) {
                   <Text bold wrap="truncate">
                     {stage.toUpperCase()}
                   </Text>
-                  <Text dimColor>
-                    {working ? `${working} in progress · ` : ''}
-                    {tasks.length}
-                  </Text>
+                  <Text dimColor>{stageAside(tasks.length, tasks)}</Text>
                 </Box>
                 {tasks.length === 0 && (
                   <Box paddingX="xs">

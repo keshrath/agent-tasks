@@ -76,16 +76,15 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       const s = await t.waitFor(/Backlog \d+/);
       expect(s).toMatch(/1: Board\s+2: Done\s+3: New\s+r: Refresh/);
       expect(s).toMatch(/Tab moves · Enter presses · ↑↓ scroll · Esc to the prompt/);
-      expect(s).toMatch(/12 open tasks/);
-      expect(s).toMatch(/6 in progress/);
-      expect(s).toMatch(/1 blocked/);
+      expect(s).toMatch(/12 open · 6 in progress · 1 blocked/);
       for (const stage of ['Backlog 6', 'Spec 2', 'Implement 2', 'Review 2'])
         expect(s).toContain(stage);
-      expect(s).toMatch(new RegExp(`! #${w.ids.harness} Write the e2e harness for the real CLI`));
+      expect(s).toMatch(new RegExp(`! +#${w.ids.harness} Write the e2e harness`));
       expect(s).toMatch(new RegExp(`waits for #${w.ids.pane}`));
-      expect(s).toMatch(new RegExp(`● #${w.ids.pane} Replace the web dashboard`));
-      expect(s).toMatch(/agent-pane · 1\/2 subtasks · agent-tasks/);
-      expect(s).toMatch(new RegExp(`○ #${w.ids.ship} Ship muk_import 19\\.0 to the customer`));
+      expect(s).toMatch(new RegExp(`● +#${w.ids.pane} Replace the web dashboard`));
+      // One line a task: its priority, who works on it and its subtasks in columns beside it.
+      expect(s).toMatch(/Replace the web dashboard[^\n]*p8\s+agent-pane\s+1\/2/);
+      expect(s).toMatch(new RegExp(`○ +#${w.ids.ship} Ship muk_import 19\\.0 to the cu`));
       // Finished tasks are under Done, not on the board.
       expect(s).not.toMatch(/Bump agent-common/);
       // The work in progress, not the unclaimed queue above it.
@@ -95,7 +94,7 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
 
     it('the status entry says what the board says', async () => {
       const entry = statusEntry(t);
-      expect(entry).toMatch(/12 open tasks · 6 in progress · 1 blocked/);
+      expect(entry).toMatch(/12 open · 6 in progress · 1 blocked/);
       expect(
         t
           .text()
@@ -130,18 +129,16 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
     it('Done lists what finished, newest first, its result beneath', async () => {
       await t.key('2');
       const s = await t.waitFor(/Recently finished/);
-      expect(s).toMatch(new RegExp(`✓ #${w.ids.bump} Bump agent-common to 1\\.1\\.2`));
-      // Who and where first, the result on a line of its own (a failure's in red).
+      expect(s).toMatch(new RegExp(`✓ +#${w.ids.bump} Bump agent-common to 1\\.1\\.2`));
+      // When and who beside the title, the result on a line of its own (a failure's in red).
       expect(s).toMatch(
-        /completed \S+ · agent-release · agent-tasks\n[^\n]*│\s+Bumped; loopback bind/,
+        /Bump agent-common[^\n]*\s(now|\d+[mhd])\s+agent-release\n[^\n]*│\s+Bumped; loopback bind/,
       );
       expect(s).toMatch(
-        new RegExp(`✗ #${w.ids.screenshots} Migrate the old dashboard screenshots`),
+        new RegExp(`✗ +#${w.ids.screenshots} Migrate the old dashboard screenshots`),
       );
-      expect(s).toMatch(
-        /failed \S+ · agent-docs · agent-tasks\n[^\n]*│\s+The screenshots are gone/,
-      );
-      expect(s).toMatch(new RegExp(`– #${w.ids.duplicate} Duplicate of the dashboard task`));
+      expect(s).toMatch(/\s(now|\d+[mhd])\s+agent-docs\n[^\n]*│\s+The screenshots are gone/);
+      expect(s).toMatch(new RegExp(`– +#${w.ids.duplicate} Duplicate of the dashboard task`));
       expect(s.indexOf(`#${w.ids.duplicate} `)).toBeLessThan(s.indexOf(`#${w.ids.boardView} `));
       t.shot('done');
       await t.key('2'); // pressed again it lands on the newest
@@ -384,13 +381,16 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       await t.key('TAB');
       await t.type('high', 0);
       await t.enter();
-      // A priority that is no number: said beneath its own field, the ring kept there.
-      await t.waitFor(/Priority\s+high.*\n.*a whole number, like 0 or 5/);
+      // A priority that is no number: said, the ring on its field.
+      await t.waitFor(/✗ the priority is a whole number, like 0 or 5/);
+      expect(t.text()).toMatch(/Priority\s+high/);
       expect(t.text()).toMatch(/Title\s+Record the \/pipeline tutorial/);
       expect(t.text()).toMatch(/Project\s+docs/);
       await landsOn(t, 'Priority');
       await t.key('BS', 4);
       await t.type('4', 0);
+      // Made whole, it is no longer said to be at fault.
+      await t.waitFor(/^(?![\s\S]*whole number, like)/);
       await t.key('TAB');
       await t.type('docs, ui', 0);
       await t.key('TAB');
@@ -415,6 +415,18 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       expect(JSON.parse(made.tags ?? '[]')).toEqual(['docs', 'ui']);
       expect((made as unknown as { created_by: string }).created_by).toBe(ME);
       t.shot('new-task-created');
+      // From the task made, 3 lands on the tab, and 3 again types into Title: no digit in it.
+      await t.key('3');
+      await landsOn(t, /^\d?:? ?New$/);
+      await t.key('3');
+      await landsOn(t, 'Title');
+      await t.type('Next one', 400);
+      expect(t.text()).toMatch(/Title\s+Next one/);
+      await t.key('TAB');
+      await t.press('Clear');
+      await t.key('ESC');
+      await t.pipeline(String(id));
+      await t.waitFor(/‹ Board/);
     });
 
     it('Find narrows the board by text, a project name too', async () => {
@@ -505,7 +517,7 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       const deadline = Date.now() + 10_000;
       while (statusEntry(t) === before && Date.now() < deadline) await sleep(250);
       expect(statusEntry(t)).not.toBe(before);
-      expect(statusEntry(t)).toMatch(/\d+ open tasks/);
+      expect(statusEntry(t)).toMatch(/\d+ open · /);
     });
   });
 
@@ -522,9 +534,11 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
     it('board, detail, forms, New and Done fit the narrow sidebar', async () => {
       const s = t.text();
       expect(s).toMatch(/1: Board\s+2: Done\s+3: New\s+r: Refresh/);
-      expect(s).toMatch(/Esc to the prompt/); // the key hint shortens, never cut
+      expect(s).toMatch(/Tab moves · Enter presses · Esc/); // the key hint shortens, never cut
+      // The server serves a web dashboard: its link sits in the header.
+      expect(s).toMatch(/Open in browser ↗/);
       // The summary breaks between its parts; nothing is cut away.
-      expect(s).toMatch(/open tasks[\s\S]*in progress[\s\S]*1 blocked/);
+      expect(s).toMatch(/\d+ open[\s\S]*in progress[\s\S]*1 blocked/);
       // One line per title: a cut title ends in … on its own line, never on the next.
       expect(s).not.toMatch(/│\s*…\s*$/m);
       // A wrapped summary line never starts on a separator.
@@ -569,7 +583,7 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       await t.pipeline();
       const s = await t.waitFor(/Backlog \d+/);
       expect(s).toMatch(/1: Board\s+2: Done\s+3: New\s+r: Refresh/);
-      expect(s).toMatch(/open tasks/);
+      expect(s).toMatch(/\d+ open · /);
       t.shot('inline-board');
     });
   });
@@ -597,18 +611,18 @@ describe.skipIf(!E2E)('/pipeline pane in Claude Code', () => {
       expect(statusEntry(t)).toBe('offline'); // no stale counts under the prompt
       await t.enter();
       // A Refresh says it tried, and when (wrapped in the 40-column pane).
-      const tried = await t.waitFor(/✗ still nothing answers at/);
+      const tried = await t.waitFor(/✗ still nothing answers/);
       const pane = tried
         .split('\n')
         .map((l) => l.split('│').slice(1).join('│').trim())
         .join(' ');
-      expect(pane).toMatch(/still nothing answers at http:\/\/127\.0\.0\.1:\d+ \(\d\d:\d\d:\d\d\)/);
+      expect(pane).toMatch(/still nothing answers \(\d\d:\d\d:\d\d\)/);
       t.shot('server-down');
 
       await w.startServer();
       await t.enter();
       await t.waitFor(/Backlog \d+/);
-      await t.waitFor(/agent-tasks: \d+ open tasks/);
+      await t.waitFor(/agent-tasks: \d+ open · /);
       await landsOn(t, /#\d+ /);
     });
   });

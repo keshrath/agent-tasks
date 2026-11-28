@@ -39,6 +39,9 @@ jobs:
       - run: npm run lint
       - run: npm run format:check
       - run: npm test
+      - name: Web dashboard e2e (Playwright)
+        if: matrix.node-version == 22
+        run: npx playwright install --with-deps chromium && npx playwright test -c tests/e2e-web/playwright.config.ts
 
   publish:
     needs: check

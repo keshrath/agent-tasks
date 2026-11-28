@@ -19,7 +19,7 @@ While the focus is in a text field, digits and letters go into the field, and th
 
 ## 1. Open it
 
-Type `/pipeline` and press Enter. The board opens beside the conversation with the keyboard. The status line under the prompt says what is in flight, `12 open tasks · 6 in progress · 1 blocked`, and stays there while the pane is closed.
+Type `/pipeline` and press Enter. The board opens beside the conversation with the keyboard. The status line under the prompt says what is in flight, `12 open · 6 in progress · 1 blocked`, and stays there while the pane is closed.
 
 ![/pipeline opens the board](images/tutorial/02-open.png)
 
@@ -71,7 +71,7 @@ The `2` key lists recently finished tasks, newest first: `✓` completed, `✗` 
 
 ![Done](images/tutorial/13-done.png)
 
-The `3` key opens the New tab; press it again to type the title. `Tab` moves to the next field; `Enter` in any field creates the task in backlog and opens it, so nothing you type is lost to a field the focus is leaving. A priority that is no whole number is said under its field, and the focus stays there.
+The `3` key opens the New tab; press it again to type the title. `Tab` moves to the next field; `Enter` in any field creates the task in backlog and opens it, so nothing you type is lost to a field the focus is leaving. A priority that is no whole number is said under the tabs, and the focus stays in its field.
 
 ![A new task](images/tutorial/14-new.png)
 

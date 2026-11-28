@@ -51,6 +51,49 @@ describe('GET /health', () => {
   });
 });
 
+describe('the web dashboard', () => {
+  it('/health names the dashboard URL as the request reached it, and who acts from it', async () => {
+    const body = await (await api('/health')).json();
+    expect(body.dashboard_url).toBe(`${baseUrl}/`);
+    expect(typeof body.user).toBe('string');
+    expect(body.user.length).toBeGreaterThan(0);
+  });
+
+  it('serves the page and its assets under a strict CSP, never framed', async () => {
+    const page = await api('/');
+    expect(page.status).toBe(200);
+    expect(page.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    expect(await page.text()).toContain('<script src="app.js" defer></script>');
+    const csp = page.headers.get('content-security-policy')!;
+    for (const rule of [
+      "default-src 'none'",
+      "script-src 'self'",
+      "connect-src 'self'",
+      "frame-ancestors 'none'",
+    ])
+      expect(csp).toContain(rule);
+    expect(page.headers.get('x-frame-options')).toBe('DENY');
+    expect((await api('/app.js')).headers.get('content-type')).toBe(
+      'text/javascript; charset=utf-8',
+    );
+    expect((await api('/app.css')).headers.get('content-type')).toBe('text/css; charset=utf-8');
+    expect((await api('/appXjs')).status).toBe(404);
+  });
+
+  it('lets a mutation from its own origin through the guard (the dashboard calling home)', async () => {
+    const res = await api('/api/tasks/999999/comments', {
+      ...jsonBody({ content: 'from the dashboard' }),
+      headers: { 'Content-Type': 'application/json', Origin: baseUrl },
+    });
+    expect(res.status).toBe(404);
+    const foreign = await api('/api/tasks/999999/comments', {
+      ...jsonBody({ content: 'from elsewhere' }),
+      headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:1' },
+    });
+    expect(foreign.status).toBe(403);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Request guard
 // ---------------------------------------------------------------------------

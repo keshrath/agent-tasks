@@ -140,7 +140,7 @@ Any MCP client supporting stdio transport can connect. Configure it to spawn `np
 
 ## 4. The /pipeline Pane
 
-agent-tasks has no web dashboard (removed in 2.0). In Claude Code the board is a pane beside the conversation: `/pipeline` opens it. Every picture in this chapter is a frame of the real Claude Code CLI against a scratch board, recorded by `npm run manual:record` (see [Recording these pictures](#recording-these-pictures)). For a guided walk through the same pane, read the [tutorial](TUTORIAL.md).
+In Claude Code the board is a pane beside the conversation: `/pipeline` opens it. When the server also serves its web dashboard, the pane's header links to it (`Open in browser ↗`). Every picture in this chapter is a frame of the real Claude Code CLI against a scratch board, recorded by `npm run manual:record` (see [Recording these pictures](#recording-these-pictures)). For a guided walk through the same pane, read the [tutorial](TUTORIAL.md).
 
 ![/pipeline opens the board, Tab and Enter open a task](images/manual/hero.gif)
 
@@ -153,7 +153,7 @@ claude plugin marketplace add keshrath/agent-tasks
 claude plugin install agent-tasks@agent-tasks
 ```
 
-Remove any hand-written `agent-tasks` entry from `~/.claude.json`, so the tools do not appear twice. Restart Claude Code; the status line under the prompt then shows what is in flight (`12 open tasks · 7 in progress · 1 blocked`).
+Remove any hand-written `agent-tasks` entry from `~/.claude.json`, so the tools do not appear twice. Restart Claude Code; the status line under the prompt then shows what is in flight (`12 open · 7 in progress · 1 blocked`, and `this session #12` while this session holds a task).
 
 ### Open it
 
@@ -169,7 +169,7 @@ The command puts nothing in the conversation when the pane opens: a plugin comma
 
 ### Layouts
 
-In the fullscreen layout (for example `CLAUDE_CODE_NO_FLICKER=1`) the pane docks beside the conversation and takes the mouse: a click presses a button. In a narrower terminal it docks narrower, and the text wraps instead of being cut.
+In the fullscreen layout (for example `CLAUDE_CODE_NO_FLICKER=1`) the pane docks beside the conversation and takes the mouse: a click presses a button. In a narrower terminal it docks narrower: every task stays one line, its title cut with `…`, and the columns beside it that no longer fit (the project, the age, then who works on it) are left out, the priority last.
 
 ![The board docked beside the conversation](images/manual/board-full.png)
 
@@ -183,7 +183,7 @@ In the default layout the pane sits above the prompt, keyboard only. When the pa
 
 In the desktop app the pane is drawn natively and laid out as a kanban board:
 
-- **Header**: the Board and Done tabs, Refresh and **New task**; under it Find and the project and assignee pickers.
+- **Header**: the Board and Done tabs (the one shown at full strength), `Open in browser ↗` when the server serves its web dashboard, Refresh and **New task**; under it Find and the project and assignee pickers.
 - **Overview**: tiles for open, in progress, blocked and recently failed tasks, a chart of the open tasks per stage (in progress and waiting), and a chart of the tasks finished on each of the last 7 days (completed and failed).
 - **Board**: one column per pipeline stage, empty stages included. Each card shows the task's title, status mark, id, priority, assignee, age, project, subtasks, tags and any task it waits for. Find narrows the columns and says how many tasks match.
 - **Detail**: clicking a card opens the task in a panel beside the board, with the same actions, facts, description, subtasks, artifacts and comments as in the terminal. **Close** shuts the panel. When the pane is under 110 columns wide, the detail takes the whole pane instead.
@@ -192,7 +192,7 @@ Minimized to a widget, the pane shows a summary: the share of open tasks in prog
 
 ### The header and the keys
 
-The first line holds the tabs and Refresh, the second says which keys work right now. That second line also carries the outcome of what you just did (`✓ #13 completed`, `– #12 marked failed`, `✗ Advancing #7 failed: …`; ✗ only for what did not go through), which clears itself after a few seconds. The status entry under the prompt shows the same outcome meanwhile, so it stays in sight when a long task has scrolled the pane. After `Advance` the focus goes to `‹ Board`, so a second `Enter` does not move the task a stage further.
+The first line holds the tabs and Refresh. The second counts the board (`12 open · 6 in progress · 1 blocked`, `4 shown` after a find), with `Open in browser ↗` beside it when the server serves its web dashboard (a click opens it). The third says which keys work right now; it also carries the outcome of what you just did (`✓ #13 completed`, `– #12 marked failed`, `✗ Advancing #7 failed: …`; ✗ only for what did not go through), which clears itself after a few seconds. The status entry under the prompt shows the same outcome meanwhile, so it stays in sight when a long task has scrolled the pane. After `Advance` the focus goes to `‹ Board`, so a second `Enter` does not move the task a stage further.
 
 | Key                 | Does                                                           |
 | ------------------- | -------------------------------------------------------------- |
@@ -216,15 +216,15 @@ After `Esc` the header says how to come back:
 
 ![The board](images/manual/board.png)
 
-- **Summary**: `12 open tasks · 7 in progress · 1 blocked`, the same text as the status line entry, and under it the count per stage (`backlog 5 · spec 3 · …`).
-- **Stages**: open tasks grouped by pipeline stage, in pipeline order; within a stage, working tasks first, then by priority. A long stage nobody works on yet (a backlog of more than 7) shows its first 5 and a dim `▸ N more`, so the work in flight below stays in reach; `Enter` unfolds it and puts the focus on the first row it showed, with `▾ Show less` right above it to fold it again. A find shows every match. Finished tasks are under [Done](#done).
-- **Rows**: a mark, the id, the title and its priority (`p8`; high ones in yellow), then a dim line with the assignee (or `unclaimed`), the parent (`part of #1`), subtask progress (`1/2 subtasks`), the project and the age (minutes, hours, then days from 24 hours on).
+- **Summary**: in the header, `12 open · 7 in progress · 1 blocked`, the same text as the status line entry.
+- **Stages**: open tasks grouped by pipeline stage, in pipeline order, each under a heading with its count (and how many are in progress when not all are) and a dim rule; within a stage, working tasks first, then by priority. A long stage nobody works on yet (a backlog of more than 7) shows its first 5 and a dim `▸ N more`, so the work in flight below stays in reach; `Enter` unfolds it and puts the focus on the first row it showed, with `▾ Show less` right above it to fold it again. A find shows every match. Finished tasks are under [Done](#done).
+- **Rows**: one line per task: a mark, the id and the title, then columns lined up down the board, as many as the pane's width leaves the title room for: the priority (`p8`; p5 and up in yellow, none for p0), who works on it (`this session` for this session's own; nothing while unclaimed), subtask progress (`1/2`), the project and the age (minutes, hours, then days from 24 hours on). A blocked task says what it waits for on a line beneath (`waits for #1`, in yellow).
 
-| Mark | Means                                                             |
-| ---- | ----------------------------------------------------------------- |
-| `●`  | in progress: an agent claimed it                                  |
-| `○`  | pending: waits for an agent to claim it                           |
-| `!`  | blocked: a `blocks` dependency is open (`waits for #1` in yellow) |
+| Mark | Means                                                           |
+| ---- | --------------------------------------------------------------- |
+| `●`  | in progress: an agent claimed it                                |
+| `○`  | pending: waits for an agent to claim it                         |
+| `!`  | blocked: a `blocks` dependency is open (`waits for #1` beneath) |
 
 The focus starts on the first task in progress (after a find, on the first match), not on the unclaimed queue above it. `Tab` walks the rows, `Enter` opens one. While the pane holds the keyboard the board and Done keep the order they were drawn in: a task another session claims, raises or finishes does not move the rows under the focus (a new one is added at the end of its stage, or of Done); they sort afresh when you open the pane again or give the keyboard back. When another session changes what the pane draws, the focus waits on Refresh while the new drawing comes up, then goes back to the control it was on, or, when that is gone, lands again: on the board as on a fresh open, in a task on `‹ Board`. It never lands by itself on a control that changes a task with one `Enter` (Advance, Reopen, `Delete #12`, a form's send, Create), nor in a text field; a key you press meanwhile wins over any landing. A press on such a control, on Complete or on a button that opens a form, that comes within a moment of the view changing went to whatever the new view drew at the focus's place, so the pane takes it and says `– that press came as the view changed: nothing was done, press it again`; the same while an action still runs. `Enter` twice on a row opens the task and nothing else. An action form whose task changed elsewhere closes (`! #12 changed elsewhere (now test): nothing was sent, what you typed is kept for the form`), the focus on the button that opened it, which opens the form again with your words. A task deleted elsewhere while open says `! #12 was deleted elsewhere` and goes back to the board. While you type into a field, what other sessions change waits until you stop for a moment (the status entry says `the board changed: shown once you stop typing`), so nothing moves under your keys and no key goes to the prompt. `r` (Refresh) leaves the focus where it is. The tasks this session holds are marked `this session`, on the board and in their detail; an agent that never named itself (`task_config` action `session`) shows as its client and project (`claude-code@agent-tasks`), never as `system`.
 
@@ -234,7 +234,7 @@ The focus starts on the first task in progress (after a find, on the first match
 
 #### Find
 
-Find narrows the board to the tasks whose id, title, assignee, project or tags contain the text. The summary then counts `4 shown`, and a row found by a tag shows that tag. `[ Clear the filter ]` shows everything again. `/pipeline <text>` opens the board already filtered.
+Find narrows the board to the tasks whose id, title, assignee, project or tags contain the text. The header then counts `4 shown`, and a row found by a tag shows that tag (`#release`). `[ Clear the filter ]` shows everything again. `/pipeline <text>` opens the board already filtered.
 
 ![Find "release", then Clear the filter](images/manual/filter.gif)
 
@@ -242,13 +242,13 @@ Find narrows the board to the tasks whose id, title, assignee, project or tags c
 
 ### Done
 
-The `2` key lists recently finished tasks, newest first: `✓` completed, `✗` failed, `–` cancelled, with who finished it, where, and the result (or the error, or the reason) beneath, on one line so the list stays easy to scan: a long one is cut with `…`, and the task's detail has all of it. `Enter` opens one.
+The `2` key lists recently finished tasks, newest first: `✓` completed, `✗` failed, `–` cancelled, with how long ago and who finished it beside the title, and the result (or the error, or the reason) beneath, on one line so the list stays easy to scan: a long one is cut with `…`, and the task's detail has all of it. `Enter` opens one.
 
 ![Recently finished tasks](images/manual/done.png)
 
 ### New task
 
-The `3` key opens the New tab; pressed again (or `New` again), it puts the focus in Title. The form: Title, Project, Priority (a whole number, higher goes first), Tags (comma separated) and Description. `Tab` moves to the next field (Description takes three lines); `Enter` in any field, or `[ Create ]`, creates the task in the first stage, unclaimed, and opens it. `[ Clear ]` empties the form and keeps the focus on itself, so a digit typed next switches tabs instead of starting a title. A priority that is no whole number is said under its field, and the focus goes back there.
+The `3` key opens the New tab; pressed again (or `New` again), it puts the focus in Title. The form: Title, Project, Priority (a whole number, higher goes first), Tags (comma separated) and Description. `Tab` moves to the next field (Description takes three lines); `Enter` in any field, or `[ Create ]`, creates the task in the first stage, unclaimed, and opens it. `[ Clear ]` empties the form and keeps the focus on itself, so a digit typed next switches tabs instead of starting a title. A priority that is no whole number is said under the tabs (`✗ the priority is a whole number, like 0 or 5`, gone once it is one), and the focus goes back to its field.
 
 ![Fill in the fields, Enter creates the task](images/manual/create.gif)
 
@@ -346,7 +346,7 @@ A project's stage gate (`task_config` action `pipeline` with a `gate_config`) ca
 
 ### Status line and toasts
 
-The status line entry under the prompt is the board's summary and stays there while the pane is closed (it refreshes every 30 s then, every 5 s while the pane is open). When another session finishes a task or moves one to review, a toast says so, the news first: `Done: #5 Review the REST changes`, `Failed: #…`, `Ready for review: #…`. What you do in the pane itself makes no toast. With the pane closed the toast ends in `(/pipeline)`, where to look.
+The status line entry under the prompt is the board's summary (with `this session #12` for the tasks this session holds) and stays there while the pane is closed (it refreshes every 30 s then, every 5 s while the pane is open). When another session finishes a task or moves one to review, a toast says so, the news first: `Done: #5 Review the REST changes`, `Failed: #…`, `Ready for review: #…`. What you do in the pane itself makes no toast. With the pane closed the toast ends in `(/pipeline)`, where to look.
 
 ![A toast from another session, and the status line entry](images/manual/toast.png)
 
@@ -362,7 +362,7 @@ With `enforcePipeline` on, the sentence about claiming asks for it: `Claim a tas
 
 ### When the server is away
 
-The pane reads the REST API of the agent-tasks MCP server (`AGENT_TASKS_PORT`, default 3422). The first MCP process serves it; when that session ends, another one takes the port over within 5 s. If nothing answers, the pane says so instead of showing a stale board, the status line says `offline`, and the focus is on Refresh: `Enter` tries again (`✗ still nothing answers at http://127.0.0.1:3422 (21:47:08)`); the tabs stay, so a digit typed meanwhile stays in the pane. `Enter` brings the board back once a server answers. It also comes back by itself on the next poll, with the focus where it was before (or on the first task).
+The pane reads the REST API of the agent-tasks MCP server (`AGENT_TASKS_PORT`, default 3422). The first MCP process serves it; when that session ends, another one takes the port over within 5 s. If nothing answers, the pane says so instead of showing a stale board, the status line says `offline`, and the focus is on Refresh: `Enter` tries again (`✗ still nothing answers (21:47:08)`); the tabs stay, so a digit typed meanwhile stays in the pane. `Enter` brings the board back once a server answers. It also comes back by itself on the next poll, with the focus where it was before (or on the first task).
 
 ![The server goes away and comes back](images/manual/server-down.gif)
 

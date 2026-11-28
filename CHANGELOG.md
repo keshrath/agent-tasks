@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.0] - 2026-11-27
+
+Every host gets a real UI: a web dashboard for Codex, Cursor, OpenCode, Aider or any browser, an MCP Apps view inline in Claude Desktop, claude.ai and VS Code, and a calmer `/pipeline` pane.
+
+### Added
+
+- **Web dashboard** at http://127.0.0.1:3422/ (`src/ui/`, served by the REST server under a strict CSP): the board as a column per stage, a Done tab, Stats (open by stage, finished per day, per project and assignee), find, project and assignee filters, and the open task beside the board with its description, artifacts, comments, subtasks and dependencies. Advance, Complete, Send back, Fail, Cancel, Reopen, Delete, comments and new tasks work from it as `AGENT_TASKS_USER` (else the OS user). It polls every 3 s, follows the system's light or dark theme and works from phone width up. See [docs/DASHBOARD.md](docs/DASHBOARD.md).
+- **`npx agent-tasks dashboard [--no-open]`** prints and opens the URL, and serves REST itself when no agent-tasks process holds the port. `GET /health` names it as `dashboard_url`.
+- **MCP Apps view** (`ui://agent-tasks/app.html`): `task_list`, `task_get` and `task_create` point MCP Apps hosts at a widget that draws a list as the board and one task as its detail, with the same actions through the tools.
+- **Open in browser ↗** in the `/pipeline` pane header (terminal and desktop app), linked once the server reports its dashboard.
+
+### Changed
+
+- **`/pipeline` pane**: one header on every view (tabs, Refresh, the open / in progress / blocked counts), ruled stage headings with their count, and one line per task with priority, who, subtasks, project and age lined up in columns that drop as the pane narrows. A blocked task says what it waits for beneath. Done is one line per task with its result beneath. The status line shows the same counts.
+- The request guard admits the dashboard's own Origin (`http://` + Host); every other Origin is still refused.
+
 ## [3.1.0] - 2026-11-21
 
 The `/pipeline` pane gets the old web dashboard's layout back where the surface can draw it: the Claude desktop app shows a kanban board.

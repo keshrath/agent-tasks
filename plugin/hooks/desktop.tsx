@@ -10,6 +10,7 @@
 import type { AgentTasksSnapshot } from '../types';
 import {
   ANY,
+  DashboardLink,
   Kanban,
   ACCENT,
   BAD,
@@ -291,12 +292,13 @@ export function DesktopPane(p: PaneProps) {
               key={`tab:${tab}`}
               {...af(p.landing, `tab:${tab}`)}
               label={label}
-              {...(route.tab === tab ? { variant: 'primary' as const } : {})}
+              {...(route.tab === tab ? {} : { dimColor: true })}
               onPress={() => on.go(tab)}
             />
           ))}
         </Box>
         <Box columnGap="sm" alignItems="center">
+          {snap.dashboard && <DashboardLink el={p.el} href={snap.dashboard} />}
           <Button
             key={refreshKey(snap.isUp, p.frame)}
             label="Refresh"

@@ -41,7 +41,6 @@ import {
   isField,
   isOutOfReach,
   isRisky,
-  matches as matchesFind,
   nextStep,
   pinOrder,
   printable,
@@ -184,10 +183,6 @@ const holderPath = (sessionId: string) =>
   `/api/holders/${encodeURIComponent(`claude:${sessionId}`)}`;
 
 /**
- * Beats this session's holder, adopting the tasks in `adopt`: resolves to the open tasks
- * it holds, null while the server is away.
- */
-/**
  * Whether `mine` says what this session holds: true once a beat answered. Its claims reach it
  * through the beats (every 30 s) and each claim its agents make (adopted at once), so a prompt
  * is judged from it with no request of its own.
@@ -197,6 +192,10 @@ let isMineKnown = false;
 /** The latest beat of this session's holder: what it holds, null while the server is away. */
 let held: Promise<Json[] | null> = Promise.resolve(null);
 
+/**
+ * Beats this session's holder, adopting the tasks in `adopt`: resolves to the open tasks
+ * it holds, null while the server is away.
+ */
 async function hold($: EngineInterface, adopt: number[] = []): Promise<Json[] | null> {
   try {
     const carried = await carryOver($);
@@ -245,11 +244,26 @@ const ref = (t: Json, blocked: Set<number>): AgentTasksRef => ({
   isBlocked: blocked.has(Number(t.id)),
 });
 
+/**
+ * The dashboard's address as a link every surface makes: http(s) only, and a loopback one
+ * named `localhost`, the one plain-http host the desktop app opens (the server answers to it).
+ */
+const linkable = (url: string | null) =>
+  url && /^https?:\/\//.test(url)
+    ? url.replace(/^http:\/\/(?:127\.0\.0\.1|\[::1\])(?=[:/]|$)/, 'http://localhost')
+    : null;
+
 async function poll($: EngineInterface): Promise<AgentTasksSnapshot> {
   const base = await origin($);
   const me = await whoAmI($);
   try {
-    const b = await api($, `/api/board?recent=${RECENT}`);
+    // The web dashboard's address comes with /health; a server without one leaves the link out.
+    const [b, dashboard] = await Promise.all([
+      api($, `/api/board?recent=${RECENT}`),
+      api($, '/health')
+        .then((h) => text(h.dashboard_url))
+        .catch(() => null),
+    ]);
     const open = list(b.open);
     const openIds = new Set(open.map((t) => Number(t.id)));
     const blockers = new Map<number, number[]>();
@@ -295,6 +309,7 @@ async function poll($: EngineInterface): Promise<AgentTasksSnapshot> {
       open: open.map(task),
       recent: list(b.recent).map(task),
       me,
+      dashboard: linkable(dashboard),
     };
   } catch (err) {
     // An agent-tasks from before the board (1.x) answers everything but /api/board.
@@ -304,7 +319,17 @@ async function poll($: EngineInterface): Promise<AgentTasksSnapshot> {
             .then((h) => text(h.version))
             .catch(() => null)
         : null;
-    return { isUp: false, origin: base, old, stages: [], pipelines: {}, open: [], recent: [], me };
+    return {
+      isUp: false,
+      origin: base,
+      old,
+      stages: [],
+      pipelines: {},
+      open: [],
+      recent: [],
+      me,
+      dashboard: null,
+    };
   }
 }
 
@@ -553,7 +578,7 @@ async function showStatus($: EngineInterface) {
       ? snap.old
         ? `old server ${snap.old} on the port`
         : 'offline'
-      : (said ?? headline(snap.open)),
+      : (said ?? headline(snap.open, await read($, mine))),
   );
 }
 
@@ -595,10 +620,7 @@ async function act(
   const snap = await refresh($, true);
   // Refresh pressed while still down: say it was tried, and when.
   if (!snap.isUp && !(await read($, notice)))
-    await say(
-      $,
-      `✗ still nothing answers at ${snap.origin} (${new Date().toTimeString().slice(0, 8)})`,
-    );
+    await say($, `✗ still nothing answers (${new Date().toTimeString().slice(0, 8)})`);
   await loadView($).catch(() => {});
   await viewChanged($);
   await update($, busy, () => null);
@@ -712,7 +734,7 @@ async function park($: EngineInterface) {
   await focusOn($, refreshKey(true, await read($, frame)));
 }
 
-/** The tab a `go` asked for, before its route is written: a second press reads it. */
+/** The tab a `go` asked for, until its route is written: a second press meanwhile reads it. */
 let requested: AgentTasksTab | null = null;
 
 /**
@@ -785,7 +807,7 @@ async function doneShown($: EngineInterface) {
   const snap = await read($, snapshot);
   const q = await read($, filter);
   return pinOrder(
-    snap?.recent.filter((t) => matchesFind(t, q)) ?? [],
+    snap?.recent.filter((t) => matches(t, q)) ?? [],
     (await read($, pinned))?.done ?? null,
   );
 }
@@ -884,8 +906,13 @@ async function landNow($: EngineInterface, from: number | null = null, since?: n
   if (key) await focusOn($, key, since);
 }
 
-/** Lands the ring where `landing` says, once the drawing of the state just written is up. */
+/**
+ * Lands the ring where `landing` says, once the drawing of the state just written is up. The
+ * controls changed: until the ring lands it sits by its place on whatever the new drawing put
+ * there (an Enter that opened a form, kept, is on the form's send), which the guard covers.
+ */
 async function land($: EngineInterface, from: number | null = null, since = claims) {
+  await viewChanged($);
   if (await afterDraw($, since)) return landNow($, from, since);
   // Yielded to a newer press that left the ring where the pane parked it: still lands, once
   // nothing else moved it meanwhile.
@@ -998,7 +1025,8 @@ async function go($: EngineInterface, tab: AgentTasksTab, toType = false) {
   await park($);
   if (tab === 'new') await update($, draft, () => typed);
   await update($, route, () => ({ tab, task: null, trail: [] }));
-  await viewChanged($);
+  // Written, the route says it: a tab asked for long ago must not read as just asked for.
+  if (requested === tab) requested = null;
   await reset($);
   await update($, pinned, () => null);
   await land($, from, since);
@@ -1118,15 +1146,18 @@ async function create($: EngineInterface): Promise<string> {
   return `✓ created #${t.id}`;
 }
 
+const PRIORITY_FAULT = '✗ the priority is a whole number, like 0 or 5';
+
 /**
- * Creates the task, unless its priority is no whole number: then the ring goes back to that
- * field, which says so beneath it.
+ * Creates the task, unless its priority is no whole number: then that is said, the fields are
+ * drawn back with what was typed (Enter emptied the one it was pressed in), and the ring goes
+ * to the priority.
  */
 async function submit($: EngineInterface) {
   const since = claims;
   if (!typed.title.trim()) return say($, '✗ a title is needed');
   if (priorityOf(typed) !== null) return act($, 'Creating the task', async () => create($));
-  // Drawn anew with what was typed, the priority's fault said under it.
+  await say($, PRIORITY_FAULT);
   await update($, draft, () => typed);
   await update($, rev, (n) => n + 1);
   await focusOn($, `new-priority:${await read($, rev)}`, since);
@@ -1139,6 +1170,7 @@ async function dismiss($: EngineInterface) {
   const stage = (await read($, detail))?.stage ?? '';
   await update($, form, () => null);
   await update($, confirm, () => null);
+  await viewChanged($);
   // What the form said ("✗ a reason is needed") goes with it.
   await say($, null);
   await focusOn(
@@ -1404,6 +1436,9 @@ function actionsOf($: EngineInterface): Actions {
     edit: (field, value) => {
       typed = { ...typed, [field]: value.replace(/\t/g, ' ') };
       void keyTyped($);
+      // A priority made whole is no longer at fault.
+      if (field === 'priority' && priorityOf(typed) !== null)
+        void read($, notice).then((n) => (n === PRIORITY_FAULT ? say($, null) : undefined));
     },
     // Enter creates from any field: walking the fields with Enter moved the ring after the
     // keypress, so what was typed meanwhile went into the field it was leaving. Tab walks them.

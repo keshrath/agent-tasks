@@ -673,7 +673,7 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
     });
 
     it('the status entry follows tasks made and finished elsewhere', async () => {
-      const count = () => Number(/(\d+) open tasks/.exec(statusEntry(t) ?? '')?.[1]);
+      const count = () => Number(/(\d+) open · /.exec(statusEntry(t) ?? '')?.[1]);
       const before = count();
       await w.api('POST', '/api/tasks', { title: 'Made in another session', created_by: 'x' });
       const deadline = Date.now() + 15_000;
@@ -689,7 +689,7 @@ describe.skipIf(!E2E)('a task in the /pipeline pane', () => {
       while (count() !== before && Date.now() < after) await sleep(250);
       expect(count()).toBe(before);
       // The board's own summary agrees.
-      expect(t.text()).toMatch(new RegExp(`${before} open tasks`));
+      expect(t.text()).toMatch(new RegExp(`${before} open · `));
     });
   });
 });

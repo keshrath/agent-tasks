@@ -333,6 +333,7 @@ describe.skipIf(!E2E)('every MCP tool through claude -p', () => {
     expect(calls.map((c) => c.name)).toEqual(['task_delete', 'task_get']);
     expect(db.queryOne(`SELECT * FROM tasks WHERE id = ?`, [cancel.id])).toBeNull();
     expect(calls[1]!.isError).toBe(true);
-    expect(calls[1]!.result).toBe(`Error [NOT_FOUND]: Task not found: ${cancel.id}`);
+    // The CLI may append its own advice (a deferred tool's schema) after ours.
+    expect(calls[1]!.result.split('\n')[0]).toBe(`Error [NOT_FOUND]: Task not found: ${cancel.id}`);
   });
 });

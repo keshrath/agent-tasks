@@ -4,9 +4,10 @@
 //   - Host must exactly equal one of the loopback names with the server's port
 //     (localhost:P, 127.0.0.1:P, [::1]:P), plus the bound host when the
 //     operator binds elsewhere (AGENT_TASKS_HOST). Defeats DNS rebinding.
-//   - Any Origin is rejected, loopback ones included: only browsers send it and
-//     no browser page is a caller (the Claude Code plugin is
-//     not browsers). No CORS headers, so no page can read a response.
+//   - An Origin is rejected unless it is the server's own origin as the request
+//     reached it (http:// + that Host): the web dashboard it serves calling home.
+//     Every other page, loopback ones on another port or host name included, is
+//     refused. No CORS headers, so no other page can read a response.
 //   - Requests with a body on POST/PUT/PATCH/DELETE must be application/json,
 //     so CORS-safelisted form posts never reach a handler.
 // =============================================================================
@@ -40,7 +41,8 @@ export function createRequestGuard(port: number, bindHost = '127.0.0.1'): Reques
       reject(res, 403, 'Forbidden host');
       return true;
     }
-    if (req.headers.origin !== undefined) {
+    const origin = req.headers.origin;
+    if (origin !== undefined && origin.toLowerCase() !== `http://${host}`) {
       reject(res, 403, 'Forbidden origin');
       return true;
     }

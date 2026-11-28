@@ -6,11 +6,19 @@
 // =============================================================================
 
 import { basename } from 'node:path';
-import { Server, type Tool } from '@modelcontextprotocol/server';
+import { ResourceNotFoundError, Server, type Tool } from '@modelcontextprotocol/server';
 import type { AppContext } from '../context.js';
 import { readPackageMeta } from '../package-meta.js';
 import { TasksError, ValidationError } from '../types.js';
 import { handlers, type SessionState } from './mcp-handlers.js';
+import {
+  WIDGET_META,
+  WIDGET_RESOURCE,
+  WIDGET_TOOLS,
+  WIDGET_URI,
+  WIDGET_MIME,
+  widgetHtml,
+} from './widget.js';
 
 // ---------------------------------------------------------------------------
 // Tool definitions (8 tools)
@@ -399,20 +407,26 @@ export interface McpServerOptions {
   holder?: string;
 }
 
+/** The tools as listed: the widget tools point MCP Apps hosts at the widget. */
+const listed: Tool[] = tools.map((t) =>
+  WIDGET_TOOLS.has(t.name) ? { ...t, _meta: WIDGET_META } : t,
+);
+
 /**
- * The MCP server: the 8 tools, each result as pretty JSON text (plus the footer), a
- * failure as `Error [CODE]: message` with isError.
+ * The MCP server: the 8 tools, each result as pretty JSON text (plus the footer), a failure as
+ * `Error [CODE]: message` with isError. No structuredContent: Claude Code gives the model that
+ * in place of the text, footer and all. The widget is the one resource (MCP Apps).
  */
 export function createMcpServer(ctx: AppContext, options: McpServerOptions = {}): Server {
   const { name, version } = readPackageMeta();
-  const server = new Server({ name, version }, { capabilities: { tools: {} } });
+  const server = new Server({ name, version }, { capabilities: { tools: {}, resources: {} } });
   // A readable name for an agent that never named itself: its client and project
   // (`claude-code@agent-tasks`), not `system`.
   const fallback = () => `${server.getClientVersion()?.name ?? 'agent'}@${basename(process.cwd())}`;
   const handleTool = createToolHandler(ctx, options.holder ?? null, fallback);
   const footer = options.footer === false ? '' : PIPELINE_FOOTER;
 
-  server.setRequestHandler('tools/list', () => ({ tools }));
+  server.setRequestHandler('tools/list', () => ({ tools: listed }));
   server.setRequestHandler('tools/call', async (req) => {
     try {
       const result = await handleTool(req.params.name, req.params.arguments ?? {});
@@ -422,6 +436,11 @@ export function createMcpServer(ctx: AppContext, options: McpServerOptions = {})
       const message = err instanceof Error ? err.message : String(err);
       return { content: [{ type: 'text', text: `Error [${code}]: ${message}` }], isError: true };
     }
+  });
+  server.setRequestHandler('resources/list', () => ({ resources: [WIDGET_RESOURCE] }));
+  server.setRequestHandler('resources/read', (req) => {
+    if (req.params.uri !== WIDGET_URI) throw new ResourceNotFoundError(req.params.uri);
+    return { contents: [{ uri: WIDGET_URI, mimeType: WIDGET_MIME, text: widgetHtml() }] };
   });
   server.oninitialized = () => options.onInitialized?.();
   return server;

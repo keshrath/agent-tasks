@@ -20,15 +20,15 @@ Every control, key, command form, view state, notice, toast and output a person 
 
 | What                                                                                                                          | Covered by                                                                                                         |
 | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Summary line (open, in progress, blocked)                                                                                     | pane > opens on the board by stage                                                                                 |
-| Stage counts, in pipeline order                                                                                               | board > /pipeline answers with the board summary…; board > a project with its own stages…                          |
+| Header counts (open, in progress, blocked); `Open in browser ↗` when the server serves the dashboard                          | pane > opens on the board by stage; pane > board, detail, forms… fit the narrow sidebar (link)                     |
+| Ruled stage headings with counts, in pipeline order                                                                           | board > /pipeline opens the pane…; board > a project with its own stages…                                          |
 | Sections by stage; in progress first, then priority, then oldest                                                              | board > /pipeline answers with the board summary and opens the pane                                                |
 | Row marks: ● in progress, ○ pending, ! blocked                                                                                | pane > opens on the board by stage                                                                                 |
-| Row facts: waits for, assignee/unclaimed, subtasks, part of, project                                                          | pane > opens on the board by stage                                                                                 |
+| One line a task; columns: priority, who, subtasks, age; `waits for` beneath                                                   | pane > opens on the board by stage                                                                                 |
 | Priority marks: p5+ coloured, lower dim, none for p0                                                                          | board > priority marks…                                                                                            |
 | Custom per-project pipeline: sections after the default stages                                                                | board > a project with its own stages gets sections after the default ones                                         |
 | Custom pipeline in a task's stage strip                                                                                       | board > a project with its own stages… (opens the proof task)                                                      |
-| Long title: cut on one line, priority beside it                                                                               | board > a long title is cut on its one line (F); board > board rows stay two lines (N)                             |
+| Long title: cut on one line, priority beside it                                                                               | board > a long title is cut on its one line (F); board > board rows stay one line (N)                              |
 | Wide (CJK, emoji) title on one line                                                                                           | board > a title with wide characters stays on one line (F); board > board rows stay… (N)                           |
 | A long board (62 tasks): Tab scrolls the pane with the ring                                                                   | board > a project with its own stages… (Tab to the last section)                                                   |
 | ↑ ↓ scroll the pane, the ring stays                                                                                           | board > ↑ and ↓ scroll the board without moving the ring                                                           |
@@ -39,33 +39,33 @@ Every control, key, command form, view state, notice, toast and output a person 
 
 ## Find
 
-| What                                               | Covered by                                                                          |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| By title text, by project                          | pane > Find narrows the board by text, a project name too                           |
-| By `#id`, by agent, by tag (row says `tag <name>`) | board > Find matches an id, an agent and a tag, and says which tag                  |
-| `N shown` in the summary                           | pane > Find narrows…; board > Find matches…                                         |
-| No match: "No open task matches."                  | pane > Find narrows…; board > /pipeline <text> that matches nothing…                |
-| Clear the filter (keyboard)                        | pane > Find narrows…; board > Find matches…; board > /pipeline <text> that matches… |
-| Ring lands on the first match after a find         | pane > Find narrows…; pane > /pipeline <text> lands on the first match every time   |
-| `r` and digits are text inside the field           | board > Find matches… (`r`); pane > digits switch Board, Done and New… (digits)     |
+| What                                           | Covered by                                                                          |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------- |
+| By title text, by project                      | pane > Find narrows the board by text, a project name too                           |
+| By `#id`, by agent, by tag (row says `#<tag>`) | board > Find matches an id, an agent and a tag, and says which tag                  |
+| `N shown` in the header                        | pane > Find narrows…; board > Find matches…                                         |
+| No match: "No open task matches."              | pane > Find narrows…; board > /pipeline <text> that matches nothing…                |
+| Clear the filter (keyboard)                    | pane > Find narrows…; board > Find matches…; board > /pipeline <text> that matches… |
+| Ring lands on the first match after a find     | pane > Find narrows…; pane > /pipeline <text> lands on the first match every time   |
+| `r` and digits are text inside the field       | board > Find matches… (`r`); pane > digits switch Board, Done and New… (digits)     |
 
 ## Done
 
-| What                                                     | Covered by                                                                       |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Newest first; ✓ ✗ – marks; who, where, result beneath    | pane > Done lists what finished, newest first, its result beneath                |
-| Its digit again lands on the newest                      | pane > Done lists what finished…                                                 |
-| A row opens its task; back lands on the row              | pane > Done lists what finished…                                                 |
-| Empty: "Nothing finished yet."; digit lands on Board tab | board > Done says nothing finished yet; its digit again lands on the Board tab   |
-| Narrow and inline                                        | board > Done rows keep who, where and the result… (N); board > Done and New… (I) |
+| What                                                     | Covered by                                                                     |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Newest first; ✓ ✗ – marks; age, who, result beneath      | pane > Done lists what finished, newest first, its result beneath              |
+| Its digit again lands on the newest                      | pane > Done lists what finished…                                               |
+| A row opens its task; back lands on the row              | pane > Done lists what finished…                                               |
+| Empty: "Nothing finished yet."; digit lands on Board tab | board > Done says nothing finished yet; its digit again lands on the Board tab |
+| Narrow and inline                                        | board > Done rows keep their age on the line… (N); board > Done and New… (I)   |
 
 ## New
 
 | What                                                                           | Covered by                                                                                                     |
 | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | Tab walks Title → … → Description at typing speed, nothing lost; Enter creates | pane > New: Tab walks the fields at typing speed…                                                              |
-| Priority not a whole number: said beneath, ring kept                           | pane > New: Tab walks the fields…                                                                              |
-| Created: `✓ created #N` on one line, the task opens                            | pane > New: Tab walks the fields…; board > New from the empty board…                                           |
+| Priority not a whole number: said under the tabs, gone once whole, ring kept   | pane > New: Tab walks the fields…                                                                              |
+| Created: `✓ created #N` on one line, the task opens; `3` from it lands on New  | pane > New: Tab walks the fields…; board > New from the empty board…                                           |
 | REST state: title, project, priority, tags, created_by                         | pane > New: Tab walks the fields…; board > the mouse… (created_by)                                             |
 | Create button                                                                  | board > New from the empty board creates the first task                                                        |
 | Clear button: empties, the ring stays on Clear                                 | board > New: Clear empties what was typed and keeps the ring on Clear (N); pane > Clear on New lands on Clear… |
@@ -82,7 +82,7 @@ Every control, key, command form, view state, notice, toast and output a person 
 | Esc: keys to the prompt, "ctrl+x tab…" hint, digits typed there                     | board > Esc gives the keyboard to the prompt; ctrl+x tab takes it back                            |
 | ctrl+x tab: keys back, ring where the person left it                                | board > Esc gives the keyboard…                                                                   |
 | `r` refreshes (up)                                                                  | board > r refreshes: a task another session made shows at once                                    |
-| `r` refreshes (down), "still no board (time)"                                       | pane > says so instead of showing a stale board…                                                  |
+| `r` refreshes (down), "still nothing answers (time)"                                | pane > says so instead of showing a stale board…                                                  |
 | Back from a board task lands on its row                                             | board > back from a task opened on the board lands on its row                                     |
 | Enter opens a row (inline)                                                          | board > the board takes the keyboard: rows open with Enter                                        |
 | Stage columns at 150+ columns; Enter opens a card, back returns to it (inline, 200) | board > draws a column per stage; a card opens with Enter…                                        |
@@ -114,11 +114,11 @@ Every control, key, command form, view state, notice, toast and output a person 
 
 ## Layouts
 
-| View  | F                                 | N                                                                | I                                                                              |
-| ----- | --------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Board | pane, board                       | pane > board, detail, forms…; board > board rows stay two lines… | pane > opens the board above the prompt; board > the board takes the keyboard… |
-| Done  | pane > Done lists…                | board > Done rows keep who…                                      | board > Done and New draw inline too                                           |
-| New   | pane > New: Tab walks the fields… | board > New: every field hint fits…                              | board > Done and New draw inline too                                           |
+| View  | F                                 | N                                                               | I                                                                              |
+| ----- | --------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Board | pane, board                       | pane > board, detail, forms…; board > board rows stay one line… | pane > opens the board above the prompt; board > the board takes the keyboard… |
+| Done  | pane > Done lists…                | board > Done rows keep who…                                     | board > Done and New draw inline too                                           |
+| New   | pane > New: Tab walks the fields… | board > New: every field hint fits…                             | board > Done and New draw inline too                                           |
 
 ## Detail
 
@@ -191,7 +191,7 @@ Every control, key, command form, view state, notice, toast and output a person 
 | Server down and back up by itself (no key), `offline` entry, `/pipeline` while down, ring back on a task | resilience > the server goes away and comes back: down and up again without a key          |
 | Down while a task is open: back up, the same task, its next step works                                   | resilience > down while a task is open: back up, the same task is shown again              |
 | An agent-tasks 1.x on the port: says which, `old server` entry, then the current one                     | resilience > an agent-tasks from before the board holds the port…                          |
-| Server down → Refresh, "still no board (time)"                                                           | pane > says so instead of showing a stale board, and Refresh brings it back                |
+| Server down → Refresh, "still nothing answers (time)"                                                    | pane > says so instead of showing a stale board, and Refresh brings it back                |
 
 ## The session's claims and the pipeline reminder
 

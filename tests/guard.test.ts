@@ -64,9 +64,26 @@ describe('createRequestGuard', () => {
     expect(ask(wildcard, { host: '0.0.0.0:3422' })?.status).toBe(403);
   });
 
-  it('refuses every Origin, loopback ones included', () => {
-    for (const origin of ['http://localhost:3422', 'http://127.0.0.1:5173', 'null', 'file://']) {
-      expect(ask(guard, { host: 'localhost:3422', origin })).toEqual({
+  it('lets the own origin through: the dashboard the server serves calling home', () => {
+    for (const host of ['localhost:3422', '127.0.0.1:3422', '[::1]:3422']) {
+      expect(ask(guard, { host, origin: `http://${host}` }), host).toBeNull();
+    }
+    expect(ask(guard, { host: 'LOCALHOST:3422', origin: 'http://localhost:3422' })).toBeNull();
+  });
+
+  it('refuses every other Origin, loopback ones on another port or name included', () => {
+    const cases: [string, string][] = [
+      ['localhost:3422', 'http://localhost:5173'],
+      ['localhost:3422', 'http://127.0.0.1:3422'],
+      ['127.0.0.1:3422', 'http://localhost:3422'],
+      ['localhost:3422', 'https://localhost:3422'],
+      ['localhost:3422', 'http://evil.com'],
+      ['localhost:3422', 'null'],
+      ['localhost:3422', 'file://'],
+      ['localhost:3422', ''],
+    ];
+    for (const [host, origin] of cases) {
+      expect(ask(guard, { host, origin }), `${origin} on ${host}`).toEqual({
         status: 403,
         body: JSON.stringify({ error: 'Forbidden origin' }),
       });

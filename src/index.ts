@@ -7,6 +7,7 @@
 // official MCP SDK. Once a client has initialized, this process also serves
 // the REST API for the /pipeline pane, or keeps trying to take the port over.
 // The client closing stdin ends it, so the port passes to a live session.
+// `agent-tasks dashboard` opens the web dashboard instead (dashboard.ts).
 // The process holds the claims made through it (HolderService) while it runs.
 // =============================================================================
 
@@ -15,28 +16,33 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { createContext } from './context.js';
 import { createMcpServer } from './transport/mcp.js';
 import { serveRestWhenFree, type RestLeader } from './server.js';
+import { dashboard } from './dashboard.js';
 
 const REST_PORT = parseInt(process.env.AGENT_TASKS_PORT ?? '3422', 10);
 
-const appContext = createContext();
-const holder = `mcp:${randomUUID()}`;
-const release = appContext.holders.keep(holder);
-let rest: RestLeader | null = null;
+if (process.argv[2] === 'dashboard') {
+  await dashboard(REST_PORT, process.argv.slice(3));
+} else {
+  const appContext = createContext();
+  const holder = `mcp:${randomUUID()}`;
+  const release = appContext.holders.keep(holder);
+  let rest: RestLeader | null = null;
 
-const server = createMcpServer(appContext, {
-  holder,
-  footer: process.env.AGENT_TASKS_INSTRUCTIONS !== '0',
-  onInitialized: () => {
-    rest ??= serveRestWhenFree(appContext, REST_PORT);
-  },
-});
-server.onclose = () => process.exit(0);
-await server.connect(new StdioServerTransport());
+  const server = createMcpServer(appContext, {
+    holder,
+    footer: process.env.AGENT_TASKS_INSTRUCTIONS !== '0',
+    onInitialized: () => {
+      rest ??= serveRestWhenFree(appContext, REST_PORT);
+    },
+  });
+  server.onclose = () => process.exit(0);
+  await server.connect(new StdioServerTransport());
 
-process.on('SIGINT', () => process.exit(0));
-process.on('SIGTERM', () => process.exit(0));
-process.on('exit', () => {
-  release();
-  rest?.close();
-  appContext.close();
-});
+  process.on('SIGINT', () => process.exit(0));
+  process.on('SIGTERM', () => process.exit(0));
+  process.on('exit', () => {
+    release();
+    rest?.close();
+    appContext.close();
+  });
+}

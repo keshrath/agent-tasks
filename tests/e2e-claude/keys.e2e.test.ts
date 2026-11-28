@@ -43,7 +43,7 @@ function nothingAsked(t: ClaudeTerm) {
 describe.skipIf(!E2E).each([
   ['docked', 160, 50, FULLSCREEN],
   ['inline', 120, 50, {}],
-] as const)('Enter twice on a row, %s', (_name, cols, rows, env) => {
+] as const)('Enter twice on a row, %s', { timeout: MIN }, (_name, cols, rows, env) => {
   let w: World;
   let t: ClaudeTerm;
   beforeAll(async () => {

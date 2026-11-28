@@ -141,10 +141,10 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       await t.pipeline();
       const s = await t.waitFor(/Backlog \d+/);
       // The pane says it: the command answers nothing the model would read on every /pipeline.
-      expect(s).not.toMatch(/⎿\s+(agent-tasks: )?12 open tasks/);
-      expect(s).toMatch(/12 open tasks · 6 in progress · 1 blocked/);
-      // The stage counts, in pipeline order, under the summary.
-      expect(s).toMatch(/backlog 6 · spec 2 · implement 2 · review 2/);
+      expect(s).not.toMatch(/⎿\s+(agent-tasks: )?12 open/);
+      expect(s).toMatch(/12 open · 6 in progress · 1 blocked/);
+      // A heading per stage, in pipeline order: its count, and a rule to the pane's edge.
+      expect(s).toMatch(/Backlog 6 ─+[\s\S]*Spec 2 ─+[\s\S]*Implement 2 ─+/);
       // In each stage, work in progress first, then by priority, then oldest first.
       const backlog = s.slice(s.indexOf('Backlog 6'), s.indexOf('Spec 2'));
       const order = [w.ids.ship, w.ids.detailView, w.ids.flaky, w.ids.badges].map((id) =>
@@ -215,8 +215,8 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       await t.key('r');
       await t.waitFor(/Made in another session/, 4_000);
       expect(t.text()).toMatch(/^❯\s*$/m); // the key went to the pane, not the prompt
-      expect(t.text()).toMatch(/13 open tasks/);
-      expect(statusEntry(t)).toMatch(/13 open tasks/);
+      expect(t.text()).toMatch(/13 open · /);
+      expect(statusEntry(t)).toMatch(/13 open · /);
     });
 
     it('Find matches an id, an agent and a tag, and says which tag', async () => {
@@ -246,9 +246,9 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       s = await t.waitFor(/6 shown/); // the ship task by its tag, five by their project
       expect(paneLines(t).join(' ')).not.toMatch(/Investigate flaky/);
       // The tag is nowhere else on a row: the row says it matched there.
-      const row = s.split('\n').findIndex((l) => l.includes(`#${w.ids.ship} Ship`));
-      expect(s.split('\n')[row + 1]).toMatch(/tag release/);
-      expect(t.style('tag release', paneColumn(t)).fg).not.toBe(-1);
+      const row = s.split('\n').find((l) => l.includes(`#${w.ids.ship} Ship`));
+      expect(row).toMatch(/#release/);
+      expect(t.style('#release', paneColumn(t)).fg).not.toBe(-1);
       shot(t, 'find-tag');
       await t.press('Clear the filter');
       await t.waitFor(/Find: id, title/);
@@ -279,10 +279,8 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       expect(s).toMatch(/no open task matches "zzz-nothing"/);
       expect(s).toMatch(/0 shown/);
       await landsOn(t, 'Clear the filter');
-      // Nothing shown: no empty line of stage counts under the summary.
-      expect(
-        paneLines(t).some((l) => /^\s*$/.test(l) === false && /^(backlog|spec) \d/.test(l)),
-      ).toBe(false);
+      // Nothing shown: no stage heading left without its rows.
+      expect(paneLines(t).some((l) => /^(Backlog|Spec) \d/.test(l))).toBe(false);
       shot(t, 'no-match');
       await t.enter();
       await t.waitFor(/Find: id, title/);
@@ -305,7 +303,7 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       await w.api('POST', '/api/tasks', { title: 'Clicked into view', created_by: 'agent-y' });
       await t.click('Refresh', x);
       // Counted at once (the backlog, now past seven, folds the new row away).
-      await t.waitFor(new RegExp(`${before + 1} open tasks`), 4_000);
+      await t.waitFor(new RegExp(`${before + 1} open · `), 4_000);
 
       await t.click('New', x);
       await t.waitFor(/New task/);
@@ -326,8 +324,8 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       await gone(t, /1: Board|Recently finished|‹ Board/);
       // The status entry stays: the last act's outcome while it lasts, then the headline.
       const deadline = Date.now() + 15_000;
-      while (!/open tasks/.test(statusEntry(t) ?? '') && Date.now() < deadline) await sleep(250);
-      expect(statusEntry(t)).toMatch(/open tasks/);
+      while (!/\d+ open · /.test(statusEntry(t) ?? '') && Date.now() < deadline) await sleep(250);
+      expect(statusEntry(t)).toMatch(/\d+ open · /);
       await t.pipeline();
       await t.waitFor(/Backlog \d+/);
       await landsOn(t, /#\d+ /);
@@ -368,12 +366,12 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
   // A long board: scrolling, a custom pipeline, long and wide titles
   // ---------------------------------------------------------------------------
 
-  describe('a long board with a custom pipeline (fullscreen, 160 columns)', () => {
+  describe('a long board with a custom pipeline (fullscreen, 160 columns, 30 rows)', () => {
     let w: World;
     let t: ClaudeTerm;
     beforeAll(async () => {
       w = await startWorld(bigBoard);
-      t = new ClaudeTerm(w, 160, 50, FULLSCREEN);
+      t = new ClaudeTerm(w, 160, 30, FULLSCREEN);
       await t.start();
       await t.pipeline();
       await t.waitFor(/Backlog \d+/);
@@ -385,12 +383,8 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
 
     it('a project with its own stages gets sections after the default ones', async () => {
       const s = paneLines(t).join(' ').replace(/\s+/g, ' ');
-      expect(s).toMatch(/62 open tasks/);
-      // The counts: the default stages, then the custom ones, each with its tasks.
-      // (A line break between two counts drops the separator there.)
-      expect(s).toMatch(
-        /backlog 53(?: ·)? spec 2(?: ·)? implement 2(?: ·)? review 2(?: ·)? todo 1(?: ·)? draft 1(?: ·)? proof 1/,
-      );
+      expect(s).toMatch(/62 open · /);
+      expect(s).toMatch(/Backlog 53 ─/);
       shot(t, 'long-top');
       // Tab down to the custom sections: the pane scrolls with the ring.
       await t.focus('Proofread the FAQ', 120);
@@ -427,14 +421,14 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       expect(t.focused()).toBe(ring);
     });
 
-    it('a long title is cut on its one line; its priority stays beside it', async () => {
+    it('a long title is cut on its one line; its priority and age stay beside it', async () => {
       await t.key('1');
       await t.waitFor(new RegExp(`#${w.more.long} Write the migration guide`));
       const lines = paneLines(t);
       const row = lines.findIndex((l) => l.includes(`#${w.more.long} Write the migration guide`));
       expect(row).toBeGreaterThanOrEqual(0);
-      expect(lines[row]).toMatch(/…\s+p9$/);
-      expect(lines[row + 1]).toMatch(/^\s+unclaimed · docs · /);
+      expect(lines[row]).toMatch(/…\s+p9\s+(now|\d+[mhd])$/);
+      expect(lines[row + 1]).toMatch(/^[○●!] /); // the next row: nothing wrapped
       expect(t.text()).not.toMatch(/WebSocket clients/);
     });
 
@@ -442,8 +436,8 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       const lines = paneLines(t);
       const row = lines.findIndex((l) => l.includes(`#${w.more.wide} `));
       expect(row).toBeGreaterThanOrEqual(0);
-      expect(lines[row]).toMatch(/p7$/);
-      expect(lines[row + 1]).toMatch(/^\s+unclaimed · i18n · /);
+      expect(lines[row]).toMatch(/p7\s+(now|\d+[mhd])$/);
+      expect(lines[row + 1]).toMatch(/^[○●!] /);
     });
 
     it('the long backlog folds past five rows; Enter unfolds it and folds it again', async () => {
@@ -457,7 +451,7 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       await t.waitFor(/▾ Show less/);
       // The ring goes to the first row the unfold showed, right under the toggle, which stays
       // where it was: the rows asked for are in view, not scrolled past.
-      await landsOn(t, /^○ #\d+ /);
+      await landsOn(t, /^○ +#\d+ /);
       const lines = t.text().split('\n');
       const toggle = lines.findIndex((l) => l.includes('▾ Show less'));
       const row = lines.findIndex((l) => l.includes(`${t.focused()}`.slice(2, 30)));
@@ -489,10 +483,10 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
     }, 2 * MIN);
 
     it('says nothing is open and offers a new task', async () => {
-      expect(statusEntry(t)).toBe('0 open tasks · 0 in progress');
+      expect(statusEntry(t)).toBe('0 open · 0 in progress');
       await t.pipeline();
       const s = await t.waitFor(/Nothing open on the board\./);
-      expect(s).toMatch(/Tasks agents create land here, by pipeline stage\./);
+      expect(s).toMatch(/Tasks agents create land here, by/); // the rest may wrap
       expect(s).not.toMatch(/Find:/);
       await landsOn(t, 'New task');
       shot(t, 'empty');
@@ -536,8 +530,8 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       const { open } = await w.api<{ open: { title: string }[] }>('GET', '/api/board');
       expect(open.map((x) => x.title)).toEqual(['The very first task']);
       await t.press('‹ Board');
-      await t.waitFor(/1 open task\b/);
-      expect(statusEntry(t)).toBe('1 open task · 0 in progress');
+      await t.waitFor(/1 open · 0 in progress/);
+      expect(statusEntry(t)).toBe('1 open · 0 in progress');
     });
 
     it('once all is finished the board points at Done', async () => {
@@ -549,7 +543,7 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       await t.waitFor(/Nothing open on the board\./);
       await t.waitFor(/1 recent one under Done\./);
       await t.key('2');
-      await t.waitFor(/✓ #\d+ The very first task/);
+      await t.waitFor(/✓ +#\d+ The very first task/);
     });
   });
 
@@ -572,24 +566,25 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
       await w?.stop();
     }, 2 * MIN);
 
-    it('board rows stay two lines, long and wide titles too', async () => {
+    it('board rows stay one line, long and wide titles too', async () => {
       await t.focus(`#${w.more.wide} `, 80);
       const lines = paneLines(t);
       for (const id of [w.more.long, w.more.wide]) {
         const row = lines.findIndex((l) => l.includes(`#${id} `));
         expect(row).toBeGreaterThanOrEqual(0);
-        expect(lines[row + 1]).toMatch(/^\s+unclaimed · /);
+        expect(lines[row]).toMatch(/…\s+p\d\b/); // the title cut, its priority beside it
+        expect(lines[row + 1]).toMatch(/^[○●!] /);
       }
       shot(t, 'narrow-long');
     });
 
-    it('Done rows keep who, where and the result on their own lines', async () => {
+    it('Done rows keep their age on the line and the result beneath', async () => {
       await t.key('2');
       const s = await t.waitFor(/Recently finished/);
-      // Facts are whole (one that does not fit is left out, never cut), the result cut to its
+      // A cell is whole (one that does not fit is left out, never cut), the result cut to its
       // one line; neither wraps.
-      expect(s).toMatch(/completed \S+ · agent-release/);
-      expect(s).not.toMatch(/ · agen…|· \S*…\s*$/m);
+      expect(s).toMatch(/✓ +#\d+ Bump agent-common[^\n]*\s(now|\d+[mhd])\b/);
+      expect(s).not.toMatch(/agen…/);
       expect(s).toMatch(/Bumped; loopback bind/);
       expect(s).not.toMatch(/│\s*(?:tasks|request guard)/);
       shot(t, 'narrow-done');
@@ -657,7 +652,7 @@ describe.skipIf(!E2E)('/pipeline board, Done and New in Claude Code', () => {
     it('Done and New draw inline too', async () => {
       await t.key('2');
       await t.waitFor(/Recently finished/);
-      expect(t.text()).toMatch(new RegExp(`✓ #${w.ids.bump} Bump agent-common`));
+      expect(t.text()).toMatch(new RegExp(`✓ +#${w.ids.bump} Bump agent-common`));
       shot(t, 'inline-done');
       await t.key('3');
       await t.waitFor(/New task/);

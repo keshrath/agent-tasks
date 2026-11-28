@@ -36,6 +36,8 @@ export type AgentTasksSnapshot = {
   recent: AgentTasksTask[];
   /** Who the person is when they act from the pane (task creator, comment author, `by`). */
   me: string;
+  /** The web dashboard's address, when the server serves one. */
+  dashboard: string | null;
 };
 
 export type AgentTasksTab = 'board' | 'done' | 'new';

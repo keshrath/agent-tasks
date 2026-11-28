@@ -126,12 +126,12 @@ describe.skipIf(!E2E)('the /pipeline pane when its server changes', () => {
     const t = await term({ AGENT_TASKS_PORT: String(port) });
     await t.pipeline();
     await t.waitFor(/Backlog \d+/);
-    expect(statusEntry(t)).toMatch(/\d+ open tasks/);
+    expect(statusEntry(t)).toMatch(/\d+ open · /);
 
     killTree(first.pid);
     await waitUntil(() => answers(port), 'a second session takes the port over', 30_000);
     await waitUntil(
-      () => /Backlog \d+/.test(t.text()) && /\d+ open tasks/.test(statusEntry(t) ?? ''),
+      () => /Backlog \d+/.test(t.text()) && /\d+ open · /.test(statusEntry(t) ?? ''),
       'the pane shows the board again',
       30_000,
     );
@@ -173,12 +173,12 @@ describe.skipIf(!E2E)('the /pipeline pane when its server changes', () => {
     await w.startServer();
     await t.waitFor(/Backlog \d+/, 20_000);
     await waitUntil(
-      () => /\d+ open tasks/.test(statusEntry(t) ?? ''),
+      () => /\d+ open · /.test(statusEntry(t) ?? ''),
       'the status entry counts again',
     );
     expect(t.text()).not.toMatch(/not reachable|still nothing answers/);
     // Back without a key, the ring is on a task again, not left on a tab where Enter does nothing.
-    await landsOn(t, /^[○●!] #\d+ /);
+    await landsOn(t, /^[○●!] +#\d+ /);
   });
 
   it('down while a task is open: back up, the same task is shown again', async () => {
@@ -233,7 +233,7 @@ describe.skipIf(!E2E)('the /pipeline pane when its server changes', () => {
       await waitUntil(() => answers(port), 'the current server holds the port');
       await t.key('r');
       await t.waitFor(/Backlog \d+/, 20_000);
-      await waitUntil(() => /\d+ open tasks/.test(statusEntry(t) ?? ''), 'the counts are back');
+      await waitUntil(() => /\d+ open · /.test(statusEntry(t) ?? ''), 'the counts are back');
     } finally {
       old.close();
     }

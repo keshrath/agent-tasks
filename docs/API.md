@@ -8,6 +8,8 @@ agent-tasks consolidates everything into 8 action-based tools to keep per-prompt
 
 **Results and errors.** A tool result is the JSON of what the tool returns, as text, followed by a short pipeline reminder (`AGENT_TASKS_INSTRUCTIONS=0` drops it). A failure is a result with `isError: true` and the text `Error [CODE]: message`, where `CODE` is `NOT_FOUND` (no such task, comment or artifact), `CONFLICT` (the task's state does not allow it: closed, blocked by a dependency, already at its last stage), `VALIDATION_ERROR` (bad input, or a stage gate not met) or `UNKNOWN_ERROR` (anything unexpected).
 
+**MCP Apps.** `task_list`, `task_get` and `task_create` carry `_meta.ui.resourceUri: "ui://agent-tasks/app.html"` and return plain JSON text like every tool (no `structuredContent`: Claude Code would give the model that in place of the text and its pipeline footer). The server lists that one resource (mime `text/html;profile=mcp-app`): a self-contained page that hosts supporting MCP Apps (Claude Desktop, claude.ai, VS Code, ...) draw inline, a list as the board and one task as its detail, acting through `task_stage`, `task_artifact`, `task_create` and `task_delete`. See [DASHBOARD.md](DASHBOARD.md#mcp-apps-view).
+
 ### Task CRUD
 
 | Tool          | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -60,13 +62,14 @@ Example `gate_config`:
 
 ## REST API (10 endpoints)
 
-All endpoints return JSON. Loopback only: a foreign `Host` header gets 403, request bodies must be `application/json`, no wildcard CORS. Any request that carries an `Origin` header gets 403 too: the callers (the `/pipeline` pane and the plugin's session hooks) are not browsers, so no web page on the machine can reach the API. The server runs on port 3422 by default. The routes are what the pane and the plugin call; everything else goes through the MCP tools.
+All endpoints return JSON, except the [web dashboard](DASHBOARD.md) (`GET /`, `/app.js`, `/app.css`, served under a CSP that allows only its own script, style and API, and never framed). Loopback only: a foreign `Host` header gets 403, request bodies must be `application/json`, no CORS headers. A request whose `Origin` is not the server's own origin as the request reached it (`http://` + its `Host`) gets 403 too: the dashboard the server serves may call home, no other web page on the machine (another port or host name included) can reach the API. The server runs on port 3422 by default. The routes are what the pane, the plugin and the dashboard call; everything else goes through the MCP tools.
 
 ### Read endpoints
 
 | Method | Path             | Description                                                                                                                                                                                                                             |
 | ------ | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/health`        | Health check with version, uptime, and task count                                                                                                                                                                                       |
+| `GET`  | `/`              | The web dashboard (HTML; its assets at `/app.js`, `/app.css`)                                                                                                                                                                           |
+| `GET`  | `/health`        | Health check with version, uptime, task count, `dashboard_url` (the dashboard as the request reached the server) and `user` (who the dashboard acts as: `AGENT_TASKS_USER`, else the OS user)                                           |
 | `GET`  | `/api/tasks/:id` | A single task in the `task_get` shape: dependencies (`blockers`, `blocking`, `links`), claim status, `gate_needs`, every artifact, `comments_count` (query: `include=subtasks,comments,transitive_deps`; `comments` are the newest 100) |
 | `GET`  | `/api/pipeline`  | Pipeline stages and gate config (query: `project`)                                                                                                                                                                                      |
 | `GET`  | `/api/board`     | Every open task, the most recently closed ones (`?recent=30`), per-project pipelines, dependencies, subtask progress (what the pane polls)                                                                                              |
@@ -94,12 +97,12 @@ The REST API is **unauthenticated**. It is designed for localhost use between tr
 }
 ```
 
-| Status | Meaning                                     |
-| ------ | ------------------------------------------- |
-| 400    | Bad request (missing params, invalid input) |
-| 403    | Foreign `Host` header, or any `Origin`      |
-| 404    | Entity not found                            |
-| 409    | Conflict (e.g. dependency cycle)            |
-| 415    | Request body is not `application/json`      |
-| 422    | Input validation failure                    |
-| 500    | Internal server error                       |
+| Status | Meaning                                      |
+| ------ | -------------------------------------------- |
+| 400    | Bad request (missing params, invalid input)  |
+| 403    | Foreign `Host` header, or a foreign `Origin` |
+| 404    | Entity not found                             |
+| 409    | Conflict (e.g. dependency cycle)             |
+| 415    | Request body is not `application/json`       |
+| 422    | Input validation failure                     |
+| 500    | Internal server error                        |

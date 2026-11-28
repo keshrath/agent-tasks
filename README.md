@@ -6,7 +6,7 @@
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-8-purple)]()
 [![REST Endpoints](https://img.shields.io/badge/REST-10%20endpoints-orange)]()
 
-**Pipeline-driven task management for AI coding agents.** An [MCP](https://modelcontextprotocol.io/) server with stage-gated pipelines, multi-agent collaboration, and a native Claude Code `/pipeline` pane. Tasks flow through configurable stages — `backlog`, `spec`, `plan`, `implement`, `test`, `review`, `done` — with dependency tracking, stage gates, artifact versioning, and threaded comments.
+**Pipeline-driven task management for AI coding agents.** An [MCP](https://modelcontextprotocol.io/) server with stage-gated pipelines, multi-agent collaboration, a native Claude Code `/pipeline` pane, a web dashboard for every other tool, and an MCP Apps view that draws task results inline in Claude Desktop, claude.ai and VS Code. Tasks flow through configurable stages — `backlog`, `spec`, `plan`, `implement`, `test`, `review`, `done` — with dependency tracking, stage gates, artifact versioning, and threaded comments.
 
 Built for AI coding agents (Claude Code, Codex CLI, Gemini CLI, Aider) but works equally well with any MCP client or REST consumer.
 
@@ -14,11 +14,11 @@ Built for AI coding agents (Claude Code, Codex CLI, Gemini CLI, Aider) but works
 
 The [user manual](docs/USER-MANUAL.md#4-the-pipeline-pane) shows every view and action of the pane, with screenshots and short clips from the real CLI.
 
-2.0 replaced the web dashboard with the `/pipeline` pane inside Claude Code; there is no browser UI, WebSocket or agent-desk plugin any more.
+For Codex, Cursor, OpenCode, Aider or anyone with a browser there is a [web dashboard](#dashboard-codex-cursor-any-browser) on the REST port.
 
 ### From 1.x
 
-- The dashboard on http://localhost:3422 is gone: open the board with `/pipeline` in Claude Code (install the plugin, below). The agent-desk Tasks tab is gone with it.
+- The 1.x dashboard and the agent-desk Tasks tab are gone. In Claude Code open the board with `/pipeline` (install the plugin, below); anywhere else, the new [web dashboard](#dashboard-codex-cursor-any-browser) is back on http://127.0.0.1:3422.
 - REST: `GET /api/overview` and `PUT /api/tasks/:id/stage` are gone (use `GET /api/board` and `POST /api/tasks/:id/stage` with `{"action": "advance"}`), and so are the routes nothing called; see [the REST API](#rest-api-10-endpoints).
 - A 1.x process still holding port 3422 is named by the pane (`An older agent-tasks (1.10.13) holds the port`) and in the status line (`old server 1.10.13 on the port`): end the Claude Code sessions still running it (or kill the old `agent-tasks` process) so a 2.x process takes the port, then Refresh.
 
@@ -39,7 +39,7 @@ When you run multiple AI agents on the same codebase, they need a shared task pi
 - **Threaded comments** — async discussions between agents on any task
 - **Artifact versioning** — per-stage document attachments with automatic versioning
 - **Full-text search** — FTS5 search across task titles and descriptions
-- **Claude Code `/pipeline` pane** — the board beside the conversation, keyboard-first: tasks by stage, task detail with artifacts and comments, advance, send back, complete, fail, cancel, comment and delete, a status line entry
+- **Claude Code `/pipeline` pane** — the board beside the conversation, keyboard-first: one line per task under its stage with priority, assignee and age in columns, task detail with artifacts and comments, advance, send back, complete, fail, cancel, comment and delete, a status line entry, a link to the web dashboard; a kanban board in the Claude desktop app
 - **2 transport layers** — MCP (stdio) and a loopback REST API (HTTP) that the pane reads
 - **Stage gates** — configurable per-project gates with per-stage rules: require named artifacts, minimum artifact counts or a comment before advancing (the schema also has `require_approval`, but no MCP tool or REST route records an approval, so a stage with it set cannot be left; keep it off)
 - **Decisions log** — structured decision artifacts (chose X over Y because Z) via `task_artifact(type: "decision")`
@@ -103,6 +103,33 @@ node dist/server.js --port 3422
 
 ---
 
+## Dashboard (Codex, Cursor, any browser)
+
+![The dashboard: tiles, a column per stage, the open task beside the board](docs/images/dashboard/board-light.png)
+
+The REST server serves a web dashboard at **http://127.0.0.1:3422/**: the board as a column per stage, a Done tab, Stats (open by stage, finished per day, per project and assignee), filters (find, project, assignee) and the open task beside the board with its description, artifacts, comments, subtasks and dependencies. Advance, Complete, Send back, Fail, Cancel, Reopen, Delete, comments and new tasks all work from it, as the person set in `AGENT_TASKS_USER` (else the OS user). It polls every 3 s, so what agents do shows within seconds. Light and dark follow the system; it works from phone width up.
+
+```bash
+npx agent-tasks dashboard   # prints the URL and opens the browser
+```
+
+The dashboard lives on the REST server, which runs while any agent-tasks MCP process runs (the first one holds the port). With none running, `npx agent-tasks dashboard` serves it itself until Ctrl+C. `GET /health` names the URL as `dashboard_url`. [docs/DASHBOARD.md](docs/DASHBOARD.md) has every view.
+
+**Codex.** Add the MCP server to `~/.codex/config.toml` (or run `codex mcp add agent-tasks -- npx -y agent-tasks`), then open the dashboard beside it:
+
+```toml
+[mcp_servers.agent-tasks]
+command = "npx"
+args = ["-y", "agent-tasks"]
+
+[mcp_servers.agent-tasks.env]
+AGENT_TASKS_USER = "your-name"
+```
+
+**MCP Apps hosts** (Claude Desktop, claude.ai, VS Code, ...) need nothing extra: `task_list`, `task_get` and `task_create` point at the `ui://agent-tasks/app.html` view, so the host draws their results as the same board and task detail, with the same actions, right in the chat.
+
+---
+
 ## Claude Code Integration
 
 Once configured (see [Quick Start](#quick-start) above), Claude Code can use all 8 MCP tools directly — creating tasks, advancing stages, adding artifacts, commenting, and more. With the plugin installed, `/pipeline` opens the board in a pane beside the conversation (Claude Code 2.1.289+). See the [Setup Guide](docs/SETUP.md) for detailed integration steps.
@@ -123,10 +150,11 @@ See [full API reference](docs/API.md) for detailed descriptions of every tool an
 
 ## REST API (10 endpoints)
 
-All endpoints return JSON. Loopback only: a foreign `Host` gets 403, so does any request carrying an `Origin` header (no browser calls this API), and request bodies must be `application/json`. Everything else goes through the MCP tools. See [full API reference](docs/API.md#rest-api-10-endpoints) for details.
+All endpoints return JSON (and `GET /` the dashboard). Loopback only: a foreign `Host` gets 403, so does any request whose `Origin` is not the server's own (only the dashboard it serves may call from a browser), and request bodies must be `application/json`. Everything else goes through the MCP tools. See [full API reference](docs/API.md#rest-api-10-endpoints) for details.
 
 ```
-GET    /health                        Health check with version + uptime
+GET    /                              The web dashboard (and /app.js, /app.css)
+GET    /health                        Health check with version, uptime, dashboard_url
 GET    /api/tasks/:id                 One task, as task_get (?include=subtasks,comments,transitive_deps)
 GET    /api/pipeline                  Pipeline stage configuration
 GET    /api/board                     Open and recently closed tasks (what the pane polls)
@@ -190,6 +218,7 @@ npm run e2e:claude    # the pane in the real Claude Code CLI (see CONTRIBUTING.m
 
 - [Tutorial](docs/TUTORIAL.md) — the `/pipeline` pane step by step, recorded from the real CLI
 - [User Manual](docs/USER-MANUAL.md) — the `/pipeline` pane view by view (screenshots and GIFs), every tool, the pipeline, gates, cleanup
+- [Dashboard](docs/DASHBOARD.md) — the web dashboard and the MCP Apps view, for every host without the pane
 - [API Reference](docs/API.md) — all 8 MCP tools and the REST endpoints
 - [Session hooks](docs/hooks.md) — what the plugin does in a Claude Code session: claims held by the session, the pipeline reminder
 - [Architecture](docs/ARCHITECTURE.md) — source structure, design principles, database schema
